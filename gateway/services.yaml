@@ -1,0 +1,17 @@
+# Services applicatifs exposes via le reverse-proxy Caddy d'expo-gw.
+# Chaque service tourne dans son propre conteneur Incus sur expo-lan (pas
+# encore automatise par ce depot - a creer manuellement pour l'instant).
+#
+# Le nom du service doit correspondre au hostname du conteneur (pour que
+# la resolution DNS automatique de dnsmasq fonctionne, cf gateway/dnsmasq.conf).
+#
+# https://<name>.web.expolab.lan  ->  Caddy  ->  http://<name>.expolab.lan:<backend_port>
+#
+# Exemple (a decommenter et adapter une fois le conteneur cree) :
+# services:
+#   - name: gitea
+#     backend_port: 3000
+#   - name: bastion
+#     backend_port: 5000
+
+services: []

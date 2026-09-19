@@ -1,8 +1,10 @@
 #!/bin/bash
 # Provisioning du conteneur expo-gw (DHCP/DNS via dnsmasq + reverse-proxy
 # TLS auto-signe via Caddy). Execute A L'INTERIEUR du conteneur par
-# deploy-gateway.sh, qui a prealablement pousse dnsmasq.conf,
-# resolv.dnsmasq.upstream et Caddyfile dans /root/.
+# deploy-gateway.sh, qui a prealablement pousse dnsmasq.conf et
+# resolv.dnsmasq.upstream dans /root/. Le Caddyfile lui-meme est pousse et
+# applique separement par deploy-gateway.sh (a chaque run, pas seulement a
+# la creation) pour rester en phase avec gateway/services.yaml.
 #
 # Ordre important : les paquets sont installes AVANT de basculer le
 # conteneur sur son IP statique / son propre resolveur, pour ne pas casser
@@ -30,8 +32,6 @@ cp /root/resolv.dnsmasq.upstream /etc/resolv.dnsmasq.upstream
 cp /root/dnsmasq.conf /etc/dnsmasq.d/expolab.conf
 systemctl enable dnsmasq >/dev/null
 
-echo "[+] Configuration Caddy..."
-cp /root/Caddyfile /etc/caddy/Caddyfile
 systemctl enable caddy >/dev/null
 
 echo "[+] Bascule sur IP statique 10.42.0.10 (etait en DHCP jusqu'ici)..."

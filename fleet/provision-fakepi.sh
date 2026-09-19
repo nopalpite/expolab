@@ -10,7 +10,7 @@ ROLE="${2:-sans-ecran}"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq openssh-server sudo avahi-daemon nginx-light >/dev/null
+apt-get install -y -qq openssh-server sudo avahi-daemon >/dev/null
 
 echo "[+] Hostname -> $NAME"
 hostnamectl set-hostname "$NAME"
@@ -36,10 +36,7 @@ sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/ssh
 echo "role=$ROLE" > /etc/expolab-role
 echo "expolab fake-pi :: $NAME (role: $ROLE)" > /etc/motd
 
-echo "<h1>expolab fake-pi :: $NAME</h1><p>role: $ROLE</p>" > /var/www/html/index.html
-
 systemctl enable --now ssh
 systemctl enable --now avahi-daemon
-systemctl enable --now nginx
 
 echo "[+] Provisioning de $NAME termine."

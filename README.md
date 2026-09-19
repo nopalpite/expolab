@@ -17,6 +17,13 @@ Le conteneur `expo-gw` (voir `gateway/`) est le serveur dedie DHCP/DNS/
 reverse-proxy de ce LAN simule : il prend le relais du DHCP integre d'Incus
 des qu'il est deploye.
 
+Le reverse-proxy n'expose PAS les faux Pi (ils n'ont pas vocation a etre
+joignables en HTTPS individuellement) : il sert a exposer les services
+applicatifs de l'infra d'expo elle-meme - Gitea, Bastion, etc. - chacun dans
+son propre conteneur sur `expo-lan`, declare dans `gateway/services.yaml`.
+Rien n'est deploye par defaut : le fichier est un template vide, a completer
+au fur et a mesure des besoins.
+
 La patte WAN/VPN (voir `vpn/`) tourne sur l'**hote** directement, pas dans
 un conteneur : donner une deuxieme interface reseau a `expo-gw` demanderait
 du macvlan sur l'interface physique, qui ne fonctionne pas de facon fiable
@@ -27,14 +34,15 @@ trafic des clients VPN vers `10.42.0.0/24`.
 
 Deux domaines DNS distincts, resolus par le `dnsmasq` d'`expo-gw` :
 - `<nom>.expolab.lan` — enregistrement DHCP automatique, pointe vers la
-  **vraie IP** de chaque faux Pi (SSH, acces direct)
+  **vraie IP** du conteneur portant ce nom (faux Pi ou conteneur de service
+  applicatif) - acces direct (SSH, ou le port de l'appli en HTTP simple)
 - `<nom>.web.expolab.lan` — wildcard fixe vers `expo-gw` (10.42.0.10), c'est
   le nom que doit utiliser un client HTTPS pour passer par le reverse-proxy
   Caddy
 
-Ne pas les confondre : un client qui demande `https://pi-01.expolab.lan`
-tape directement sur pi-01 (qui n'ecoute qu'en HTTP, port 80) et contourne
-Caddy entierement.
+Ne pas les confondre : un client qui demande `https://gitea.expolab.lan`
+tape directement sur le conteneur gitea (qui n'ecoute qu'en HTTP, sur son
+port applicatif) et contourne Caddy entierement.
 
 ## Prerequis
 
@@ -62,8 +70,9 @@ sudo ./vpn/add-peer.sh mon-laptop
 
 `deploy-fleet.sh` est idempotent : relancez-le apres avoir modifie
 `fleet/inventory.yaml` pour ajouter/retirer des faux Pi, seules les entrees
-manquantes sont creees. Relancez `gateway/deploy-gateway.sh` apres coup pour
-regenerer le Caddyfile avec les nouvelles entrees.
+manquantes sont creees. `deploy-gateway.sh` est idempotent aussi : relancez-le
+apres avoir modifie `gateway/services.yaml` pour regenerer et appliquer le
+Caddyfile sans recreer `expo-gw`.
 
 ## Verifier / se connecter
 
@@ -72,14 +81,15 @@ incus list                       # etat + IP de chaque faux Pi (+ expo-gw)
 incus exec pi-01 -- bash         # shell direct dans le conteneur
 ssh pi@<ip-de-pi-01>             # mot de passe: raspberry (a changer si besoin)
 
-# Reverse proxy HTTPS (TLS auto-signe, cert "not trusted" attendu sans
-# importer le CA interne de Caddy) :
-incus exec expo-gw -- curl -sk https://pi-01.web.expolab.lan
+# Reverse proxy HTTPS (une fois un service ajoute a gateway/services.yaml -
+# TLS auto-signe, cert "not trusted" attendu sans importer le CA interne
+# de Caddy) :
+incus exec expo-gw -- curl -sk https://gitea.web.expolab.lan
 
 # VPN : recuperer /etc/wireguard/peers/mon-laptop.conf sur le poste client
 # (WireGuard app ou wg-quick), puis une fois connecte :
-ssh pi@10.42.0.181                       # acces direct a un faux Pi via le VPN
-curl -k https://pi-01.web.expolab.lan     # (DNS = 10.42.0.10 pousse par le VPN)
+ssh pi@10.42.0.181                        # acces direct a un faux Pi via le VPN
+curl -k https://gitea.web.expolab.lan     # (DNS = 10.42.0.10 pousse par le VPN)
 ```
 
 ## Rollback (retour a l'etat initial)
@@ -142,7 +152,8 @@ gateway/
   provision-gateway.sh        # script de premier boot execute dans expo-gw
   dnsmasq.conf                # config DHCP+DNS (plage, domaine expolab.lan)
   resolv.dnsmasq.upstream     # DNS amont utilise par dnsmasq (evite la boucle)
-  render-caddyfile.py         # genere le Caddyfile a partir de fleet/inventory.yaml
+  services.yaml                # services applicatifs a exposer (vide par defaut)
+  render-caddyfile.py         # genere le Caddyfile a partir de gateway/services.yaml
 vpn/
   install.sh                  # installe WireGuard sur l'hote, cree wg0
   uninstall.sh                 # desinstalle WireGuard (symetrique de install.sh)
@@ -153,6 +164,9 @@ rollback.sh                   # orchestre les 5 teardown dans le bon ordre
 
 ## A venir
 
+- Deploiement effectif des services applicatifs (Gitea, Bastion...) dans
+  leurs propres conteneurs sur `expo-lan`, puis entree correspondante dans
+  `gateway/services.yaml`
 - Renouvellement/rotation des certs Caddy au-dela du lab (hors scope d'un
   environnement isole)
 - Redirection de port sur le routeur du reseau reel pour un acces VPN
