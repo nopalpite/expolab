@@ -32,6 +32,21 @@ en place). Les futurs services (Gitea, Bastion...) s'ajoutent ensuite comme
 conteneurs Docker sur ce meme hote, geres depuis Dockhand ou via
 `apps/docker-compose.yml`.
 
+Egalement deploye sur `expo-apps` : la **webui** (`webui/`,
+https://fleet.web.expolab.lan), une petite app Flask pour creer/supprimer
+des faux Pi depuis un navigateur (hostname, role, identifiants SSH
+pre-remplis `pi`/`raspberry`) sans avoir a toucher `fleet/inventory.yaml` a
+la main. Elle pilote Incus directement : le socket Incus de l'hote est
+remonte dans expo-apps puis dans le conteneur Docker de la webui (deux
+montages en cascade, voir `incus/profiles/expo-apps.yaml`). **A savoir** :
+ca donne a expo-apps - et a tout service Docker qui y monterait ce socket -
+un controle total sur Incus, pas seulement sur la flotte. Compromis assume
+pour ce lab ; a garder en tete avant d'exposer expo-apps au-dela du reseau
+isole. La webui reutilise `fleet/deploy-fleet.sh` comme unique source de
+verite (elle edite l'inventaire puis declenche le meme script que la ligne
+de commande) - `fleet/` est monte en direct (pas copie) dans expo-apps pour
+que les deux facons de gerer la flotte restent sur le meme fichier.
+
 La patte WAN/VPN (voir `vpn/`) tourne sur l'**hote** directement, pas dans
 un conteneur : donner une deuxieme interface reseau a `expo-gw` demanderait
 du macvlan sur l'interface physique, qui ne fonctionne pas de facon fiable
@@ -106,10 +121,10 @@ incus list                       # etat + IP de chaque faux Pi (+ expo-gw)
 incus exec pi-01 -- bash         # shell direct dans le conteneur
 ssh pi@<ip-de-pi-01>             # mot de passe: raspberry (a changer si besoin)
 
-# Reverse proxy HTTPS (une fois un service ajoute a gateway/services.yaml -
-# TLS auto-signe, cert "not trusted" attendu sans importer le CA interne
-# de Caddy) :
-incus exec expo-gw -- curl -sk https://gitea.web.expolab.lan
+# Reverse proxy HTTPS (TLS auto-signe, cert "not trusted" attendu sans
+# importer le CA interne de Caddy) :
+incus exec expo-gw -- curl -sk https://fleet.web.expolab.lan    # webui flotte
+incus exec expo-gw -- curl -sk https://dockhand.web.expolab.lan # Dockhand
 
 # VPN : recuperer /etc/wireguard/peers/mon-laptop.conf sur le poste client
 # (WireGuard app ou wg-quick), puis une fois connecte :
@@ -137,17 +152,18 @@ sudo ./rollback.sh --yes    # sans confirmation
 ```
 
 Ce script defait dans l'ordre exactement ce que `install.sh` /
-`network-setup.sh` / `deploy-fleet.sh` / `deploy-gateway.sh` /
-`vpn/install.sh` ont mis en place :
+`network-setup.sh` / `deploy-fleet.sh` / `deploy-apps.sh` /
+`deploy-gateway.sh` / `vpn/install.sh` ont mis en place :
 
 1. `vpn/uninstall.sh` — arrete WireGuard, supprime tous les pairs et
    desinstalle wireguard-tools
 2. `gateway/teardown-gateway.sh` — supprime `expo-gw` et reactive le DHCP
    integre d'Incus sur `expo-lan` (secours)
-3. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
-4. `incus/network-teardown.sh` — supprime les profils `fake-pi`/`expo-gw` et
-   le reseau `expo-lan`
-5. `incus/uninstall.sh` — desinstalle Incus, retire le depot Zabbly et
+3. `apps/teardown-apps.sh` — supprime `expo-apps` (Docker, Dockhand, webui)
+4. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
+5. `incus/network-teardown.sh` — supprime les profils
+   `fake-pi`/`expo-gw`/`expo-apps` et le reseau `expo-lan`
+6. `incus/uninstall.sh` — desinstalle Incus, retire le depot Zabbly et
    `/var/lib/incus`
 
 Chaque etape est aussi utilisable seule (ex: `./fleet/teardown-fleet.sh`
@@ -166,31 +182,43 @@ incus/
   network-teardown.sh        # defait network-setup.sh
   profiles/fake-pi.yaml      # profil Incus flotte (reseau + limites CPU/RAM)
   profiles/expo-gw.yaml      # profil Incus gateway (reseau + limites CPU/RAM)
+  profiles/expo-apps.yaml    # profil Incus hote Docker (nesting + socket Incus monte)
 fleet/
-  inventory.yaml             # liste declarative des faux Pi (nom, MAC, role)
+  inventory.yaml             # liste declarative des faux Pi (nom, MAC, role, identifiants)
   deploy-fleet.sh             # cree/provisionne les faux Pi manquants
   teardown-fleet.sh           # supprime les faux Pi de l'inventaire
   provision-fakepi.sh         # script de premier boot execute dans chaque conteneur
+apps/
+  deploy-apps.sh               # cree/met a jour expo-apps (Docker, Dockhand, webui)
+  teardown-apps.sh              # supprime expo-apps
+  provision-apps.sh             # premier boot expo-apps (installe Docker)
+  docker-compose.yml            # stack Docker (dockhand, webui)
+webui/
+  app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh
+  Dockerfile                     # image (Flask + client Incus)
+  templates/, static/            # page unique HTML/JS/CSS
 gateway/
   deploy-gateway.sh           # cree/provisionne expo-gw, bascule le DHCP de expo-lan
   teardown-gateway.sh         # supprime expo-gw, reactive le DHCP integre d'Incus
   provision-gateway.sh        # script de premier boot execute dans expo-gw
   dnsmasq.conf                # config DHCP+DNS (plage, domaine expolab.lan)
-  services.yaml                # services applicatifs a exposer (vide par defaut)
+  services.yaml                # services applicatifs exposes (dockhand, fleet)
   render-caddyfile.py         # genere le Caddyfile a partir de gateway/services.yaml
 vpn/
   install.sh                  # installe WireGuard sur l'hote, cree wg0
   uninstall.sh                 # desinstalle WireGuard (symetrique de install.sh)
   add-peer.sh                  # ajoute un pair VPN + genere sa config client
   remove-peer.sh                # retire un pair VPN
-rollback.sh                   # orchestre les 5 teardown dans le bon ordre
+rollback.sh                   # orchestre les 6 teardown dans le bon ordre
 ```
 
 ## A venir
 
-- Deploiement effectif des services applicatifs (Gitea, Bastion...) dans
-  leurs propres conteneurs sur `expo-lan`, puis entree correspondante dans
+- Deploiement effectif de Gitea/Bastion (conteneurs Docker sur `expo-apps`,
+  geres depuis Dockhand), puis entree correspondante dans
   `gateway/services.yaml`
+- Authentification sur la webui (aucune pour l'instant - protegee
+  uniquement par l'isolation reseau d'`expo-lan`)
 - Renouvellement/rotation des certs Caddy au-dela du lab (hors scope d'un
   environnement isole)
 - Redirection de port sur le routeur du reseau reel pour un acces VPN

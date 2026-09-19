@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# Deploie le conteneur expo-apps (hote Docker) et sa stack (Dockhand pour
-# l'instant). Recoit son IP par DHCP aupres de expo-gw comme un membre
-# normal du LAN simule (pas besoin d'IP statique, contrairement a expo-gw).
+# Deploie le conteneur expo-apps (hote Docker) et sa stack (Dockhand,
+# webui expolab). Recoit son IP par DHCP aupres de expo-gw comme un
+# membre normal du LAN simule (pas besoin d'IP statique, contrairement a
+# expo-gw).
+#
+# Idempotent : relancer ce script (apres avoir modifie le code de webui/
+# par exemple) repousse le code et reconstruit/redemarre la stack Docker
+# sans recreer le conteneur.
 #
 # Usage: ./deploy-apps.sh
 set -euo pipefail
@@ -29,45 +34,59 @@ if ! incus profile show "$PROFILE" &>/dev/null; then
 fi
 
 if incus info "$NAME" &>/dev/null; then
-    echo "[=] $NAME existe deja, rien a faire."
-    echo "    (pour re-appliquer la stack : incus exec $NAME -- bash -c 'cd /opt/expo-apps && docker compose up -d')"
-    exit 0
+    echo "[=] $NAME existe deja."
+else
+    echo "[+] Creation de $NAME..."
+    incus launch "$IMAGE" "$NAME" --profile default --profile "$PROFILE" < /dev/null
+
+    echo "[+] Attente du demarrage de $NAME..."
+    # `incus exec -- true` reussit des que le canal exec repond, avant que
+    # systemd/dbus n'ait fini de demarrer - insuffisant ici car
+    # provision-apps.sh appelle hostnamectl (qui parle a systemd-hostnamed
+    # via dbus). Le profil expo-apps (security.nesting=true) semble mettre
+    # un peu plus de temps a atteindre cet etat que les profils sans
+    # nesting (fake-pi, expo-gw).
+    for _ in $(seq 1 30); do
+        if incus exec "$NAME" -- test -S /run/dbus/system_bus_socket < /dev/null &>/dev/null; then
+            break
+        fi
+        sleep 2
+    done
+
+    echo "[+] Attente de la resolution DNS (apt-get/curl en ont besoin)..."
+    for _ in $(seq 1 15); do
+        if incus exec "$NAME" -- getent hosts deb.debian.org < /dev/null &>/dev/null; then
+            break
+        fi
+        sleep 2
+    done
+
+    incus file push "$SCRIPT_DIR/provision-apps.sh" "$NAME/root/provision-apps.sh" --mode 0755 < /dev/null
+    incus exec "$NAME" -- /root/provision-apps.sh "$NAME" < /dev/null
 fi
 
-echo "[+] Creation de $NAME..."
-incus launch "$IMAGE" "$NAME" --profile default --profile "$PROFILE" < /dev/null
+echo "[+] Montage live de fleet/ dans expo-apps (source de verite partagee avec la webui, pas une copie)..."
+if ! incus config device show "$NAME" 2>/dev/null | grep -q '^expolab-fleet:'; then
+    incus config device add "$NAME" expolab-fleet disk source="$REPO_ROOT/fleet" path=/opt/expolab/fleet < /dev/null
+fi
 
-echo "[+] Attente du demarrage de $NAME..."
-# `incus exec -- true` reussit des que le canal exec repond, avant que
-# systemd/dbus n'ait fini de demarrer - insuffisant ici car provision-apps.sh
-# appelle hostnamectl (qui parle a systemd-hostnamed via dbus). Le profil
-# expo-apps (security.nesting=true) semble mettre un peu plus de temps a
-# atteindre cet etat que les profils sans nesting (fake-pi, expo-gw).
-for _ in $(seq 1 30); do
-    if incus exec "$NAME" -- test -S /run/dbus/system_bus_socket < /dev/null &>/dev/null; then
-        break
-    fi
-    sleep 2
-done
+echo "[+] Mise a jour du code applicatif (docker-compose.yml, webui/)..."
+incus exec "$NAME" -- mkdir -p /opt/expo-apps < /dev/null
+incus file push "$SCRIPT_DIR/docker-compose.yml" "$NAME/opt/expo-apps/docker-compose.yml" < /dev/null
+incus file push -r "$REPO_ROOT/webui" "$NAME/opt/expo-apps/" < /dev/null
 
-echo "[+] Attente de la resolution DNS (apt-get/curl en ont besoin)..."
-for _ in $(seq 1 15); do
-    if incus exec "$NAME" -- getent hosts deb.debian.org < /dev/null &>/dev/null; then
-        break
-    fi
-    sleep 2
-done
-
-incus file push "$SCRIPT_DIR/docker-compose.yml" "$NAME/root/docker-compose.yml" < /dev/null
-incus file push "$SCRIPT_DIR/provision-apps.sh" "$NAME/root/provision-apps.sh" --mode 0755 < /dev/null
-
-incus exec "$NAME" -- /root/provision-apps.sh "$NAME" < /dev/null
+echo "[+] (Re)demarrage de la stack Docker..."
+incus exec "$NAME" -- bash -c 'cd /opt/expo-apps && docker compose up -d --build' < /dev/null
 
 cat <<EOF
 
 [+] expo-apps pret.
+    Dockhand : port 3000
+    webui    : port 5050 (gere fleet/inventory.yaml + declenche deploy-fleet.sh)
 
-Dockhand tourne sur le port 3000 de expo-apps - pas encore expose via
-Caddy. Ajouter une entree dans gateway/services.yaml puis relancer
-gateway/deploy-gateway.sh pour l'exposer en https://dockhand.web.expolab.lan
+Pas encore expose via Caddy. Ajouter une entree dans gateway/services.yaml
+puis relancer gateway/deploy-gateway.sh, par exemple :
+    - name: fleet
+      backend_host: expo-apps
+      backend_port: 5050
 EOF

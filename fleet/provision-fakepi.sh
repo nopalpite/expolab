@@ -2,11 +2,13 @@
 # Provisioning "premier boot" execute A L'INTERIEUR de chaque conteneur
 # faux-Pi (pousse et lance par deploy-fleet.sh via `incus exec`).
 #
-# Usage: provision-fakepi.sh <name> <role>
+# Usage: provision-fakepi.sh <name> <role> [username] [password]
 set -euo pipefail
 
 NAME="${1:?nom du faux Pi manquant}"
 ROLE="${2:-sans-ecran}"
+FAKEPI_USER="${3:-pi}"
+FAKEPI_PASSWORD="${4:-raspberry}"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
@@ -21,15 +23,16 @@ else
     echo -e "127.0.1.1\t$NAME" >> /etc/hosts
 fi
 
-if ! id pi >/dev/null 2>&1; then
-    echo "[+] Creation de l'utilisateur pi"
-    useradd -m -s /bin/bash -G sudo pi
-    echo "pi:raspberry" | chpasswd
+if ! id "$FAKEPI_USER" >/dev/null 2>&1; then
+    echo "[+] Creation de l'utilisateur $FAKEPI_USER"
+    useradd -m -s /bin/bash -G sudo "$FAKEPI_USER"
 fi
+echo "$FAKEPI_USER:$FAKEPI_PASSWORD" | chpasswd
 
-# Mot de passe par defaut "raspberry" pour coller au comportement historique
-# des vrais Raspberry Pi (realisme du lab) - A CHANGER avant toute exposition
-# au-dela du reseau isole du lab.
+# Identifiants pi/raspberry par defaut pour coller au comportement
+# historique des vrais Raspberry Pi (realisme du lab) - configurables par
+# entree dans fleet/inventory.yaml (ou via la webui). A changer avant toute
+# exposition au-dela du reseau isole du lab.
 
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
 

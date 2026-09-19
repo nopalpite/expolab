@@ -12,6 +12,9 @@ services:
   - name: dockhand
     backend_host: expo-apps
     backend_port: 3000
+  - name: fleet
+    backend_host: expo-apps
+    backend_port: 5050
 
 # Exemples pour plus tard (une fois le service deploye dans expo-apps,
 # via Dockhand ou apps/docker-compose.yml) :

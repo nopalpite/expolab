@@ -33,7 +33,9 @@ for pi in data.get("fleet", []):
     name = pi["name"]
     mac = pi["mac"]
     role = pi.get("role", "sans-ecran")
-    print(f"{name}\t{mac}\t{role}")
+    username = pi.get("username", "pi")
+    password = pi.get("password", "raspberry")
+    print(f"{name}\t{mac}\t{role}\t{username}\t{password}")
 EOF
 
 # Lu entierement en memoire (pas de `done < fichier` sur la boucle) : des
@@ -43,7 +45,7 @@ EOF
 mapfile -t FLEET_LINES < "$TMP_TSV"
 
 for line in "${FLEET_LINES[@]}"; do
-    IFS=$'\t' read -r name mac role <<< "$line"
+    IFS=$'\t' read -r name mac role username password <<< "$line"
     [ -z "${name:-}" ] && continue
 
     if incus info "$name" &>/dev/null; then
@@ -51,7 +53,7 @@ for line in "${FLEET_LINES[@]}"; do
         continue
     fi
 
-    echo "[+] Creation de $name (mac=$mac, role=$role)"
+    echo "[+] Creation de $name (mac=$mac, role=$role, user=$username)"
     incus launch "$IMAGE" "$name" --profile default --profile "$PROFILE" < /dev/null
     incus config device override "$name" eth0 hwaddr="$mac" < /dev/null
     incus restart "$name" < /dev/null
@@ -65,7 +67,7 @@ for line in "${FLEET_LINES[@]}"; do
     done
 
     incus file push "$SCRIPT_DIR/provision-fakepi.sh" "$name/root/provision-fakepi.sh" --mode 0755 < /dev/null
-    incus exec "$name" -- /root/provision-fakepi.sh "$name" "$role" < /dev/null
+    incus exec "$name" -- /root/provision-fakepi.sh "$name" "$role" "$username" "$password" < /dev/null
 
     echo "[+] $name pret."
 done

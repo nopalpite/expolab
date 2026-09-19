@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>expolab - flotte</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>expolab</h1>
+        <p class="subtitle">Flotte de faux Raspberry Pi</p>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>Ajouter un faux Pi</h2>
+            <form id="create-form">
+                <div class="field">
+                    <label for="name">Hostname</label>
+                    <input type="text" id="name" name="name" placeholder="pi-06" required pattern="[a-z][a-z0-9-]{2,31}">
+                </div>
+                <div class="field">
+                    <label for="role">Role</label>
+                    <select id="role" name="role">
+                        {% for r in roles %}
+                        <option value="{{ r }}">{{ r }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="username">Utilisateur</label>
+                    <input type="text" id="username" name="username" value="pi" required>
+                </div>
+                <div class="field">
+                    <label for="password">Mot de passe</label>
+                    <input type="text" id="password" name="password" value="raspberry" required>
+                </div>
+                <button type="submit" id="create-btn">Creer</button>
+            </form>
+            <p id="create-status" class="status" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Flotte actuelle</h2>
+            <table id="fleet-table">
+                <thead>
+                    <tr>
+                        <th>Nom</th>
+                        <th>Statut</th>
+                        <th>IP</th>
+                        <th>Role</th>
+                        <th>Identifiants</th>
+                        <th>MAC</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="fleet-body">
+                    <tr><td colspan="7" class="empty">Chargement...</td></tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

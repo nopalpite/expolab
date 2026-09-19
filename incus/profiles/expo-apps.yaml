@@ -1,10 +1,24 @@
 # Profil Incus pour le conteneur hote Docker (expo-apps) : heberge Dockhand
-# et, plus tard, les services applicatifs geres par Dockhand (Gitea,
-# Bastion, etc.) en tant que conteneurs Docker.
+# et les services applicatifs geres par Dockhand (Gitea, Bastion, webui
+# expolab, etc.) en tant que conteneurs Docker.
 #
 # security.nesting + les intercepts syscall sont necessaires pour faire
 # tourner Docker de facon fiable a l'interieur d'un conteneur systeme
 # Incus (pattern standard, documente par Incus/LXD).
+#
+# incus-socket expose le socket Incus DE L'HOTE a l'interieur de
+# expo-apps, qui le remonte a son tour dans le conteneur Docker webui
+# (docker-compose.yml) pour que la webui puisse piloter Incus (creer/
+# supprimer des faux Pi). ATTENTION : ceci donne a expo-apps (et donc a
+# tout conteneur Docker qui y monterait ce socket) un CONTROLE TOTAL sur
+# Incus - pas seulement sur la flotte expolab, sur n'importe quel
+# conteneur/reseau/profil de l'hote. Compromis assume pour ce lab.
+#
+# shift=true necessaire : expo-apps est un conteneur non-privilegie (uid
+# mapping), sans ca le socket apparait appartenir a "nobody:nogroup" a
+# l'interieur (les uid/gid root:incus-admin de l'hote ne correspondent a
+# rien dans l'espace de noms du conteneur) et personne n'a le droit d'y
+# ecrire - shift=true active le mapping idmap pour ce device precis.
 #
 # Applique/mis a jour automatiquement par apps/deploy-apps.sh.
 config:
@@ -24,4 +38,9 @@ devices:
     path: /
     pool: default
     type: disk
+  incus-socket:
+    type: disk
+    source: /var/lib/incus/unix.socket
+    path: /var/lib/incus/unix.socket
+    shift: "true"
 name: expo-apps

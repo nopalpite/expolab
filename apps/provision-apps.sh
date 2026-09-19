@@ -1,8 +1,9 @@
 #!/bin/bash
 # Provisioning "premier boot" de expo-apps : installe Docker + Docker
-# Compose, puis demarre la stack (Dockhand). Execute A L'INTERIEUR du
-# conteneur par deploy-apps.sh, qui a prealablement pousse
-# docker-compose.yml dans /root/.
+# Compose. Execute A L'INTERIEUR du conteneur par deploy-apps.sh, une
+# seule fois a la creation - le deploiement/mise a jour de la stack
+# elle-meme (docker-compose.yml, webui/) est gere separement par
+# deploy-apps.sh a chaque run, pas ici.
 set -euo pipefail
 
 NAME="${1:?nom du conteneur manquant}"
@@ -25,10 +26,5 @@ echo "[+] Installation de Docker (script officiel get.docker.com)..."
 curl -fsSL https://get.docker.com | sh >/dev/null
 
 mkdir -p /opt/expo-apps
-cp /root/docker-compose.yml /opt/expo-apps/docker-compose.yml
 
-echo "[+] Demarrage de la stack Docker (Dockhand)..."
-cd /opt/expo-apps
-docker compose up -d
-
-echo "[+] expo-apps pret (Docker + Dockhand sur le port 3000)."
+echo "[+] expo-apps pret (Docker installe)."
