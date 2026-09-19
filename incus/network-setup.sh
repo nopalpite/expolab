@@ -7,17 +7,17 @@
 # Pourquoi pas du macvlan sur une interface physique (eth0/wlan0) comme dans
 # la premiere version : le besoin reel est de simuler un reseau local pour
 # la flotte, pas de rendre les faux Pi visibles/joignables depuis le reseau
-# physique/Internet. Le futur serveur DHCP/DNS/reverse-proxy dedie viendra
-# se brancher sur ce meme reseau expo-lan (sa "patte LAN"), avec une
-# deuxieme patte vers le WAN/VPN pour l'acces distant - c'est ce serveur qui
-# gardera la main sur ce qui sort ou non du LAN simule.
+# physique/Internet. Le "serveur d'expo" (voir server/, DHCP/DNS/
+# reverse-proxy) tourne directement sur l'hote et se branche sur ce meme
+# reseau expo-lan via l'interface bridge elle-meme (10.42.0.1, deja portee
+# par l'hote) - pas besoin d'un conteneur Incus dedie pour ca.
 #
-# En attendant ce serveur dedie, le DHCP integre a Incus sur ce bridge sert
-# a valider que chaque faux Pi recoit bien une IP via sa MAC (objectif de
-# cette phase). ipv4.nat=true est laisse actif pour l'instant uniquement
-# pour permettre aux conteneurs de faire `apt-get install` pendant leur
-# provisioning (trafic SORTANT uniquement, aucun port n'est expose depuis
-# l'exterieur vers les conteneurs).
+# En attendant que server/deploy-server.sh prenne le relais, le DHCP
+# integre a Incus sur ce bridge sert a valider que chaque faux Pi recoit
+# bien une IP via sa MAC. ipv4.nat=true est laisse actif pour l'instant
+# uniquement pour permettre aux conteneurs de faire `apt-get install`
+# pendant leur provisioning (trafic SORTANT uniquement, aucun port n'est
+# expose depuis l'exterieur vers les conteneurs).
 #
 # Usage: sudo ./network-setup.sh
 set -euo pipefail

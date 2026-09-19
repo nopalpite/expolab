@@ -18,27 +18,23 @@ if [[ "${1:-}" == "--yes" ]]; then
     YES_FLAG=(--yes)
 fi
 
-echo "=== 1/6 : suppression du VPN (WireGuard) ==="
+echo "=== 1/5 : suppression du VPN (WireGuard) ==="
 "$SCRIPT_DIR/vpn/uninstall.sh" "${YES_FLAG[@]}"
 
 echo
-echo "=== 2/6 : suppression du gateway DHCP/DNS/reverse-proxy ==="
-"$SCRIPT_DIR/gateway/teardown-gateway.sh" "${YES_FLAG[@]}"
+echo "=== 2/5 : suppression du serveur d'expo (Docker : dnsmasq, caddy, dockhand, webui) ==="
+"$SCRIPT_DIR/server/teardown-server.sh" "${YES_FLAG[@]}"
 
 echo
-echo "=== 3/6 : suppression de l'hote Docker (expo-apps) ==="
-"$SCRIPT_DIR/apps/teardown-apps.sh" "${YES_FLAG[@]}"
-
-echo
-echo "=== 4/6 : suppression de la flotte ==="
+echo "=== 3/5 : suppression de la flotte ==="
 "$SCRIPT_DIR/fleet/teardown-fleet.sh" "${YES_FLAG[@]}"
 
 echo
-echo "=== 5/6 : demontage du reseau (profils, reseau expo-lan) ==="
+echo "=== 4/5 : demontage du reseau (profil fake-pi, reseau expo-lan) ==="
 "$SCRIPT_DIR/incus/network-teardown.sh"
 
 echo
-echo "=== 6/6 : desinstallation d'Incus ==="
+echo "=== 5/5 : desinstallation d'Incus ==="
 "$SCRIPT_DIR/incus/uninstall.sh" "${YES_FLAG[@]}"
 
 echo

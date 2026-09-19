@@ -67,7 +67,7 @@ cat > "$CLIENT_CONF" <<EOF
 [Interface]
 PrivateKey = $PEER_PRIVATE_KEY
 Address = ${PEER_IP}/32
-DNS = 10.42.0.10
+DNS = 10.42.0.1
 
 [Peer]
 PublicKey = $SERVER_PUBLIC_KEY

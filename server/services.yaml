@@ -1,0 +1,16 @@
+# Services applicatifs exposes via le reverse-proxy Caddy.
+#
+# - name          : label public, utilise dans <name>.web.expolab.lan
+# - backend_port  : port du service sur l'hote (tous les services de ce
+#                    stack Docker partagent l'hote via network_mode: host
+#                    ou une publication de port - donc toujours localhost)
+# - backend_host  : (optionnel, defaut "localhost") a ne renseigner que
+#                    pour un service qui vivrait ailleurs (ex: un futur
+#                    faux Pi si jamais besoin, via <nom>.expolab.lan)
+#
+# https://<name>.web.expolab.lan  ->  Caddy  ->  http://<backend_host>:<backend_port>
+services:
+  - name: dockhand
+    backend_port: 3000
+  - name: fleet
+    backend_port: 5050

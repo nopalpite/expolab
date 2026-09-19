@@ -1,0 +1,56 @@
+# Stack Docker du "serveur d'expo" - tourne directement sur l'hote (pas
+# dans un conteneur Incus). C'est exactement ce qui serait deploye sur le
+# vrai serveur de l'exposition : DHCP/DNS, reverse-proxy, et les services
+# applicatifs (Dockhand, webui, puis Gitea/Bastion) en conteneurs Docker.
+# Incus, lui, ne sert qu'a simuler la flotte de faux Pi - un besoin propre
+# au lab, absent en vraie vie.
+services:
+  dnsmasq:
+    build: ./dnsmasq
+    container_name: expolab-dnsmasq
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./dnsmasq.conf:/etc/dnsmasq.conf:ro
+      - /etc/resolv.conf:/etc/resolv.conf:ro
+
+  caddy:
+    image: caddy:latest
+    container_name: expolab-caddy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  dockhand:
+    image: fnsys/dockhand:latest
+    container_name: dockhand
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - dockhand_data:/app/data
+
+  webui:
+    build: ../webui
+    container_name: expolab-webui
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    volumes:
+      # Socket Incus DIRECT sur l'hote - un seul montage (plus le
+      # double-hop hote -> conteneur Incus -> conteneur Docker d'avant,
+      # ni les histoires de shift= qui allaient avec).
+      - /var/lib/incus/unix.socket:/var/lib/incus/unix.socket
+      - ../fleet:/expolab/fleet
+
+volumes:
+  caddy_data:
+  caddy_config:
+  dockhand_data:
