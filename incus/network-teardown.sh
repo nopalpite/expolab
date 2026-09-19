@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Annule ce que network-setup.sh a mis en place : profils fake-pi/expo-gw et
-# reseau expo-lan. Symetrique de network-setup.sh. A lancer APRES
-# fleet/teardown-fleet.sh et gateway/teardown-gateway.sh (un profil/reseau
+# Annule ce que network-setup.sh a mis en place : profils
+# fake-pi/expo-gw/expo-apps et reseau expo-lan. Symetrique de
+# network-setup.sh. A lancer APRES fleet/teardown-fleet.sh,
+# gateway/teardown-gateway.sh et apps/teardown-apps.sh (un profil/reseau
 # encore utilise par une instance ne peut pas etre supprime).
 set -euo pipefail
 
@@ -15,7 +16,7 @@ if ! command -v incus &>/dev/null; then
     exit 0
 fi
 
-for profile in fake-pi expo-gw; do
+for profile in fake-pi expo-gw expo-apps; do
     if incus profile show "$profile" &>/dev/null; then
         if incus profile delete "$profile" 2>/tmp/expolab-profile-err; then
             echo "[-] Profil $profile supprime."

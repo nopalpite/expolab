@@ -49,11 +49,30 @@ else
     done
 
     incus file push "$SCRIPT_DIR/dnsmasq.conf" "$NAME/root/dnsmasq.conf" < /dev/null
-    incus file push "$SCRIPT_DIR/resolv.dnsmasq.upstream" "$NAME/root/resolv.dnsmasq.upstream" < /dev/null
     incus file push "$SCRIPT_DIR/provision-gateway.sh" "$NAME/root/provision-gateway.sh" --mode 0755 < /dev/null
 
     incus exec "$NAME" -- /root/provision-gateway.sh < /dev/null
 fi
+
+# DNS amont de dnsmasq : la passerelle de l'hote plutot qu'un resolveur
+# public fige. Sur certains reseaux (constate sur le Wi-Fi du lab), le DNS
+# public en UDP:53 direct (1.1.1.1, 9.9.9.9) est bloque/filtre alors que le
+# routeur local repond normalement - la passerelle detectee dynamiquement
+# est donc plus fiable, et reste portable d'un reseau a l'autre. Regenere a
+# chaque run (pas seulement a la creation) pour suivre un changement de
+# reseau. Conserve les resolveurs publics en repli.
+echo "[+] Mise a jour du DNS amont de dnsmasq..."
+HOST_GATEWAY_IP="$(ip route show default 0.0.0.0/0 2>/dev/null | awk '{print $3; exit}')"
+UPSTREAM_TMP="$(mktemp)"
+{
+    [ -n "$HOST_GATEWAY_IP" ] && echo "nameserver $HOST_GATEWAY_IP"
+    echo "nameserver 1.1.1.1"
+    echo "nameserver 9.9.9.9"
+} > "$UPSTREAM_TMP"
+incus file push "$UPSTREAM_TMP" "$NAME/root/resolv.dnsmasq.upstream" < /dev/null
+rm -f "$UPSTREAM_TMP"
+incus exec "$NAME" -- cp /root/resolv.dnsmasq.upstream /etc/resolv.dnsmasq.upstream < /dev/null
+incus exec "$NAME" -- systemctl restart dnsmasq < /dev/null
 
 echo "[+] Generation/mise a jour du Caddyfile a partir de $SERVICES..."
 CADDYFILE_TMP="$(mktemp)"
@@ -75,19 +94,24 @@ if [ "$FRESH" -eq 1 ]; then
         sleep 2
     done
 
-    echo "[+] Renouvellement des baux de la flotte existante aupres du nouveau DHCP..."
+    echo "[+] Renouvellement des baux des autres conteneurs aupres du nouveau DHCP..."
     # Un simple `systemctl restart systemd-networkd` ne force pas un nouveau
     # DHCPDISCOVER : le client garde son bail precedent (encore valide a ses
     # yeux) tant qu'il n'a pas expire. Un restart complet du conteneur repart
     # d'une interface reseau vierge et force une vraie renegociation. On
     # reessaie si le bail n'est pas arrive du premier coup (le dnsmasq du
     # gateway peut mettre un instant a etre pleinement pret).
-    for pi in $(incus list --format csv -c n 2>/dev/null | grep '^pi-' || true); do
-        echo "    - $pi"
+    #
+    # Tous les conteneurs sauf expo-gw lui-meme (flotte, expo-apps, et tout
+    # ce qui sera ajoute plus tard) : sans ca, leur nom ne serait jamais
+    # enregistre aupres du nouveau dnsmasq et resterait impossible a
+    # resoudre en <nom>.expolab.lan.
+    for c in $(incus list --format csv -c n 2>/dev/null | grep -v "^${NAME}\$" || true); do
+        echo "    - $c"
         for attempt in 1 2 3; do
-            incus restart "$pi" < /dev/null || true
+            incus restart "$c" < /dev/null || true
             sleep 5
-            ip="$(incus list "$pi" --format csv -c 4 2>/dev/null | head -1)"
+            ip="$(incus list "$c" --format csv -c 4 2>/dev/null | head -1)"
             if [ -n "$ip" ]; then
                 break
             fi

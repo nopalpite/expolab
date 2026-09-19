@@ -1,0 +1,27 @@
+# Profil Incus pour le conteneur hote Docker (expo-apps) : heberge Dockhand
+# et, plus tard, les services applicatifs geres par Dockhand (Gitea,
+# Bastion, etc.) en tant que conteneurs Docker.
+#
+# security.nesting + les intercepts syscall sont necessaires pour faire
+# tourner Docker de facon fiable a l'interieur d'un conteneur systeme
+# Incus (pattern standard, documente par Incus/LXD).
+#
+# Applique/mis a jour automatiquement par apps/deploy-apps.sh.
+config:
+  limits.cpu: "2"
+  limits.memory: 2GiB
+  limits.memory.enforce: soft
+  security.nesting: "true"
+  security.syscalls.intercept.mknod: "true"
+  security.syscalls.intercept.setxattr: "true"
+description: Hote Docker expolab (Dockhand + services applicatifs)
+devices:
+  eth0:
+    name: eth0
+    network: expo-lan
+    type: nic
+  root:
+    path: /
+    pool: default
+    type: disk
+name: expo-apps

@@ -1,0 +1,16 @@
+# Stack Docker de expo-apps. Dockhand donne ensuite une UI web pour
+# ajouter/gerer d'autres services (Gitea, Bastion...) sans avoir a toucher
+# a ce fichier a la main - mais rien n'empeche de les ajouter ici aussi.
+services:
+  dockhand:
+    image: fnsys/dockhand:latest
+    container_name: dockhand
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - dockhand_data:/app/data
+
+volumes:
+  dockhand_data:

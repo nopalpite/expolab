@@ -1,10 +1,11 @@
 #!/bin/bash
 # Provisioning du conteneur expo-gw (DHCP/DNS via dnsmasq + reverse-proxy
 # TLS auto-signe via Caddy). Execute A L'INTERIEUR du conteneur par
-# deploy-gateway.sh, qui a prealablement pousse dnsmasq.conf et
-# resolv.dnsmasq.upstream dans /root/. Le Caddyfile lui-meme est pousse et
-# applique separement par deploy-gateway.sh (a chaque run, pas seulement a
-# la creation) pour rester en phase avec gateway/services.yaml.
+# deploy-gateway.sh, qui a prealablement pousse dnsmasq.conf dans /root/.
+# Le Caddyfile et le DNS amont de dnsmasq (resolv.dnsmasq.upstream) sont
+# pousses et appliques separement par deploy-gateway.sh, A CHAQUE run (pas
+# seulement a la creation) pour rester en phase avec gateway/services.yaml
+# et suivre un eventuel changement de reseau.
 #
 # Ordre important : les paquets sont installes AVANT de basculer le
 # conteneur sur son IP statique / son propre resolveur, pour ne pas casser
@@ -28,7 +29,10 @@ apt-get update -qq
 apt-get install -y -qq caddy >/dev/null
 
 echo "[+] Configuration dnsmasq..."
-cp /root/resolv.dnsmasq.upstream /etc/resolv.dnsmasq.upstream
+# Placeholder - le vrai contenu (DNS amont detecte dynamiquement) est
+# pousse et applique par deploy-gateway.sh juste apres ce script, mais
+# dnsmasq a besoin que resolv-file existe deja pour demarrer proprement.
+touch /etc/resolv.dnsmasq.upstream
 cp /root/dnsmasq.conf /etc/dnsmasq.d/expolab.conf
 systemctl enable dnsmasq >/dev/null
 
@@ -43,8 +47,9 @@ Name=eth0
 [Network]
 Address=10.42.0.10/24
 Gateway=10.42.0.1
-DNS=1.1.1.1
 EOF
+# Pas de DNS= ici : le resolveur local est bascule sur dnsmasq (127.0.0.1)
+# juste apres, ce qui rend un DNS fige dans cette config inutile/trompeur.
 # Le fichier de match par defaut de l'image (DHCP sur toutes les
 # interfaces) est trie apres le notre (priorite alphabetique) donc notre
 # config statique gagne pour eth0 specifiquement - mais systemd-networkd ne

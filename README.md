@@ -19,10 +19,18 @@ des qu'il est deploye.
 
 Le reverse-proxy n'expose PAS les faux Pi (ils n'ont pas vocation a etre
 joignables en HTTPS individuellement) : il sert a exposer les services
-applicatifs de l'infra d'expo elle-meme - Gitea, Bastion, etc. - chacun dans
-son propre conteneur sur `expo-lan`, declare dans `gateway/services.yaml`.
-Rien n'est deploye par defaut : le fichier est un template vide, a completer
-au fur et a mesure des besoins.
+applicatifs de l'infra d'expo elle-meme, declares dans
+`gateway/services.yaml`.
+
+Ces services applicatifs tournent en Docker, dans un conteneur Incus dedie
+`expo-apps` (voir `apps/`, `security.nesting=true` - pattern standard pour
+faire tourner Docker a l'interieur d'un conteneur systeme Incus). Un seul
+hote Docker plutot qu'un conteneur Incus par service : plus simple a
+administrer au quotidien via **Dockhand**, deploye par defaut dessus (UI
+web de gestion Docker, https://dockhand.web.expolab.lan une fois le gateway
+en place). Les futurs services (Gitea, Bastion...) s'ajoutent ensuite comme
+conteneurs Docker sur ce meme hote, geres depuis Dockhand ou via
+`apps/docker-compose.yml`.
 
 La patte WAN/VPN (voir `vpn/`) tourne sur l'**hote** directement, pas dans
 un conteneur : donner une deuxieme interface reseau a `expo-gw` demanderait
@@ -40,9 +48,21 @@ Deux domaines DNS distincts, resolus par le `dnsmasq` d'`expo-gw` :
   le nom que doit utiliser un client HTTPS pour passer par le reverse-proxy
   Caddy
 
-Ne pas les confondre : un client qui demande `https://gitea.expolab.lan`
-tape directement sur le conteneur gitea (qui n'ecoute qu'en HTTP, sur son
-port applicatif) et contourne Caddy entierement.
+Ne pas les confondre : un client qui demande `https://expo-apps.expolab.lan`
+tape directement sur le conteneur expo-apps (qui n'ecoute qu'en HTTP, sur
+les ports applicatifs de chaque service Docker) et contourne Caddy
+entierement. C'est pour ca que `gateway/services.yaml` distingue `name`
+(le label public) de `backend_host` (le conteneur reel) : plusieurs
+services Docker sur `expo-apps` partagent la meme IP mais des ports
+differents.
+
+DNS amont de dnsmasq (pour resoudre le reste d'Internet, ex: `apt-get
+update`) : la passerelle de l'hote, detectee dynamiquement a chaque
+`deploy-gateway.sh` plutot que figee sur un resolveur public. Sur certains
+reseaux (constate sur le Wi-Fi du lab), le DNS public en UDP:53 direct
+(1.1.1.1, 9.9.9.9) est filtre alors que le routeur local repond
+normalement - resolveurs publics conserves en repli si la detection
+echoue.
 
 ## Prerequis
 
@@ -51,6 +71,9 @@ port applicatif) et contourne Caddy entierement.
   n'en depend pas) uniquement pour qu'Incus puisse telecharger l'image de
   base et que les conteneurs fassent leurs `apt-get install` pendant le
   provisioning
+- Budget RAM a garder en tete sur un Pi 5 8 Go : ~2 Go pour `expo-apps`
+  (Docker + Dockhand), 512 Mo pour `expo-gw`, 512 Mo par faux Pi (2,5 Go
+  pour 5 faux Pi) - ajuster `incus/profiles/*.yaml` si besoin
 
 ## Mise en route (a executer directement sur le Pi 5)
 
@@ -61,6 +84,8 @@ sudo ./incus/install.sh
 sudo ./incus/network-setup.sh
 
 ./fleet/deploy-fleet.sh
+
+./apps/deploy-apps.sh
 
 ./gateway/deploy-gateway.sh
 
@@ -151,7 +176,6 @@ gateway/
   teardown-gateway.sh         # supprime expo-gw, reactive le DHCP integre d'Incus
   provision-gateway.sh        # script de premier boot execute dans expo-gw
   dnsmasq.conf                # config DHCP+DNS (plage, domaine expolab.lan)
-  resolv.dnsmasq.upstream     # DNS amont utilise par dnsmasq (evite la boucle)
   services.yaml                # services applicatifs a exposer (vide par defaut)
   render-caddyfile.py         # genere le Caddyfile a partir de gateway/services.yaml
 vpn/

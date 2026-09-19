@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 # Genere un Caddyfile a partir de gateway/services.yaml : un vhost TLS
 # auto-signe par service applicatif deploye sur expo-lan (Gitea, Bastion,
-# etc.), reverse-proxy vers son port backend.
+# Dockhand, etc.), reverse-proxy vers son port backend.
 #
 # Le nom public (vhost, ce que le client demande) et le nom backend (ce que
 # Caddy interroge en interne) sont volontairement differents : le nom
 # backend est l'enregistrement DHCP automatique de dnsmasq, qui pointe vers
-# la vraie IP du conteneur de service - si le vhost public utilisait ce
-# meme nom, un client contournerait Caddy et taperait directement sur le
-# conteneur en HTTPS, port sur lequel rien n'ecoute forcement (voir
-# dnsmasq.conf, address=/web.../).
+# la vraie IP du conteneur hebergeant le service - si le vhost public
+# utilisait ce meme nom, un client contournerait Caddy et taperait
+# directement sur le conteneur en HTTPS, port sur lequel rien n'ecoute
+# forcement (voir dnsmasq.conf, address=/web.../).
+#
+# `backend_host` (optionnel, defaut = `name`) permet a plusieurs services
+# de partager un meme conteneur (ex: Dockhand + Gitea + Bastion tous sur
+# expo-apps, chacun sur son propre port).
 #
 # Usage: render-caddyfile.py <chemin_services.yaml> [domaine_public] [domaine_backend]
 import sys
@@ -37,9 +41,10 @@ def main() -> None:
     for svc in services:
         name = svc["name"]
         port = svc["backend_port"]
+        backend_host = svc.get("backend_host", name)
         print(f"{name}.{public_domain} {{")
         print("    tls internal")
-        print(f"    reverse_proxy {name}.{backend_domain}:{port}")
+        print(f"    reverse_proxy {backend_host}.{backend_domain}:{port}")
         print("}")
         print()
 

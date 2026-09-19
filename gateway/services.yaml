@@ -1,17 +1,23 @@
 # Services applicatifs exposes via le reverse-proxy Caddy d'expo-gw.
-# Chaque service tourne dans son propre conteneur Incus sur expo-lan (pas
-# encore automatise par ce depot - a creer manuellement pour l'instant).
 #
-# Le nom du service doit correspondre au hostname du conteneur (pour que
-# la resolution DNS automatique de dnsmasq fonctionne, cf gateway/dnsmasq.conf).
+# - name          : label public, utilise dans <name>.web.expolab.lan
+# - backend_host  : (optionnel, defaut = name) hostname du conteneur qui
+#                    heberge reellement le service - a renseigner quand
+#                    plusieurs services partagent un meme conteneur
+#                    (ex: Dockhand + Gitea + Bastion tous sur expo-apps)
+# - backend_port  : port d'ecoute du service sur ce conteneur
 #
-# https://<name>.web.expolab.lan  ->  Caddy  ->  http://<name>.expolab.lan:<backend_port>
-#
-# Exemple (a decommenter et adapter une fois le conteneur cree) :
-# services:
-#   - name: gitea
-#     backend_port: 3000
-#   - name: bastion
-#     backend_port: 5000
+# https://<name>.web.expolab.lan  ->  Caddy  ->  http://<backend_host>.expolab.lan:<backend_port>
+services:
+  - name: dockhand
+    backend_host: expo-apps
+    backend_port: 3000
 
-services: []
+# Exemples pour plus tard (une fois le service deploye dans expo-apps,
+# via Dockhand ou apps/docker-compose.yml) :
+# - name: gitea
+#   backend_host: expo-apps
+#   backend_port: 3000
+# - name: bastion
+#   backend_host: expo-apps
+#   backend_port: 5000
