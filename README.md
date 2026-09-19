@@ -4,8 +4,7 @@ Lab de simulation d'infra d'exposition : une flotte de "faux" Raspberry Pi
 (conteneurs Incus avec MAC propre, DHCP, SSH) hebergee sur un Raspberry Pi 5
 physique.
 
-Le GPIO physique par faux Pi est **hors scope pour cette phase** (voir plus
-bas). On se concentre sur la creation de la flotte reseau.
+Cette phase se concentre sur la creation de la flotte reseau.
 
 ## Architecture reseau
 
@@ -106,5 +105,3 @@ rollback.sh                 # orchestre les 3 teardown dans le bon ordre
 ## A venir (hors scope de cette phase)
 
 - Serveur dedie DHCP (dnsmasq) + DNS + reverse proxy HTTPS auto-signe (Caddy)
-- Acces GPIO physique (mock logiciel par defaut, passthrough reel sur 1-2
-  noeuds si besoin de valider du vrai materiel)
