@@ -15,9 +15,15 @@ physique ou Internet.
 
 Le conteneur `expo-gw` (voir `gateway/`) est le serveur dedie DHCP/DNS/
 reverse-proxy de ce LAN simule : il prend le relais du DHCP integre d'Incus
-des qu'il est deploye. Dans l'architecture cible il aura une deuxieme patte
-reseau vers le WAN pour un acces VPN a distance — pas encore implementee
-(voir "A venir").
+des qu'il est deploye.
+
+La patte WAN/VPN (voir `vpn/`) tourne sur l'**hote** directement, pas dans
+un conteneur : donner une deuxieme interface reseau a `expo-gw` demanderait
+du macvlan sur l'interface physique, qui ne fonctionne pas de facon fiable
+en Wi-Fi (meme constat que pour `expo-lan`). L'hote a deja naturellement les
+deux pattes - son interface physique (WAN reel) et le bridge `expo-lan`
+(LAN simule) - c'est le point de frontiere naturel, WireGuard y route le
+trafic des clients VPN vers `10.42.0.0/24`.
 
 Deux domaines DNS distincts, resolus par le `dnsmasq` d'`expo-gw` :
 - `<nom>.expolab.lan` — enregistrement DHCP automatique, pointe vers la
@@ -49,6 +55,9 @@ sudo ./incus/network-setup.sh
 ./fleet/deploy-fleet.sh
 
 ./gateway/deploy-gateway.sh
+
+sudo ./vpn/install.sh
+sudo ./vpn/add-peer.sh mon-laptop
 ```
 
 `deploy-fleet.sh` est idempotent : relancez-le apres avoir modifie
@@ -66,6 +75,11 @@ ssh pi@<ip-de-pi-01>             # mot de passe: raspberry (a changer si besoin)
 # Reverse proxy HTTPS (TLS auto-signe, cert "not trusted" attendu sans
 # importer le CA interne de Caddy) :
 incus exec expo-gw -- curl -sk https://pi-01.web.expolab.lan
+
+# VPN : recuperer /etc/wireguard/peers/mon-laptop.conf sur le poste client
+# (WireGuard app ou wg-quick), puis une fois connecte :
+ssh pi@10.42.0.181                       # acces direct a un faux Pi via le VPN
+curl -k https://pi-01.web.expolab.lan     # (DNS = 10.42.0.10 pousse par le VPN)
 ```
 
 ## Rollback (retour a l'etat initial)
@@ -88,15 +102,17 @@ sudo ./rollback.sh --yes    # sans confirmation
 ```
 
 Ce script defait dans l'ordre exactement ce que `install.sh` /
-`network-setup.sh` / `deploy-fleet.sh` / `deploy-gateway.sh` ont mis en
-place :
+`network-setup.sh` / `deploy-fleet.sh` / `deploy-gateway.sh` /
+`vpn/install.sh` ont mis en place :
 
-1. `gateway/teardown-gateway.sh` — supprime `expo-gw` et reactive le DHCP
+1. `vpn/uninstall.sh` — arrete WireGuard, supprime tous les pairs et
+   desinstalle wireguard-tools
+2. `gateway/teardown-gateway.sh` — supprime `expo-gw` et reactive le DHCP
    integre d'Incus sur `expo-lan` (secours)
-2. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
-3. `incus/network-teardown.sh` — supprime les profils `fake-pi`/`expo-gw` et
+3. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
+4. `incus/network-teardown.sh` — supprime les profils `fake-pi`/`expo-gw` et
    le reseau `expo-lan`
-4. `incus/uninstall.sh` — desinstalle Incus, retire le depot Zabbly et
+5. `incus/uninstall.sh` — desinstalle Incus, retire le depot Zabbly et
    `/var/lib/incus`
 
 Chaque etape est aussi utilisable seule (ex: `./fleet/teardown-fleet.sh`
@@ -127,9 +143,18 @@ gateway/
   dnsmasq.conf                # config DHCP+DNS (plage, domaine expolab.lan)
   resolv.dnsmasq.upstream     # DNS amont utilise par dnsmasq (evite la boucle)
   render-caddyfile.py         # genere le Caddyfile a partir de fleet/inventory.yaml
-rollback.sh                   # orchestre les 4 teardown dans le bon ordre
+vpn/
+  install.sh                  # installe WireGuard sur l'hote, cree wg0
+  uninstall.sh                 # desinstalle WireGuard (symetrique de install.sh)
+  add-peer.sh                  # ajoute un pair VPN + genere sa config client
+  remove-peer.sh                # retire un pair VPN
+rollback.sh                   # orchestre les 5 teardown dans le bon ordre
 ```
 
-## A venir (hors scope de cette phase)
+## A venir
 
-- Patte WAN + VPN sur `expo-gw` pour l'acces distant au lab
+- Renouvellement/rotation des certs Caddy au-dela du lab (hors scope d'un
+  environnement isole)
+- Redirection de port sur le routeur du reseau reel pour un acces VPN
+  depuis l'exterieur (specifique a la box de l'utilisateur, hors perimetre
+  scriptable)
