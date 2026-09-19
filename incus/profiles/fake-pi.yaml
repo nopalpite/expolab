@@ -1,0 +1,17 @@
+# Profil Incus applique a chaque "faux Raspberry Pi" de la flotte.
+# Applique/mis a jour automatiquement par network-setup.sh.
+config:
+  limits.cpu: "1"
+  limits.memory: 512MiB
+  limits.memory.enforce: soft
+description: Faux Raspberry Pi expolab (reseau LAN simule isole + ressources contraintes)
+devices:
+  eth0:
+    name: eth0
+    network: expo-lan
+    type: nic
+  root:
+    path: /
+    pool: default
+    type: disk
+name: fake-pi

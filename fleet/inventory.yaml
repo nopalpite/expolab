@@ -1,0 +1,24 @@
+# Inventaire declaratif de la flotte de faux Raspberry Pi.
+# - name : nom du conteneur Incus / hostname du faux Pi
+# - mac  : adresse MAC simulee (prefixe OUI Raspberry Pi Trading Ltd DC:A6:32)
+# - role : libre pour l'instant (sert plus tard a brancher le bon service
+#          applicatif par interactif - GPIO/ecran hors scope pour cette phase)
+#
+# Pour agrandir la flotte : ajouter une entree puis relancer
+# ./deploy-fleet.sh (idempotent, ne touche pas aux instances existantes).
+fleet:
+  - name: pi-01
+    mac: "dc:a6:32:00:00:01"
+    role: sans-ecran
+  - name: pi-02
+    mac: "dc:a6:32:00:00:02"
+    role: avec-ecran
+  - name: pi-03
+    mac: "dc:a6:32:00:00:03"
+    role: avec-ecran
+  - name: pi-04
+    mac: "dc:a6:32:00:00:04"
+    role: sans-ecran
+  - name: pi-05
+    mac: "dc:a6:32:00:00:05"
+    role: sans-ecran
