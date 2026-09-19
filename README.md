@@ -2,9 +2,8 @@
 
 Lab de simulation d'infra d'exposition : une flotte de "faux" Raspberry Pi
 (conteneurs Incus avec MAC propre, DHCP, SSH) hebergee sur un Raspberry Pi 5
-physique.
-
-Cette phase se concentre sur la creation de la flotte reseau.
+physique, avec un serveur dedie DHCP/DNS/reverse-proxy (TLS auto-signe) pour
+ce reseau simule.
 
 ## Architecture reseau
 
@@ -14,11 +13,22 @@ identiquement en Wi-Fi ou en Ethernet). Objectif : simuler un reseau local
 pour la flotte, pas rendre les faux Pi visibles/joignables depuis le reseau
 physique ou Internet.
 
-Dans l'architecture cible, le futur serveur dedie DHCP/DNS/reverse-proxy aura
-deux pattes reseau : une sur `expo-lan` (le "LAN" de la flotte) et une sur le
-WAN pour un acces VPN a distance. En attendant ce serveur, le DHCP integre
-d'Incus sur `expo-lan` fait office de DHCP temporaire, juste pour valider que
-chaque faux Pi recoit bien une IP via sa propre MAC.
+Le conteneur `expo-gw` (voir `gateway/`) est le serveur dedie DHCP/DNS/
+reverse-proxy de ce LAN simule : il prend le relais du DHCP integre d'Incus
+des qu'il est deploye. Dans l'architecture cible il aura une deuxieme patte
+reseau vers le WAN pour un acces VPN a distance — pas encore implementee
+(voir "A venir").
+
+Deux domaines DNS distincts, resolus par le `dnsmasq` d'`expo-gw` :
+- `<nom>.expolab.lan` — enregistrement DHCP automatique, pointe vers la
+  **vraie IP** de chaque faux Pi (SSH, acces direct)
+- `<nom>.web.expolab.lan` — wildcard fixe vers `expo-gw` (10.42.0.10), c'est
+  le nom que doit utiliser un client HTTPS pour passer par le reverse-proxy
+  Caddy
+
+Ne pas les confondre : un client qui demande `https://pi-01.expolab.lan`
+tape directement sur pi-01 (qui n'ecoute qu'en HTTP, port 80) et contourne
+Caddy entierement.
 
 ## Prerequis
 
@@ -37,18 +47,25 @@ sudo ./incus/install.sh
 sudo ./incus/network-setup.sh
 
 ./fleet/deploy-fleet.sh
+
+./gateway/deploy-gateway.sh
 ```
 
 `deploy-fleet.sh` est idempotent : relancez-le apres avoir modifie
 `fleet/inventory.yaml` pour ajouter/retirer des faux Pi, seules les entrees
-manquantes sont creees.
+manquantes sont creees. Relancez `gateway/deploy-gateway.sh` apres coup pour
+regenerer le Caddyfile avec les nouvelles entrees.
 
 ## Verifier / se connecter
 
 ```bash
-incus list                       # etat + IP de chaque faux Pi
+incus list                       # etat + IP de chaque faux Pi (+ expo-gw)
 incus exec pi-01 -- bash         # shell direct dans le conteneur
 ssh pi@<ip-de-pi-01>             # mot de passe: raspberry (a changer si besoin)
+
+# Reverse proxy HTTPS (TLS auto-signe, cert "not trusted" attendu sans
+# importer le CA interne de Caddy) :
+incus exec expo-gw -- curl -sk https://pi-01.web.expolab.lan
 ```
 
 ## Rollback (retour a l'etat initial)
@@ -71,12 +88,15 @@ sudo ./rollback.sh --yes    # sans confirmation
 ```
 
 Ce script defait dans l'ordre exactement ce que `install.sh` /
-`network-setup.sh` / `deploy-fleet.sh` ont mis en place :
+`network-setup.sh` / `deploy-fleet.sh` / `deploy-gateway.sh` ont mis en
+place :
 
-1. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
-2. `incus/network-teardown.sh` — supprime le profil `fake-pi` et le reseau
-   `expo-lan`
-3. `incus/uninstall.sh` — desinstalle Incus, retire le depot Zabbly et
+1. `gateway/teardown-gateway.sh` — supprime `expo-gw` et reactive le DHCP
+   integre d'Incus sur `expo-lan` (secours)
+2. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
+3. `incus/network-teardown.sh` — supprime les profils `fake-pi`/`expo-gw` et
+   le reseau `expo-lan`
+4. `incus/uninstall.sh` — desinstalle Incus, retire le depot Zabbly et
    `/var/lib/incus`
 
 Chaque etape est aussi utilisable seule (ex: `./fleet/teardown-fleet.sh`
@@ -89,19 +109,27 @@ retour a l'etat initial *exact* est requis.
 
 ```
 incus/
-  install.sh              # installe Incus sur l'hote
-  uninstall.sh             # desinstalle Incus (symetrique de install.sh)
-  network-setup.sh         # cree le reseau expo-lan (bridge isole) + profil fake-pi
-  network-teardown.sh      # defait network-setup.sh
-  profiles/fake-pi.yaml    # profil Incus (reseau + limites CPU/RAM)
+  install.sh                # installe Incus sur l'hote
+  uninstall.sh               # desinstalle Incus (symetrique de install.sh)
+  network-setup.sh           # cree le reseau expo-lan (bridge isole) + profil fake-pi
+  network-teardown.sh        # defait network-setup.sh
+  profiles/fake-pi.yaml      # profil Incus flotte (reseau + limites CPU/RAM)
+  profiles/expo-gw.yaml      # profil Incus gateway (reseau + limites CPU/RAM)
 fleet/
-  inventory.yaml           # liste declarative des faux Pi (nom, MAC, role)
-  deploy-fleet.sh           # cree/provisionne les faux Pi manquants
-  teardown-fleet.sh         # supprime les faux Pi de l'inventaire
-  provision-fakepi.sh       # script de premier boot execute dans chaque conteneur
-rollback.sh                 # orchestre les 3 teardown dans le bon ordre
+  inventory.yaml             # liste declarative des faux Pi (nom, MAC, role)
+  deploy-fleet.sh             # cree/provisionne les faux Pi manquants
+  teardown-fleet.sh           # supprime les faux Pi de l'inventaire
+  provision-fakepi.sh         # script de premier boot execute dans chaque conteneur
+gateway/
+  deploy-gateway.sh           # cree/provisionne expo-gw, bascule le DHCP de expo-lan
+  teardown-gateway.sh         # supprime expo-gw, reactive le DHCP integre d'Incus
+  provision-gateway.sh        # script de premier boot execute dans expo-gw
+  dnsmasq.conf                # config DHCP+DNS (plage, domaine expolab.lan)
+  resolv.dnsmasq.upstream     # DNS amont utilise par dnsmasq (evite la boucle)
+  render-caddyfile.py         # genere le Caddyfile a partir de fleet/inventory.yaml
+rollback.sh                   # orchestre les 4 teardown dans le bon ordre
 ```
 
 ## A venir (hors scope de cette phase)
 
-- Serveur dedie DHCP (dnsmasq) + DNS + reverse proxy HTTPS auto-signe (Caddy)
+- Patte WAN + VPN sur `expo-gw` pour l'acces distant au lab

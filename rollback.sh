@@ -18,15 +18,19 @@ if [[ "${1:-}" == "--yes" ]]; then
     YES_FLAG=(--yes)
 fi
 
-echo "=== 1/3 : suppression de la flotte ==="
+echo "=== 1/4 : suppression du gateway DHCP/DNS/reverse-proxy ==="
+"$SCRIPT_DIR/gateway/teardown-gateway.sh" "${YES_FLAG[@]}"
+
+echo
+echo "=== 2/4 : suppression de la flotte ==="
 "$SCRIPT_DIR/fleet/teardown-fleet.sh" "${YES_FLAG[@]}"
 
 echo
-echo "=== 2/3 : demontage du reseau (profil, macvlan, interface hote) ==="
+echo "=== 3/4 : demontage du reseau (profils, reseau expo-lan) ==="
 "$SCRIPT_DIR/incus/network-teardown.sh"
 
 echo
-echo "=== 3/3 : desinstallation d'Incus ==="
+echo "=== 4/4 : desinstallation d'Incus ==="
 "$SCRIPT_DIR/incus/uninstall.sh" "${YES_FLAG[@]}"
 
 echo

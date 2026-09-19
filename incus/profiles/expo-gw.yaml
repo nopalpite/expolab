@@ -1,0 +1,17 @@
+# Profil Incus pour le conteneur dedie DHCP/DNS/reverse-proxy (expo-gw).
+# Applique/mis a jour automatiquement par gateway/deploy-gateway.sh.
+config:
+  limits.cpu: "1"
+  limits.memory: 512MiB
+  limits.memory.enforce: soft
+description: Serveur dedie DHCP/DNS/reverse-proxy pour le reseau expo-lan
+devices:
+  eth0:
+    name: eth0
+    network: expo-lan
+    type: nic
+  root:
+    path: /
+    pool: default
+    type: disk
+name: expo-gw
