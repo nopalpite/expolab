@@ -18,6 +18,9 @@ function renderFleet(fleet) {
     fleetBody.innerHTML = fleet.map((pi) => {
         const live = pi.live || { status: "Absent", ips: [] };
         const ip = live.ips && live.ips.length ? live.ips[0] : "-";
+        const running = (live.status || "").toLowerCase() === "running";
+        const powerLabel = running ? "Arreter" : "Demarrer";
+        const powerAction = running ? "stop" : "start";
         return `
             <tr>
                 <td data-label="Nom">${pi.name}</td>
@@ -26,13 +29,19 @@ function renderFleet(fleet) {
                 <td data-label="Role">${pi.role}</td>
                 <td data-label="Identifiants"><code>${pi.username} / ${pi.password}</code></td>
                 <td data-label="MAC"><code>${pi.mac}</code></td>
-                <td data-label=""><button class="danger" data-name="${pi.name}">Supprimer</button></td>
+                <td data-label="" class="actions">
+                    <button class="secondary" data-name="${pi.name}" data-action="${powerAction}">${powerLabel}</button>
+                    <button class="danger" data-name="${pi.name}">Supprimer</button>
+                </td>
             </tr>
         `;
     }).join("");
 
     fleetBody.querySelectorAll("button.danger").forEach((btn) => {
         btn.addEventListener("click", () => deletePi(btn.dataset.name));
+    });
+    fleetBody.querySelectorAll("button.secondary").forEach((btn) => {
+        btn.addEventListener("click", () => powerPi(btn.dataset.name, btn.dataset.action));
     });
 }
 
@@ -96,6 +105,18 @@ createForm.addEventListener("submit", async (ev) => {
         createStatus.textContent = `Erreur : ${err.message}`;
     }
 });
+
+async function powerPi(name, action) {
+    try {
+        const res = await fetch(`/api/fleet/${name}/${action}`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "erreur inconnue");
+        refreshFleet();
+        pollJob(data.job_id, () => refreshFleet());
+    } catch (err) {
+        alert(`Erreur : ${err.message}`);
+    }
+}
 
 async function deletePi(name) {
     if (!confirm(`Supprimer ${name} ?`)) return;

@@ -107,6 +107,20 @@ button.danger {
     font-size: 0.85rem;
 }
 
+button.secondary {
+    background: transparent;
+    border-color: var(--muted);
+    color: var(--text);
+    padding: 4px 10px;
+    font-size: 0.85rem;
+}
+
+td.actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
 .status {
     margin-top: 10px;
     font-size: 0.9rem;

@@ -163,6 +163,28 @@ def api_fleet_create():
     return jsonify({"job_id": job_id, "mac": mac}), 202
 
 
+@app.route("/api/fleet/<name>/start", methods=["POST"])
+def api_fleet_start(name: str):
+    data = load_inventory()
+    if not any(pi["name"] == name for pi in data.get("fleet", [])):
+        return jsonify({"error": f"'{name}' introuvable dans l'inventaire"}), 404
+
+    job_id = f"start-{name}-{int(time.time())}"
+    start_job(job_id, ["incus", "start", name])
+    return jsonify({"job_id": job_id}), 202
+
+
+@app.route("/api/fleet/<name>/stop", methods=["POST"])
+def api_fleet_stop(name: str):
+    data = load_inventory()
+    if not any(pi["name"] == name for pi in data.get("fleet", [])):
+        return jsonify({"error": f"'{name}' introuvable dans l'inventaire"}), 404
+
+    job_id = f"stop-{name}-{int(time.time())}"
+    start_job(job_id, ["incus", "stop", name])
+    return jsonify({"job_id": job_id}), 202
+
+
 @app.route("/api/fleet/<name>", methods=["DELETE"])
 def api_fleet_delete(name: str):
     data = load_inventory()
