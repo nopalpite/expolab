@@ -66,8 +66,14 @@ else
 fi
 
 echo "[+] Montage live de fleet/ dans expo-apps (source de verite partagee avec la webui, pas une copie)..."
+# shift=true indispensable : sans ca, les fichiers apparaissent appartenir
+# a "nobody:nogroup" a l'interieur du conteneur non-privilegie (l'uid/gid
+# reels de l'hote ne correspondent a rien dans son espace de noms) et la
+# webui ne peut pas ecrire dans inventory.yaml (deja vu en prod).
 if ! incus config device show "$NAME" 2>/dev/null | grep -q '^expolab-fleet:'; then
-    incus config device add "$NAME" expolab-fleet disk source="$REPO_ROOT/fleet" path=/opt/expolab/fleet < /dev/null
+    incus config device add "$NAME" expolab-fleet disk source="$REPO_ROOT/fleet" path=/opt/expolab/fleet shift=true < /dev/null
+else
+    incus config device set "$NAME" expolab-fleet shift=true < /dev/null
 fi
 
 echo "[+] Mise a jour du code applicatif (docker-compose.yml, webui/)..."
