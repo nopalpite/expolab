@@ -141,6 +141,13 @@ th, td {
     border-bottom: 1px solid var(--border);
 }
 
+td[data-label="Role"] {
+    /* "sans-ecran"/"avec-ecran" : le tiret est un point de coupure valide
+       pour un navigateur, donc une colonne un peu etroite le scindait en
+       "sans-" / "ecran" sur deux lignes plutot que de rogner/scroller. */
+    white-space: nowrap;
+}
+
 th {
     color: var(--muted);
     font-weight: 500;
