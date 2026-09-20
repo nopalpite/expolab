@@ -229,3 +229,12 @@ rollback.sh                   # orchestre les 5 teardown dans le bon ordre
 - Redirection de port sur le routeur du reseau reel pour un acces VPN
   depuis l'exterieur (specifique a la box de l'utilisateur, hors perimetre
   scriptable)
+- Le role `avec-ecran`/`sans-ecran` (`fleet/inventory.yaml`) reste pour
+  l'instant une simple etiquette (ecrite dans `/etc/expolab-role` et le
+  motd par `provision-fakepi.sh`, affichee dans la webui) - aucun paquet
+  ni service ne differe encore selon sa valeur. Volontaire : dans la
+  vraie vie, ce type de configuration (desktop, VNC...) sera gere par un
+  playbook Ansible, pas par ce script de provisioning du lab. Setup
+  manuel deja valide en attendant sur un faux Pi (sway en mode headless +
+  wayvnc, teste via Bastion) : voir l'historique du projet, pas encore
+  scripte.
