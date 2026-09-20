@@ -54,9 +54,15 @@ for line in "${FLEET_LINES[@]}"; do
     fi
 
     echo "[+] Creation de $name (mac=$mac, role=$role, user=$username)"
-    incus launch "$IMAGE" "$name" --profile default --profile "$PROFILE" < /dev/null
+    # init (pas launch) + override MAC + un seul start : evite un premier
+    # boot avec une MAC aleatoire suivi d'un `incus restart` pour corriger -
+    # cet `incus restart` s'est avere se bloquer indefiniment de facon
+    # intermittente sur ce lab (operation serveur qui aboutit reellement,
+    # mais dont le suivi cote demon Incus ne se termine jamais - la
+    # commande CLI attend alors un signal de fin qui ne vient jamais).
+    incus init "$IMAGE" "$name" --profile default --profile "$PROFILE" < /dev/null
     incus config device override "$name" eth0 hwaddr="$mac" < /dev/null
-    incus restart "$name" < /dev/null
+    incus start "$name" < /dev/null
 
     echo "[+] Attente du demarrage reseau de $name..."
     for _ in $(seq 1 15); do
