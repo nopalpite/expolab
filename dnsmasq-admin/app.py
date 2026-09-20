@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""expolab dnsmasq-admin : baux DHCP, reservations et enregistrements DNS.
+"""expolab dnsmasq-admin : baux DHCP et reservations.
 
 Les baux (server/stacks/dnsmasq/data/dnsmasq.leases) sont en lecture
-seule - dnsmasq les gere lui-meme. Les reservations DHCP et
-enregistrements DNS statiques sont ecrits dans deux fichiers separes
-(server/stacks/dnsmasq/admin-config/) que dnsmasq relit A CHAUD sur
-SIGHUP (--dhcp-hostsfile / --addn-hosts, voir dnsmasq.conf) - pas besoin
-de redemarrer le conteneur ni de couper le DHCP/DNS pour le reste de la
-flotte a chaque modification.
+seule - dnsmasq les gere lui-meme. Les reservations DHCP sont ecrites
+dans server/stacks/dnsmasq/admin-config/reservations.conf, que dnsmasq
+relit A CHAUD sur SIGHUP (--dhcp-hostsfile, voir dnsmasq.conf) - pas
+besoin de redemarrer le conteneur ni de couper le DHCP/DNS pour le reste
+de la flotte a chaque modification.
+
+Pas d'enregistrements DNS statiques independants du DHCP ici : tous les
+services du serveur d'expo vivent sous *.web.expolab.lan, un unique
+wildcard dans dnsmasq.conf (le tri par service se fait ensuite cote
+Caddy via le Host: HTTP, pas via DNS) - une liste d'enregistrements
+individuels par nom aurait ete purement redondante.
 """
 import ipaddress
 import re
@@ -21,7 +26,6 @@ app = Flask(__name__)
 
 LEASES_PATH = Path("/dnsmasq-data/dnsmasq.leases")
 RESERVATIONS_PATH = Path("/dnsmasq-admin-config/reservations.conf")
-DNS_RECORDS_PATH = Path("/dnsmasq-admin-config/dns-records.conf")
 
 EXPO_LAN = ipaddress.ip_network("10.42.0.0/24")
 MAC_RE = re.compile(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$")
@@ -97,28 +101,6 @@ def save_reservations(reservations: list[dict]) -> None:
     RESERVATIONS_PATH.write_text("\n".join(lines) + ("\n" if lines else ""))
 
 
-def load_dns_records() -> list[dict]:
-    if not DNS_RECORDS_PATH.exists():
-        return []
-    records = []
-    for line in DNS_RECORDS_PATH.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split()
-        if len(parts) < 2:
-            continue
-        records.append({"ip": parts[0], "hostname": parts[1]})
-    records.sort(key=lambda r: r["hostname"])
-    return records
-
-
-def save_dns_records(records: list[dict]) -> None:
-    DNS_RECORDS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f"{r['ip']} {r['hostname']}" for r in records]
-    DNS_RECORDS_PATH.write_text("\n".join(lines) + ("\n" if lines else ""))
-
-
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -175,52 +157,6 @@ def api_reservations_delete(mac: str):
     ok, err = reload_dnsmasq()
     if not ok:
         return jsonify({"error": f"Reservation retiree mais rechargement dnsmasq echoue : {err}"}), 500
-    return jsonify({"ok": True})
-
-
-@app.route("/api/dns-records", methods=["GET"])
-def api_dns_records_list():
-    return jsonify({"records": load_dns_records()})
-
-
-@app.route("/api/dns-records", methods=["POST"])
-def api_dns_records_create():
-    body = request.get_json(force=True, silent=True) or {}
-    hostname = (body.get("hostname") or "").strip().lower()
-    ip = (body.get("ip") or "").strip()
-
-    if not HOSTNAME_RE.match(hostname):
-        return jsonify({"error": "Hostname invalide (minuscules/chiffres/tirets)"}), 400
-    try:
-        ipaddress.ip_address(ip)
-    except ValueError:
-        return jsonify({"error": "IP invalide"}), 400
-
-    records = load_dns_records()
-    if any(r["hostname"] == hostname for r in records):
-        return jsonify({"error": f"'{hostname}' existe deja"}), 409
-
-    records.append({"ip": ip, "hostname": hostname})
-    save_dns_records(records)
-
-    ok, err = reload_dnsmasq()
-    if not ok:
-        return jsonify({"error": f"Enregistrement ajoute mais rechargement dnsmasq echoue : {err}"}), 500
-    return jsonify({"ok": True}), 201
-
-
-@app.route("/api/dns-records/<hostname>", methods=["DELETE"])
-def api_dns_records_delete(hostname: str):
-    hostname = hostname.lower()
-    records = load_dns_records()
-    new_records = [r for r in records if r["hostname"] != hostname]
-    if len(new_records) == len(records):
-        return jsonify({"error": "introuvable"}), 404
-    save_dns_records(new_records)
-
-    ok, err = reload_dnsmasq()
-    if not ok:
-        return jsonify({"error": f"Enregistrement retire mais rechargement dnsmasq echoue : {err}"}), 500
     return jsonify({"ok": True})
 
 

@@ -1,6 +1,6 @@
-# Stack Dockhand "dnsmasq-admin" - baux DHCP actifs (lecture seule),
-# reservations DHCP et enregistrements DNS statiques (lecture-ecriture,
-# via dhcp-hostsfile/addn-hosts de dnsmasq - voir dnsmasq.conf).
+# Stack Dockhand "dnsmasq-admin" - baux DHCP actifs (lecture seule) et
+# reservations DHCP (lecture-ecriture, via dhcp-hostsfile de dnsmasq -
+# voir dnsmasq.conf).
 services:
   dnsmasq-admin:
     build: ${REPO_ROOT}/dnsmasq-admin
@@ -12,7 +12,6 @@ services:
       - ${REPO_ROOT}/server/stacks/dnsmasq/data:/dnsmasq-data:ro
       - ${REPO_ROOT}/server/stacks/dnsmasq/admin-config:/dnsmasq-admin-config
       # Necessaire pour `docker kill --signal=HUP expolab-dnsmasq` -
-      # seule facon de faire relire a dnsmasq ses fichiers de
-      # reservations/enregistrements sans redemarrer le conteneur (voir
-      # dnsmasq-admin/app.py).
+      # seule facon de faire relire a dnsmasq son fichier de reservations
+      # sans redemarrer le conteneur (voir dnsmasq-admin/app.py).
       - /var/run/docker.sock:/var/run/docker.sock

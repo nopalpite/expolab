@@ -48,35 +48,6 @@
         </section>
 
         <section class="panel">
-            <h2>Enregistrement DNS statique</h2>
-            <p class="subtitle">Associe un hostname a une IP, independamment de tout bail DHCP.</p>
-            <form id="dns-form">
-                <div class="field">
-                    <label for="d-hostname">Hostname</label>
-                    <input type="text" id="d-hostname" name="hostname" placeholder="imprimante" required>
-                </div>
-                <div class="field">
-                    <label for="d-ip">IP</label>
-                    <input type="text" id="d-ip" name="ip" placeholder="10.42.0.20" required>
-                </div>
-                <button type="submit" id="dns-btn">Ajouter</button>
-            </form>
-            <p id="dns-status" class="status" hidden></p>
-            <table id="dns-table">
-                <thead>
-                    <tr>
-                        <th>Hostname</th>
-                        <th>IP</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody id="dns-body">
-                    <tr><td colspan="3" class="empty">Chargement...</td></tr>
-                </tbody>
-            </table>
-        </section>
-
-        <section class="panel">
             <h2>Baux actifs</h2>
             <table id="leases-table">
                 <thead>

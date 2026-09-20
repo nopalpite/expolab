@@ -61,13 +61,16 @@ chaque service comme **stack Dockhand independante** via son API REST
   webui : editer/lire un fichier de config existant et reutiliser les
   scripts/mecanismes deja en place, sans rien reimplementer.
   - `dnsmasq-admin` (https://dnsmasq.web.expolab.lan) : baux DHCP actifs
-    (lecture seule) + **reservations DHCP** (MAC -> IP fixe) et
-    **enregistrements DNS statiques** (hostname -> IP), ecrits dans deux
-    fichiers dedies (`server/stacks/dnsmasq/admin-config/`, non
+    (lecture seule) + **reservations DHCP** (MAC -> IP fixe), ecrites
+    dans un fichier dedie (`server/stacks/dnsmasq/admin-config/`, non
     versionne) que dnsmasq relit **a chaud sur SIGHUP**
-    (`--dhcp-hostsfile`/`--addn-hosts`, voir `dnsmasq.conf`) via
+    (`--dhcp-hostsfile`, voir `dnsmasq.conf`) via
     `docker kill --signal=HUP expolab-dnsmasq` - pas de redemarrage du
-    conteneur, pas de coupure DHCP/DNS pour le reste de la flotte.
+    conteneur, pas de coupure DHCP/DNS pour le reste de la flotte. Pas
+    d'enregistrements DNS statiques independants : tous les services
+    vivent sous *.web.expolab.lan, un unique wildcard dans dnsmasq.conf
+    (le tri par service se fait cote Caddy via le Host: HTTP, pas via
+    DNS) - une liste par nom aurait ete redondante.
   - `caddy-admin` (https://caddy.web.expolab.lan) : ajoute/retire une
     entree dans `server/services.yaml`, regenere le Caddyfile et le
     pousse a **l'admin API de Caddy lui-meme**
