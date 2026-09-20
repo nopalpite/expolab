@@ -20,6 +20,8 @@ async function loadLeases() {
     }
 }
 
+let editingMac = null;
+
 async function loadReservations() {
     const body = document.getElementById("reservations-body");
     try {
@@ -34,11 +36,17 @@ async function loadReservations() {
                 <td data-label="MAC"><code>${r.mac}</code></td>
                 <td data-label="IP"><code>${r.ip}</code></td>
                 <td data-label="Hostname">${r.hostname || "-"}</td>
-                <td class="actions"><button class="danger" data-mac="${r.mac}">Retirer</button></td>
+                <td class="actions">
+                    <button class="secondary" data-edit-mac="${r.mac}" data-edit-ip="${r.ip}" data-edit-hostname="${r.hostname || ""}">Modifier</button>
+                    <button class="danger" data-mac="${r.mac}">Retirer</button>
+                </td>
             </tr>
         `).join("");
         body.querySelectorAll("button.danger").forEach(btn => {
             btn.addEventListener("click", () => deleteReservation(btn.dataset.mac));
+        });
+        body.querySelectorAll("button[data-edit-mac]").forEach(btn => {
+            btn.addEventListener("click", () => startEditReservation(btn.dataset.editMac, btn.dataset.editIp, btn.dataset.editHostname));
         });
     } catch (e) {
         body.innerHTML = '<tr><td colspan="4" class="status-error">Erreur de chargement</td></tr>';
@@ -50,8 +58,32 @@ async function deleteReservation(mac) {
     const res = await fetch(`/api/reservations/${encodeURIComponent(mac)}`, { method: "DELETE" });
     const data = await res.json();
     if (!res.ok) { alert(data.error || "Erreur"); return; }
+    if (editingMac === mac) stopEditReservation();
     loadReservations();
 }
+
+function startEditReservation(mac, ip, hostname) {
+    editingMac = mac;
+    const macField = document.getElementById("r-mac");
+    macField.value = mac;
+    macField.disabled = true;
+    document.getElementById("r-ip").value = ip;
+    document.getElementById("r-hostname").value = hostname;
+    document.getElementById("reservation-btn").textContent = "Modifier";
+    document.getElementById("reservation-cancel").hidden = false;
+    document.getElementById("reservation-status").hidden = true;
+}
+
+function stopEditReservation() {
+    editingMac = null;
+    const macField = document.getElementById("r-mac");
+    macField.disabled = false;
+    document.getElementById("reservation-form").reset();
+    document.getElementById("reservation-btn").textContent = "Reserver";
+    document.getElementById("reservation-cancel").hidden = true;
+}
+
+document.getElementById("reservation-cancel").addEventListener("click", stopEditReservation);
 
 document.getElementById("reservation-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -65,11 +97,17 @@ document.getElementById("reservation-form").addEventListener("submit", async (e)
     const hostname = document.getElementById("r-hostname").value.trim().toLowerCase();
 
     try {
-        const res = await fetch("/api/reservations", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mac, ip, hostname }),
-        });
+        const res = editingMac
+            ? await fetch(`/api/reservations/${encodeURIComponent(editingMac)}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ip, hostname }),
+            })
+            : await fetch("/api/reservations", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ mac, ip, hostname }),
+            });
         const data = await res.json();
         status.hidden = false;
         if (!res.ok) {
@@ -77,8 +115,8 @@ document.getElementById("reservation-form").addEventListener("submit", async (e)
             status.textContent = data.error || "Erreur";
         } else {
             status.className = "status status-ok";
-            status.textContent = `Reservation ajoutee pour ${mac}.`;
-            document.getElementById("reservation-form").reset();
+            status.textContent = editingMac ? `Reservation ${mac} modifiee.` : `Reservation ajoutee pour ${mac}.`;
+            stopEditReservation();
             loadReservations();
         }
     } catch (e) {

@@ -145,6 +145,35 @@ def api_reservations_create():
     return jsonify({"ok": True}), 201
 
 
+@app.route("/api/reservations/<mac>", methods=["PUT"])
+def api_reservations_update(mac: str):
+    mac = mac.lower()
+    body = request.get_json(force=True, silent=True) or {}
+    ip = (body.get("ip") or "").strip()
+    hostname = (body.get("hostname") or "").strip().lower()
+
+    if not valid_ip_in_expo_lan(ip):
+        return jsonify({"error": "IP invalide (doit etre dans 10.42.0.0/24)"}), 400
+    if hostname and not HOSTNAME_RE.match(hostname):
+        return jsonify({"error": "Hostname invalide (minuscules/chiffres/tirets)"}), 400
+
+    reservations = load_reservations()
+    target = next((r for r in reservations if r["mac"] == mac), None)
+    if target is None:
+        return jsonify({"error": "introuvable"}), 404
+    if any(r["ip"] == ip and r["mac"] != mac for r in reservations):
+        return jsonify({"error": f"L'IP {ip} est deja reservee par une autre entree"}), 409
+
+    target["ip"] = ip
+    target["hostname"] = hostname
+    save_reservations(reservations)
+
+    ok, err = reload_dnsmasq()
+    if not ok:
+        return jsonify({"error": f"Reservation modifiee mais rechargement dnsmasq echoue : {err}"}), 500
+    return jsonify({"ok": True})
+
+
 @app.route("/api/reservations/<mac>", methods=["DELETE"])
 def api_reservations_delete(mac: str):
     mac = mac.lower()
