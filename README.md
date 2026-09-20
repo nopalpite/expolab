@@ -90,6 +90,41 @@ config des pairs persistees dans `vpn/wireguard/config/` (non versionne).
 L'hote lui-meme n'a plus besoin du paquet `wireguard-tools` : `vpn/add-peer.sh`/
 `remove-peer.sh` passent par `docker exec wireguard wg ...`.
 
+**Pourquoi le VPN, meme en local** : `dnsmasq` ne repond qu'a la resolution
+DNS sur `expo-lan` (par design - reseau simule, pas question de repondre
+au DHCP/DNS de la vraie infra reseau de l'hote). Un poste sur le meme
+Wi-Fi physique que le Pi ne peut donc pas resoudre `*.web.expolab.lan`
+sans configuration DNS locale manuelle. Plutot que de demander a
+l'utilisateur final (visiteur/exposant) de toucher son fichier hosts,
+`vpn/install.sh` cree automatiquement un pair VPN `default` pret a
+l'emploi : son fichier de config client pousse `DNS = 10.42.0.1`, donc la
+resolution `*.web.expolab.lan` fonctionne des l'import du fichier dans un
+client WireGuard, sans autre manip. Superflu si non utilise -
+`sudo ./remove-peer.sh default` le retire proprement.
+
+Contenu du fichier client genere (`vpn/wireguard/config/peers/<nom>.conf`,
+pret a importer tel quel, rien a completer a la main) :
+
+```ini
+[Interface]
+PrivateKey = ...      # clef privee generee pour ce pair, unique, jamais reutilisee
+Address = 10.66.66.X/32   # IP du client DANS le tunnel VPN
+DNS = 10.42.0.1            # pousse dnsmasq comme resolveur -> *.web.expolab.lan
+                             # se resout automatiquement une fois connecte
+
+[Peer]
+PublicKey = ...             # clef publique du serveur WireGuard
+PresharedKey = ...           # couche de chiffrement symetrique additionnelle
+Endpoint = <ip-lan-du-pi>:51820   # detecte automatiquement (IP LAN de l'hote) -
+                                    # a remplacer par une IP publique + redirection
+                                    # de port sur la box pour un acces exterieur
+AllowedIPs = 10.42.0.0/24, 10.66.66.0/24   # split tunnel : seul le trafic vers
+                                             # expo-lan et le VPN lui-meme passe
+                                             # par le tunnel, le reste (internet)
+                                             # suit la route habituelle du client
+PersistentKeepalive = 25   # garde la connexion ouverte a travers un NAT/firewall
+```
+
 Deux domaines DNS distincts, resolus par `dnsmasq` :
 - `<nom>.expolab.lan` — enregistrement DHCP automatique, pointe vers la
   **vraie IP** de chaque faux Pi - acces direct (SSH)
@@ -139,7 +174,8 @@ sudo ./server/deploy-server.sh
 # Environments, puis relancer la meme commande.
 
 sudo ./vpn/install.sh
-sudo ./vpn/add-peer.sh mon-laptop
+# Cree aussi un pair "default" pret a distribuer (vpn/wireguard/config/peers/default.conf)
+sudo ./vpn/add-peer.sh mon-laptop   # optionnel : un pair nommement identifie en plus
 ```
 
 `deploy-fleet.sh` est idempotent : relancez-le apres avoir modifie
@@ -165,8 +201,8 @@ curl -k https://fleet.web.expolab.lan      # webui flotte
 curl -k https://dockhand.web.expolab.lan   # Dockhand
 curl -k https://bastion.web.expolab.lan    # Bastion (admin/raspberry)
 
-# VPN : importer vpn/wireguard/config/peers/mon-laptop.conf sur le poste client
-# (WireGuard app ou wg-quick), puis une fois connecte, les memes URLs
+# VPN : importer vpn/wireguard/config/peers/default.conf (ou mon-laptop.conf)
+# sur le poste client (WireGuard app ou wg-quick), puis une fois connecte, les memes URLs
 # https://*.web.expolab.lan et un acces SSH direct aux faux Pi
 # fonctionnent depuis ce poste.
 ```

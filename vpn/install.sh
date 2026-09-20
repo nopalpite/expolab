@@ -92,6 +92,31 @@ dockhand_require_env
 echo "[+] Creation/redeploiement de la stack 'wireguard'..."
 dockhand_upsert_stack wireguard "$SCRIPT_DIR/wireguard/docker-compose.yml"
 
+# La stack venant d'etre (re)creee via l'API, le conteneur met un court
+# instant a apparaitre cote Docker - add-peer.sh (docker exec wireguard...)
+# echouerait sinon en cas de course.
+echo "[+] Attente du conteneur 'wireguard'..."
+for _ in $(seq 1 15); do
+    docker inspect wireguard --format '{{.State.Running}}' 2>/dev/null | grep -q true && break
+    sleep 1
+done
+
+# Un pair "default" pret a l'emploi des l'installation : l'objectif est
+# qu'un utilisateur final (visiteur/exposant sur le wifi de l'expo) puisse
+# se connecter en important un seul fichier, sans manip DNS/hosts locale
+# (le client WireGuard genere pousse DNS = 10.42.0.1, qui resout
+# *.web.expolab.lan automatiquement une fois le tunnel actif). Purement un
+# point de depart : superflu si non utilise, supprimable avec
+# `sudo ./remove-peer.sh default`, et rien n'empeche d'en creer d'autres
+# nommement via `add-peer.sh`.
+DEFAULT_PEER_NAME="default"
+if ! grep -q "^# peer: $DEFAULT_PEER_NAME\$" "$WG_DIR/wg0.conf" 2>/dev/null; then
+    echo "[+] Creation d'un pair VPN par defaut ('$DEFAULT_PEER_NAME'), pret a l'emploi..."
+    "$SCRIPT_DIR/add-peer.sh" "$DEFAULT_PEER_NAME"
+else
+    echo "[=] Pair '$DEFAULT_PEER_NAME' deja present, conserve."
+fi
+
 cat <<EOF
 
 [+] VPN pret :
@@ -99,7 +124,11 @@ cat <<EOF
     Sous-reseau VPN : $WG_SUBNET
     Cle publique serveur : $(cat "$WG_DIR/server_public.key")
 
-Pour ajouter un pair (ex: votre laptop) :
+Pair par defaut pret a distribuer : $WG_DIR/peers/${DEFAULT_PEER_NAME}.conf
+(a copier vers le poste client - jamais commite dans le depot git ; inutile
+ ? le supprimer avec sudo ./remove-peer.sh $DEFAULT_PEER_NAME)
+
+Pour ajouter un autre pair nommement (ex: le laptop d'un admin) :
     sudo ./add-peer.sh mon-laptop
 
 IMPORTANT : pour un acces depuis l'exterieur de votre reseau local, il faut
