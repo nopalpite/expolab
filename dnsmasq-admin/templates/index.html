@@ -9,12 +9,75 @@
 <body>
     <header>
         <h1>dnsmasq</h1>
-        <p class="subtitle">Baux DHCP actifs sur expo-lan</p>
+        <p class="subtitle">DHCP/DNS sur expo-lan (10.42.0.0/24)</p>
     </header>
 
     <main>
         <section class="panel">
-            <h2>Baux</h2>
+            <h2>Reservation DHCP</h2>
+            <p class="subtitle">Fixe l'IP attribuee a une adresse MAC (survit aux renouvellements de bail).</p>
+            <form id="reservation-form">
+                <div class="field">
+                    <label for="r-mac">Adresse MAC</label>
+                    <input type="text" id="r-mac" name="mac" placeholder="dc:a6:32:00:00:10" required>
+                </div>
+                <div class="field">
+                    <label for="r-ip">IP</label>
+                    <input type="text" id="r-ip" name="ip" placeholder="10.42.0.50" required>
+                </div>
+                <div class="field">
+                    <label for="r-hostname">Hostname (optionnel)</label>
+                    <input type="text" id="r-hostname" name="hostname" placeholder="mon-appareil">
+                </div>
+                <button type="submit" id="reservation-btn">Reserver</button>
+            </form>
+            <p id="reservation-status" class="status" hidden></p>
+            <table id="reservations-table">
+                <thead>
+                    <tr>
+                        <th>MAC</th>
+                        <th>IP</th>
+                        <th>Hostname</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="reservations-body">
+                    <tr><td colspan="4" class="empty">Chargement...</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="panel">
+            <h2>Enregistrement DNS statique</h2>
+            <p class="subtitle">Associe un hostname a une IP, independamment de tout bail DHCP.</p>
+            <form id="dns-form">
+                <div class="field">
+                    <label for="d-hostname">Hostname</label>
+                    <input type="text" id="d-hostname" name="hostname" placeholder="imprimante" required>
+                </div>
+                <div class="field">
+                    <label for="d-ip">IP</label>
+                    <input type="text" id="d-ip" name="ip" placeholder="10.42.0.20" required>
+                </div>
+                <button type="submit" id="dns-btn">Ajouter</button>
+            </form>
+            <p id="dns-status" class="status" hidden></p>
+            <table id="dns-table">
+                <thead>
+                    <tr>
+                        <th>Hostname</th>
+                        <th>IP</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="dns-body">
+                    <tr><td colspan="3" class="empty">Chargement...</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="panel">
+            <h2>Baux actifs</h2>
             <table id="leases-table">
                 <thead>
                     <tr>

@@ -60,10 +60,14 @@ chaque service comme **stack Dockhand independante** via son API REST
   sans repasser par la ligne de commande, sur le meme principe que la
   webui : editer/lire un fichier de config existant et reutiliser les
   scripts/mecanismes deja en place, sans rien reimplementer.
-  - `dnsmasq-admin` (https://dnsmasq.web.expolab.lan) : lecture seule des
-    baux DHCP actifs (`server/stacks/dnsmasq/data/dnsmasq.leases`) - le
-    conf lui-meme change rarement une fois le lab deploye, la donnee
-    vivante utile au quotidien c'est le bail.
+  - `dnsmasq-admin` (https://dnsmasq.web.expolab.lan) : baux DHCP actifs
+    (lecture seule) + **reservations DHCP** (MAC -> IP fixe) et
+    **enregistrements DNS statiques** (hostname -> IP), ecrits dans deux
+    fichiers dedies (`server/stacks/dnsmasq/admin-config/`, non
+    versionne) que dnsmasq relit **a chaud sur SIGHUP**
+    (`--dhcp-hostsfile`/`--addn-hosts`, voir `dnsmasq.conf`) via
+    `docker kill --signal=HUP expolab-dnsmasq` - pas de redemarrage du
+    conteneur, pas de coupure DHCP/DNS pour le reste de la flotte.
   - `caddy-admin` (https://caddy.web.expolab.lan) : ajoute/retire une
     entree dans `server/services.yaml`, regenere le Caddyfile et le
     pousse a **l'admin API de Caddy lui-meme**
@@ -312,7 +316,7 @@ server/
   services.yaml                  # services applicatifs exposes au reverse-proxy (dashboard, dockhand, fleet, bastion, dnsmasq/caddy/vpn-admin)
   render-caddyfile.py             # genere le Caddyfile a partir de server/services.yaml
   stacks/
-    dnsmasq/{docker-compose.yml, Dockerfile, dnsmasq.conf, data/}   # data/ non versionne (baux DHCP)
+    dnsmasq/{docker-compose.yml, Dockerfile, dnsmasq.conf, data/, admin-config/}   # data/ et admin-config/ non versionnes (baux, reservations, enregistrements DNS)
     dnsmasq-admin/docker-compose.yml                                  # build context = ../../dnsmasq-admin
     caddy/{docker-compose.yml, Caddyfile}                            # Caddyfile genere, non versionne
     caddy-admin/docker-compose.yml                                    # build context = ../../caddy-admin

@@ -1,9 +1,10 @@
-# Image de dnsmasq-admin : Flask seul, aucun acces reseau/socket special -
-# lecture seule d'un fichier monte (voir server/stacks/dnsmasq-admin/docker-compose.yml).
+# Image de dnsmasq-admin : Flask + client Docker (pour `docker kill
+# --signal=HUP expolab-dnsmasq`, seule facon de faire relire a dnsmasq
+# ses reservations/enregistrements sans le redemarrer).
 FROM debian:trixie-slim
 
 RUN apt-get update -qq && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-flask && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-flask docker.io && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

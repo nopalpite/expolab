@@ -79,6 +79,13 @@ fi
 
 mkdir -p "$SCRIPT_DIR/stacks/dnsmasq/data"
 
+# dnsmasq refuse de demarrer si dhcp-hostsfile/addn-hosts pointent vers
+# un fichier absent (voir dnsmasq.conf) - crees vides au besoin, jamais
+# ecrases si deja presents (geres ensuite par dnsmasq-admin).
+mkdir -p "$SCRIPT_DIR/stacks/dnsmasq/admin-config"
+touch "$SCRIPT_DIR/stacks/dnsmasq/admin-config/reservations.conf" \
+      "$SCRIPT_DIR/stacks/dnsmasq/admin-config/dns-records.conf"
+
 echo "[+] Creation/redeploiement des stacks applicatives via l'API Dockhand..."
 for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard; do
     dockhand_upsert_stack "$stack" "$SCRIPT_DIR/stacks/$stack/docker-compose.yml"

@@ -16,3 +16,8 @@ services:
       # Fichier de baux DHCP persistant - perdu a chaque recreation du
       # conteneur sans ca (pas de volume dedie avant cette reorganisation).
       - ${REPO_ROOT}/server/stacks/dnsmasq/data:/var/lib/misc
+      # Reservations DHCP + enregistrements DNS statiques, ecrits par
+      # dnsmasq-admin (lecture seule ici, voir dhcp-hostsfile/addn-hosts
+      # dans dnsmasq.conf) - meme repertoire monte en lecture-ecriture
+      # dans le stack dnsmasq-admin.
+      - ${REPO_ROOT}/server/stacks/dnsmasq/admin-config:/etc/dnsmasq.d:ro
