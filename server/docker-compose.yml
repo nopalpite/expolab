@@ -1,32 +1,10 @@
-# Stack Docker du "serveur d'expo" - tourne directement sur l'hote (pas
-# dans un conteneur Incus). C'est exactement ce qui serait deploye sur le
-# vrai serveur de l'exposition : DHCP/DNS, reverse-proxy, et les services
-# applicatifs (Dockhand, webui, Bastion, puis Gitea) en conteneurs Docker.
-# Incus, lui, ne sert qu'a simuler la flotte de faux Pi - un besoin propre
-# au lab, absent en vraie vie.
+# Bootstrap UNIQUEMENT : Dockhand lui-meme, lance directement par
+# deploy-server.sh via `docker compose up -d` (il ne peut pas se creer
+# via sa propre API - probleme de l'oeuf et la poule). Tous les autres
+# services (dnsmasq, caddy, webui, bastion, et vpn/wireguard a part) sont
+# des stacks Dockhand independantes, creees/deployees via son API REST -
+# voir server/stacks/*/docker-compose.yml et server/dockhand-api.sh.
 services:
-  dnsmasq:
-    build: ./dnsmasq
-    container_name: expolab-dnsmasq
-    restart: unless-stopped
-    network_mode: host
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    volumes:
-      - ./dnsmasq.conf:/etc/dnsmasq.conf:ro
-      - /etc/resolv.conf:/etc/resolv.conf:ro
-
-  caddy:
-    image: caddy:latest
-    container_name: expolab-caddy
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-
   dockhand:
     image: fnsys/dockhand:latest
     container_name: dockhand
@@ -36,46 +14,14 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - dockhand_data:/app/data
-
-  webui:
-    build: ../webui
-    container_name: expolab-webui
-    restart: unless-stopped
-    ports:
-      - "5050:5050"
-    volumes:
-      # Socket Incus DIRECT sur l'hote - un seul montage (plus le
-      # double-hop hote -> conteneur Incus -> conteneur Docker d'avant,
-      # ni les histoires de shift= qui allaient avec).
-      - /var/lib/incus/unix.socket:/var/lib/incus/unix.socket
-      - ../fleet:/expolab/fleet
-
-  bastion:
-    image: ghcr.io/nopalpite/bastion:latest
-    container_name: bastion
-    restart: unless-stopped
-    # network_mode: host, comme dnsmasq/caddy - recommande par le projet
-    # lui-meme pour un bastion (memes interfaces/routes que l'hote, pas
-    # de surprise de routage vers expo-lan).
-    network_mode: host
-    env_file:
-      - ./bastion.env
-    environment:
-      - BASTION_ADMIN_USER=admin
-      - BASTION_ADMIN_PASSWORD=raspberry
-      - BASTION_VNC_WS_PORT=6080
-      # TLS termine par Caddy (vhost bastion.web.expolab.lan, voir
-      # services.yaml) - chemin a faire suivre pour le pont VNC, "option
-      # B" de la section "Derriere un reverse proxy" du README de
-      # Bastion. Ne PAS activer BASTION_TLS_SELFSIGNED en plus : les
-      # deux approches ne se combinent pas.
-      - BASTION_VNC_WS_PATH=/vnc-ws/
-      - BASTION_HISTORY_RETENTION_DAYS=30
-    volumes:
-      - ./bastion/config:/app/config
-      - ./bastion/maps:/app/static/uploads/maps
+      # "Matching paths" (recommande par le manuel Dockhand) : Dockhand
+      # execute `docker compose build` depuis SON PROPRE conteneur, pas
+      # depuis l'hote - sans ce montage au MEME chemin absolu, les stacks
+      # avec un `build:` (dnsmasq, webui, vpn/wireguard) echouent avec
+      # "unable to prepare context: path ... not found", meme si les
+      # binds de volumes en runtime (geres par le demon Docker, pas par
+      # ce conteneur) fonctionnent deja correctement sans ca.
+      - ${REPO_ROOT}:${REPO_ROOT}:ro
 
 volumes:
-  caddy_data:
-  caddy_config:
   dockhand_data:

@@ -9,10 +9,14 @@ Deux couches bien separees :
   peut evidemment pas dupliquer sur une seule machine de lab. C'est un
   artifice propre au lab.
 - **Le serveur d'expo** (`server/`, `vpn/`, `webui/`) - DHCP/DNS,
-  reverse-proxy, et les services applicatifs (Dockhand, webui, Bastion,
-  plus tard Gitea) tournent en Docker **directement sur l'hote**, pas
-  dans Incus. C'est exactement ce qui sera deploye sur le vrai serveur
-  de l'exposition, qui n'aura pas besoin d'Incus du tout.
+  reverse-proxy, et les services applicatifs (webui, Bastion, plus tard
+  Gitea) tournent en Docker **directement sur l'hote**, pas dans Incus.
+  C'est exactement ce qui sera deploye sur le vrai serveur de
+  l'exposition, qui n'aura pas besoin d'Incus du tout. **Dockhand est le
+  point d'entree de gestion de tout le stack** : chaque service (y
+  compris le VPN WireGuard) est une stack Dockhand independante,
+  creee/redeployee via son API plutot qu'un unique `docker-compose.yml`
+  monolithique - voir `server/dockhand-api.sh`.
 
 ## Architecture reseau
 
@@ -24,24 +28,41 @@ depuis le reseau physique ou Internet. L'hote porte lui-meme l'adresse
 `10.42.0.1` sur ce bridge (c'est Incus qui la lui donne a la creation du
 reseau).
 
-`server/deploy-server.sh` deploie sur l'hote un stack Docker qui prend le
-relais du DHCP integre d'Incus des qu'il est pret :
+`server/deploy-server.sh` demarre **Dockhand seul** (`server/docker-compose.yml`
+- il ne peut pas se creer lui-meme via sa propre API), puis cree/redeploie
+chaque service comme **stack Dockhand independante** via son API REST
+(`server/dockhand-api.sh`), plutot que de tout lancer d'un coup avec
+`docker compose up`. Chaque stack vit dans `server/stacks/<nom>/` :
 - **dnsmasq** (DHCP/DNS) en `network_mode: host`, lie a l'interface
   `expo-lan` - besoin d'un acces bas niveau (broadcast DHCP) qu'un reseau
-  Docker isole ne permet pas
+  Docker isole ne permet pas. Bail DHCP persiste dans
+  `server/stacks/dnsmasq/data/` (survit a une recreation du conteneur).
 - **Caddy** (reverse-proxy TLS auto-signe), egalement en
   `network_mode: host`
-- **Dockhand** (UI de gestion Docker) et la **webui** expolab
-  (creation/suppression de faux Pi), sur le reseau Docker par defaut avec
-  publication de port
+- **webui** expolab (creation/suppression de faux Pi), publication de port
 - **Bastion** (https://github.com/nopalpite/bastion, dashboard +
   SSH/VNC web) en `network_mode: host` - image prete a l'emploi publiee
   sur GHCR (`ghcr.io/nopalpite/bastion`), identifiants par defaut
   `admin`/`raspberry`. Secrets (cle de session, cle de chiffrement des
   identifiants memorises) generes une seule fois au premier
-  `deploy-server.sh` dans `server/bastion.env` (non versionne) ;
-  inventaire de machines et donnees persistees dans `server/bastion/`
-  (egalement non versionne, propre a chaque lab)
+  `deploy-server.sh` dans `server/stacks/bastion/bastion.env` (non
+  versionne) ; inventaire de machines et donnees persistees dans
+  `server/stacks/bastion/{config,maps}/` (egalement non versionne, propre
+  a chaque lab)
+
+Les binds relatifs (`./x`) d'une stack creee via l'API Dockhand se
+resolvent dans le repertoire de donnees propre a Dockhand, pas dans ce
+depot git - chaque `docker-compose.yml` de stack utilise donc des chemins
+**absolus** via `${REPO_ROOT}`, substitues par `dockhand-api.sh` (envsubst)
+avant l'envoi, pour que nos fichiers de config restent les notres
+(versionnes/regenerables) plutot qu'une copie geree par Dockhand.
+
+**Etape manuelle unique** au tout premier `deploy-server.sh` : Dockhand ne
+propose aucun endpoint API pour creer un environnement (connexion au
+Docker local) - le script s'arrete avec des instructions si aucun
+environnement n'est configure ; ouvrir `http://<ip>:3000`, confirmer
+l'environnement local (Unix socket) dans *Settings > Environments*, puis
+relancer le script, qui reprend automatiquement a partir de la.
 
 Le reverse-proxy n'expose PAS les faux Pi (ils n'ont pas vocation a etre
 joignables en HTTPS individuellement) : il sert a exposer les services
@@ -60,10 +81,14 @@ la flotte restent sur le meme fichier. **A savoir** : ca donne au conteneur
 Docker de la webui un controle total sur Incus, pas seulement sur la
 flotte. Compromis assume pour ce lab.
 
-La patte WAN/VPN (`vpn/`) tourne aussi directement sur l'**hote** : WireGuard
-route le trafic des clients VPN vers `10.42.0.0/24` (la meme logique que le
-stack Docker - l'hote est le seul point qui porte naturellement les deux
-pattes, WAN reel et LAN simule).
+La patte WAN/VPN (`vpn/`) est desormais **conteneurisee** elle aussi (stack
+Dockhand `wireguard`, `vpn/wireguard/`), pour la meme coherence que le
+reste : `network_mode: host` (comme dnsmasq/caddy/bastion, necessaire pour
+que ses regles PostUp/PostDown iptables visent les vraies interfaces de
+l'hote) et route le trafic des clients VPN vers `10.42.0.0/24`. Cles et
+config des pairs persistees dans `vpn/wireguard/config/` (non versionne).
+L'hote lui-meme n'a plus besoin du paquet `wireguard-tools` : `vpn/add-peer.sh`/
+`remove-peer.sh` passent par `docker exec wireguard wg ...`.
 
 Deux domaines DNS distincts, resolus par `dnsmasq` :
 - `<nom>.expolab.lan` — enregistrement DHCP automatique, pointe vers la
@@ -109,6 +134,9 @@ sudo ./incus/network-setup.sh
 ./fleet/deploy-fleet.sh
 
 sudo ./server/deploy-server.sh
+# S'arrete la 1ere fois avec des instructions : ouvrir Dockhand
+# (http://<ip>:3000), confirmer l'environnement local dans Settings >
+# Environments, puis relancer la meme commande.
 
 sudo ./vpn/install.sh
 sudo ./vpn/add-peer.sh mon-laptop
@@ -118,8 +146,8 @@ sudo ./vpn/add-peer.sh mon-laptop
 `fleet/inventory.yaml` pour ajouter/retirer des faux Pi, seules les
 entrees manquantes sont creees. `deploy-server.sh` est idempotent aussi :
 relancez-le apres avoir modifie `server/services.yaml` ou le code de
-`webui/` pour regenerer le Caddyfile et reconstruire le stack sans
-repeter la bascule DHCP.
+`webui/` pour regenerer le Caddyfile et redeployer les stacks concernees
+via l'API Dockhand, sans repeter la bascule DHCP.
 
 ## Verifier / se connecter
 
@@ -128,7 +156,8 @@ incus list                       # etat + IP de chaque faux Pi
 incus exec pi-01 -- bash         # shell direct dans le conteneur
 ssh pi@<ip-de-pi-01>             # mot de passe: raspberry (a changer si besoin)
 
-docker compose -f server/docker-compose.yml ps   # etat du stack serveur
+# http://<ip-du-pi>:3000 - toutes les stacks (dnsmasq, caddy, webui,
+# bastion, wireguard) y sont visibles/pilotables
 
 # Reverse proxy HTTPS (TLS auto-signe, cert "not trusted" attendu sans
 # importer le CA interne de Caddy) :
@@ -136,7 +165,7 @@ curl -k https://fleet.web.expolab.lan      # webui flotte
 curl -k https://dockhand.web.expolab.lan   # Dockhand
 curl -k https://bastion.web.expolab.lan    # Bastion (admin/raspberry)
 
-# VPN : importer /etc/wireguard/peers/mon-laptop.conf sur le poste client
+# VPN : importer vpn/wireguard/config/peers/mon-laptop.conf sur le poste client
 # (WireGuard app ou wg-quick), puis une fois connecte, les memes URLs
 # https://*.web.expolab.lan et un acces SSH direct aux faux Pi
 # fonctionnent depuis ce poste.
@@ -165,11 +194,11 @@ Ce script defait dans l'ordre exactement ce que `install.sh` /
 `network-setup.sh` / `deploy-fleet.sh` / `deploy-server.sh` /
 `vpn/install.sh` ont mis en place :
 
-1. `vpn/uninstall.sh` — arrete WireGuard, supprime tous les pairs et
-   desinstalle wireguard-tools
-2. `server/teardown-server.sh` — arrete le stack Docker (dnsmasq, caddy,
-   dockhand, webui), reactive le DHCP integre d'Incus sur `expo-lan`
-   (secours), desinstalle Docker
+1. `vpn/uninstall.sh` — arrete la stack Docker `wireguard`, supprime tous
+   les pairs et la config generee
+2. `server/teardown-server.sh` — arrete Dockhand et les stacks Docker
+   (dnsmasq, caddy, webui, bastion), reactive le DHCP integre d'Incus sur
+   `expo-lan` (secours), desinstalle Docker
 3. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
 4. `incus/network-teardown.sh` — supprime le profil `fake-pi` et le
    reseau `expo-lan`
@@ -197,24 +226,27 @@ fleet/
   teardown-fleet.sh           # supprime les faux Pi de l'inventaire
   provision-fakepi.sh         # script de premier boot execute dans chaque conteneur
 server/
-  deploy-server.sh             # installe Docker sur l'hote, deploie/met a jour le stack
-  teardown-server.sh            # arrete le stack, reactive le DHCP integre d'Incus, desinstalle Docker
-  docker-compose.yml            # stack : dnsmasq, caddy, dockhand, webui, bastion
-  dnsmasq/Dockerfile             # image dnsmasq minimale
-  dnsmasq.conf                    # config DHCP+DNS (plage, domaine expolab.lan)
-  services.yaml                    # services applicatifs exposes (dockhand, fleet, bastion)
-  render-caddyfile.py               # genere le Caddyfile a partir de server/services.yaml
-  bastion.env                        # secrets Bastion generes au 1er deploiement (non versionne)
-  bastion/                            # inventaire + donnees persistees de Bastion (non versionne)
+  deploy-server.sh             # installe Docker, demarre Dockhand, cree/redeploie les stacks via son API
+  teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), reactive le DHCP integre d'Incus, desinstalle Docker
+  docker-compose.yml            # bootstrap UNIQUEMENT : Dockhand (ne peut pas se creer via sa propre API)
+  dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack via l'API
+  services.yaml                  # services applicatifs exposes au reverse-proxy (dockhand, fleet, bastion)
+  render-caddyfile.py             # genere le Caddyfile a partir de server/services.yaml
+  stacks/
+    dnsmasq/{docker-compose.yml, Dockerfile, dnsmasq.conf, data/}   # data/ non versionne (baux DHCP)
+    caddy/{docker-compose.yml, Caddyfile}                            # Caddyfile genere, non versionne
+    webui/docker-compose.yml                                          # build context = ../../webui
+    bastion/{docker-compose.yml, bastion.env, config/, maps/}        # ces 3 derniers non versionnes
 webui/
   app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh
   Dockerfile                     # image (Flask + client Incus)
   templates/, static/            # page unique HTML/JS/CSS
 vpn/
-  install.sh                  # installe WireGuard sur l'hote, cree wg0
-  uninstall.sh                 # desinstalle WireGuard (symetrique de install.sh)
-  add-peer.sh                  # ajoute un pair VPN + genere sa config client
+  install.sh                  # genere wg0.conf, cree/redeploie la stack Dockhand "wireguard"
+  uninstall.sh                 # arrete la stack (docker compose direct), supprime la config generee
+  add-peer.sh                  # ajoute un pair VPN (docker exec wireguard wg ...) + config client
   remove-peer.sh                # retire un pair VPN
+  wireguard/{docker-compose.yml, Dockerfile, entrypoint.sh, config/}   # config/ non versionne (cles, pairs)
 rollback.sh                   # orchestre les 5 teardown dans le bon ordre
 ```
 
@@ -224,6 +256,11 @@ rollback.sh                   # orchestre les 5 teardown dans le bon ordre
   Dockhand), puis entree correspondante dans `server/services.yaml`
 - Authentification sur la webui (aucune pour l'instant - protegee
   uniquement par l'isolation reseau d'`expo-lan`)
+- Authentification Dockhand (desactivee par defaut, protegee comme la
+  webui par l'isolation reseau pour l'instant) - l'activer cree un premier
+  compte admin dans son UI ; deposer ensuite un token dans
+  `server/dockhand.env` (non versionne) pour que `deploy-server.sh` et
+  `vpn/install.sh` continuent de fonctionner (voir `server/dockhand-api.sh`)
 - Renouvellement/rotation des certs Caddy au-dela du lab (hors scope d'un
   environnement isole)
 - Redirection de port sur le routeur du reseau reel pour un acces VPN

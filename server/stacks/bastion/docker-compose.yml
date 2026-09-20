@@ -1,0 +1,30 @@
+# Stack Dockhand "bastion" - dashboard + SSH/VNC web
+# (https://github.com/nopalpite/bastion). Secrets generes une seule fois
+# par deploy-server.sh dans bastion.env (non versionne, a cote de ce
+# fichier) ; inventaire de machines + plans dans config/ et maps/
+# (egalement non versionnes, propres a chaque lab).
+services:
+  bastion:
+    image: ghcr.io/nopalpite/bastion:latest
+    container_name: bastion
+    restart: unless-stopped
+    # network_mode: host, comme dnsmasq/caddy - recommande par le projet
+    # lui-meme pour un bastion (memes interfaces/routes que l'hote, pas
+    # de surprise de routage vers expo-lan).
+    network_mode: host
+    env_file:
+      - ${REPO_ROOT}/server/stacks/bastion/bastion.env
+    environment:
+      - BASTION_ADMIN_USER=admin
+      - BASTION_ADMIN_PASSWORD=raspberry
+      - BASTION_VNC_WS_PORT=6080
+      # TLS termine par Caddy (vhost bastion.web.expolab.lan, voir
+      # services.yaml) - chemin a faire suivre pour le pont VNC, "option
+      # B" de la section "Derriere un reverse proxy" du README de
+      # Bastion. Ne PAS activer BASTION_TLS_SELFSIGNED en plus : les
+      # deux approches ne se combinent pas.
+      - BASTION_VNC_WS_PATH=/vnc-ws/
+      - BASTION_HISTORY_RETENTION_DAYS=30
+    volumes:
+      - ${REPO_ROOT}/server/stacks/bastion/config:/app/config
+      - ${REPO_ROOT}/server/stacks/bastion/maps:/app/static/uploads/maps

@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
-# Arrete/supprime le stack Docker du serveur d'expo et reactive le DHCP
-# integre d'Incus sur expo-lan (secours). Symetrique de deploy-server.sh.
+# Arrete/supprime le serveur d'expo (Dockhand + toutes les stacks
+# applicatives) et reactive le DHCP integre d'Incus sur expo-lan
+# (secours). Symetrique de deploy-server.sh.
+#
+# Contourne volontairement l'API Dockhand (contrairement au deploiement) :
+# `docker compose down` directement sur chaque stack, plus simple et plus
+# robuste (fonctionne meme si Dockhand est deja casse/injoignable). Sans
+# consequence sur un "etat fantome" cote Dockhand : son propre volume de
+# donnees est aussi supprime ci-dessous, donc toute trace qu'il aurait
+# gardee en memoire des stacks disparait de toute facon.
 #
 # Usage: sudo ./teardown-server.sh [--yes]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+export REPO_ROOT
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Ce script doit etre lance en root (sudo)." >&2
@@ -17,16 +27,34 @@ if [[ "${1:-}" == "--yes" ]]; then
     ASSUME_YES=1
 fi
 
-if command -v docker &>/dev/null && [ -f "$SCRIPT_DIR/docker-compose.yml" ]; then
+if command -v docker &>/dev/null; then
     if [ "$ASSUME_YES" -ne 1 ]; then
-        read -r -p "Arreter/supprimer le stack Docker (dnsmasq, caddy, dockhand, webui, bastion) ? [y/N] " ans
+        read -r -p "Arreter/supprimer le serveur d'expo (dockhand, dnsmasq, caddy, webui, bastion) ? [y/N] " ans
         [[ "$ans" =~ ^[yY]$ ]] || { echo "Annule."; exit 0; }
     fi
-    echo "[+] Arret du stack Docker..."
-    (cd "$SCRIPT_DIR" && docker compose down -v)
-    echo "[-] Stack arrete."
+
+    TMP_COMPOSE="$(mktemp)"
+    trap 'rm -f "$TMP_COMPOSE"' EXIT
+
+    for stack in dnsmasq caddy webui bastion; do
+        compose_file="$SCRIPT_DIR/stacks/$stack/docker-compose.yml"
+        if [ -f "$compose_file" ]; then
+            echo "[+] Arret de la stack '$stack'..."
+            envsubst '${REPO_ROOT}' < "$compose_file" > "$TMP_COMPOSE"
+            docker compose -f "$TMP_COMPOSE" -p "$stack" down -v || true
+        fi
+    done
+
+    rm -f "$TMP_COMPOSE"
+    trap - EXIT
+
+    if [ -f "$SCRIPT_DIR/docker-compose.yml" ]; then
+        echo "[+] Arret de Dockhand..."
+        (cd "$SCRIPT_DIR" && docker compose down -v)
+    fi
+    echo "[-] Serveur d'expo arrete."
 else
-    echo "[=] Docker ou docker-compose.yml absent, rien a arreter."
+    echo "[=] Docker absent, rien a arreter."
 fi
 
 if incus network show expo-lan &>/dev/null; then
@@ -42,7 +70,7 @@ else
     echo "[=] Reseau expo-lan absent, rien a faire."
 fi
 
-rm -f "$SCRIPT_DIR/Caddyfile"
+rm -f "$SCRIPT_DIR/stacks/caddy/Caddyfile"
 
 if command -v docker &>/dev/null; then
     if [ "$ASSUME_YES" -ne 1 ]; then

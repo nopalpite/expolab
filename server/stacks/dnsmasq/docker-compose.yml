@@ -1,0 +1,18 @@
+# Stack Dockhand "dnsmasq" - DHCP/DNS pour expo-lan. Voir
+# server/dockhand-api.sh pour comment cette stack est creee/deployee (API
+# Dockhand plutot que `docker compose` direct).
+services:
+  dnsmasq:
+    build: ${REPO_ROOT}/server/stacks/dnsmasq
+    container_name: expolab-dnsmasq
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ${REPO_ROOT}/server/stacks/dnsmasq/dnsmasq.conf:/etc/dnsmasq.conf:ro
+      - /etc/resolv.conf:/etc/resolv.conf:ro
+      # Fichier de baux DHCP persistant - perdu a chaque recreation du
+      # conteneur sans ca (pas de volume dedie avant cette reorganisation).
+      - ${REPO_ROOT}/server/stacks/dnsmasq/data:/var/lib/misc

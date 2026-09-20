@@ -1,0 +1,17 @@
+# Stack Dockhand "caddy" - reverse-proxy TLS auto-signe. Caddyfile genere
+# par server/render-caddyfile.py a partir de server/services.yaml (non
+# versionne, regenere a chaque deploiement).
+services:
+  caddy:
+    image: caddy:latest
+    container_name: expolab-caddy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ${REPO_ROOT}/server/stacks/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,14 @@
+# Stack Dockhand "webui" - app Flask de gestion de la flotte de faux Pi.
+services:
+  webui:
+    build: ${REPO_ROOT}/webui
+    container_name: expolab-webui
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    volumes:
+      # Socket Incus DIRECT sur l'hote - un seul montage (plus le
+      # double-hop hote -> conteneur Incus -> conteneur Docker d'avant,
+      # ni les histoires de shift= qui allaient avec).
+      - /var/lib/incus/unix.socket:/var/lib/incus/unix.socket
+      - ${REPO_ROOT}/fleet:/expolab/fleet
