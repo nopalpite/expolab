@@ -271,6 +271,14 @@ td code {
     padding: 20px;
 }
 
+/* Un selecteur #id l'emporte sur l'attribut [hidden] du navigateur
+   (display: none) en specificite CSS - sans cette regle, "display: flex"
+   ci-dessus s'applique meme quand l'attribut hidden est present, et la
+   modale reste visible en permanence des le chargement de la page. */
+#qr-modal[hidden] {
+    display: none;
+}
+
 #qr-modal-content {
     max-width: 320px;
     text-align: center;
