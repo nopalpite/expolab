@@ -4,7 +4,7 @@ async function loadLeases() {
         const res = await fetch("/api/leases");
         const data = await res.json();
         if (!data.leases.length) {
-            body.innerHTML = '<tr><td colspan="4" class="empty">Aucun bail actif</td></tr>';
+            body.innerHTML = '<tr><td colspan="5" class="empty">Aucun bail actif</td></tr>';
             return;
         }
         body.innerHTML = data.leases.map(l => `
@@ -13,10 +13,16 @@ async function loadLeases() {
                 <td data-label="IP"><code>${l.ip}</code></td>
                 <td data-label="MAC"><code>${l.mac}</code></td>
                 <td data-label="Expire dans">${l.expires_in_min} min</td>
+                <td class="actions">
+                    <button class="secondary" data-lease-mac="${l.mac}" data-lease-ip="${l.ip}" data-lease-hostname="${l.hostname === '(inconnu)' ? '' : l.hostname}">Reserver</button>
+                </td>
             </tr>
         `).join("");
+        body.querySelectorAll("button[data-lease-mac]").forEach(btn => {
+            btn.addEventListener("click", () => startReservationFromLease(btn.dataset.leaseMac, btn.dataset.leaseIp, btn.dataset.leaseHostname));
+        });
     } catch (e) {
-        body.innerHTML = '<tr><td colspan="4" class="status-error">Erreur de chargement</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="status-error">Erreur de chargement</td></tr>';
     }
 }
 
@@ -72,6 +78,19 @@ function startEditReservation(mac, ip, hostname) {
     document.getElementById("reservation-btn").textContent = "Modifier";
     document.getElementById("reservation-cancel").hidden = false;
     document.getElementById("reservation-status").hidden = true;
+}
+
+function startReservationFromLease(mac, ip, hostname) {
+    editingMac = null;
+    const macField = document.getElementById("r-mac");
+    macField.value = mac;
+    macField.disabled = false;
+    document.getElementById("r-ip").value = ip;
+    document.getElementById("r-hostname").value = hostname;
+    document.getElementById("reservation-btn").textContent = "Reserver";
+    document.getElementById("reservation-cancel").hidden = true;
+    document.getElementById("reservation-status").hidden = true;
+    document.getElementById("reservation-form").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 function stopEditReservation() {

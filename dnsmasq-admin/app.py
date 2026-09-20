@@ -15,6 +15,7 @@ Caddy via le Host: HTTP, pas via DNS) - une liste d'enregistrements
 individuels par nom aurait ete purement redondante.
 """
 import ipaddress
+import os
 import re
 import subprocess
 import time
@@ -98,7 +99,15 @@ def load_reservations() -> list[dict]:
 def save_reservations(reservations: list[dict]) -> None:
     RESERVATIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
     lines = [f"{r['mac']},{r['ip']},{r['hostname']}" if r["hostname"] else f"{r['mac']},{r['ip']}" for r in reservations]
-    RESERVATIONS_PATH.write_text("\n".join(lines) + ("\n" if lines else ""))
+    content = "\n".join(lines) + ("\n" if lines else "")
+    # Ecriture atomique (fichier temporaire + rename) : evite toute
+    # fenetre ou une lecture/un rechargement dnsmasq concurrent verrait
+    # un fichier partiellement ecrit ou vide, et garantit qu'un crash en
+    # cours d'ecriture ne laisse jamais un fichier tronque a la place des
+    # reservations existantes.
+    tmp_path = RESERVATIONS_PATH.with_suffix(".tmp")
+    tmp_path.write_text(content)
+    os.replace(tmp_path, RESERVATIONS_PATH)
 
 
 @app.route("/")
