@@ -8,6 +8,7 @@ Caddyfile et le pousse a Caddy via SON PROPRE admin API
 network_mode: host comme ce conteneur) - rechargement a chaud, sans
 redemarrer le conteneur Caddy ni repasser par Dockhand.
 """
+import os
 import re
 import subprocess
 import urllib.error
@@ -31,6 +32,17 @@ NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 def load_services() -> dict:
     with open(SERVICES_PATH) as f:
         return yaml.safe_load(f) or {"services": []}
+
+
+def save_services(data: dict) -> None:
+    # Ecriture atomique (fichier temporaire + rename) : evite toute
+    # fenetre ou une lecture concurrente verrait un fichier partiellement
+    # ecrit, et garantit qu'un crash en cours d'ecriture ne laisse jamais
+    # un services.yaml tronque a la place.
+    tmp_path = SERVICES_PATH.with_suffix(".tmp")
+    with open(tmp_path, "w") as f:
+        yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+    os.replace(tmp_path, SERVICES_PATH)
 
 
 def save_and_reload() -> tuple[bool, str]:
@@ -95,13 +107,41 @@ def api_services_create():
         return jsonify({"error": f"'{name}' existe deja"}), 409
 
     services.append({"name": name, "backend_port": port})
-    with open(SERVICES_PATH, "w") as f:
-        yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+    save_services(data)
 
     ok, err = save_and_reload()
     if not ok:
         return jsonify({"error": f"Service ajoute mais rechargement Caddy echoue : {err}"}), 500
     return jsonify({"ok": True}), 201
+
+
+@app.route("/api/services/<name>", methods=["PUT"])
+def api_services_update(name: str):
+    body = request.get_json(force=True, silent=True) or {}
+    port = body.get("backend_port")
+
+    try:
+        port = int(port)
+        if not (1 <= port <= 65535):
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Port invalide (1-65535)"}), 400
+
+    data = load_services()
+    services = data.get("services", [])
+    target = next((s for s in services if s["name"] == name), None)
+    if target is None:
+        return jsonify({"error": f"'{name}' introuvable"}), 404
+
+    # extra_routes (Bastion, etc.) reste intact - seul backend_port est
+    # editable depuis cette page, pas les routes avancees (voir services.yaml).
+    target["backend_port"] = port
+    save_services(data)
+
+    ok, err = save_and_reload()
+    if not ok:
+        return jsonify({"error": f"Service modifie mais rechargement Caddy echoue : {err}"}), 500
+    return jsonify({"ok": True})
 
 
 @app.route("/api/services/<name>", methods=["DELETE"])
@@ -113,8 +153,7 @@ def api_services_delete(name: str):
         return jsonify({"error": f"'{name}' introuvable"}), 404
 
     data["services"] = new_services
-    with open(SERVICES_PATH, "w") as f:
-        yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+    save_services(data)
 
     ok, err = save_and_reload()
     if not ok:
