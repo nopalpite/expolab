@@ -1,0 +1,14 @@
+# Stack Dockhand "caddy-admin" - ajoute/retire un service expose par
+# Caddy (edite server/services.yaml, seule source de verite, deja
+# utilisee par render-caddyfile.py et deploy-server.sh).
+services:
+  caddy-admin:
+    build: ${REPO_ROOT}/caddy-admin
+    container_name: expolab-caddy-admin
+    restart: unless-stopped
+    # network_mode: host - necessaire pour joindre l'admin API de Caddy
+    # (127.0.0.1:2019, lui-meme en network_mode: host) pour le
+    # rechargement a chaud, sans passer par Dockhand ni redemarrer Caddy.
+    network_mode: host
+    volumes:
+      - ${REPO_ROOT}/server:/server

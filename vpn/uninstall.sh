@@ -27,8 +27,8 @@ if ! docker inspect wireguard &>/dev/null && [ ! -d "$WG_DIR" ]; then
 fi
 
 if [ "$ASSUME_YES" -ne 1 ]; then
-    echo "Ceci va arreter le VPN, supprimer tous les pairs et la stack Docker"
-    echo "'wireguard'."
+    echo "Ceci va arreter le VPN, supprimer tous les pairs et les stacks Docker"
+    echo "'wireguard' et 'vpn-admin'."
     read -r -p "Continuer ? [y/N] " ans
     [[ "$ans" =~ ^[yY]$ ]] || { echo "Annule."; exit 0; }
 fi
@@ -40,6 +40,11 @@ if command -v docker &>/dev/null; then
     docker compose -f "$TMP_COMPOSE" -p wireguard down -v || true
     rm -f "$TMP_COMPOSE"
     docker image rm expolab-wireguard 2>/dev/null || true
+
+    echo "[+] Arret de la stack 'vpn-admin'..."
+    REPO_ROOT="$REPO_ROOT" envsubst '${REPO_ROOT}' < "$REPO_ROOT/server/stacks/vpn-admin/docker-compose.yml" > "$TMP_COMPOSE"
+    docker compose -f "$TMP_COMPOSE" -p vpn-admin down -v || true
+    rm -f "$TMP_COMPOSE"
 fi
 
 echo "[+] Suppression de la configuration..."

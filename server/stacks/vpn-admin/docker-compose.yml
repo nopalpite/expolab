@@ -1,0 +1,21 @@
+# Stack Dockhand "vpn-admin" - creer/supprimer des pairs WireGuard.
+# N'appelle QUE vpn/add-peer.sh et vpn/remove-peer.sh (montes en volume) -
+# aucune logique WireGuard reimplementee ici, voir vpn-admin/app.py.
+services:
+  vpn-admin:
+    build: ${REPO_ROOT}/vpn-admin
+    container_name: expolab-vpn-admin
+    restart: unless-stopped
+    # network_mode: host - add-peer.sh detecte l'IP publique par defaut
+    # d'un pair via `ip route get` (voir vpn/add-peer.sh) : en reseau
+    # bridge Docker par defaut, ca renvoie l'IP interne du bridge (ex:
+    # 172.x.x.x, injoignable depuis un client), pas celle de l'hote.
+    # Reproduit ici le meme reseau que dnsmasq/caddy/bastion/wireguard
+    # pour que ce script se comporte pareil, qu'il tourne sur l'hote ou
+    # soit appele depuis ce conteneur.
+    network_mode: host
+    volumes:
+      - ${REPO_ROOT}/vpn:/vpn
+      # Necessaire pour `docker exec wireguard wg ...` (meme mecanisme
+      # qu'add-peer.sh/remove-peer.sh en ligne de commande).
+      - /var/run/docker.sock:/var/run/docker.sock

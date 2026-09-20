@@ -1,0 +1,262 @@
+:root {
+    /* Uniquement "dark" (pas "light dark") : la page n'a aucune variante
+       claire, tout est code en dur sombre. Avec "light dark", Firefox
+       peut rendre les widgets natifs (dont la liste du <select> ouvert)
+       en palette claire si l'OS/le navigateur prefere "clair" - texte
+       clair (var(--text)) sur fond clair du navigateur, quasi illisible
+       pour l'option selectionnee. Chromium suit davantage nos surcharges
+       CSS et n'etait pas touche, d'ou l'ecart observe entre navigateurs. */
+    color-scheme: dark;
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2e38;
+    --text: #e6e8eb;
+    --muted: #9aa1ac;
+    --accent: #4f8cff;
+    --ok: #3ecf8e;
+    --error: #ef5350;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding-block: 24px;
+}
+
+header {
+    padding: 0 20px 16px;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 1.6rem;
+}
+
+.subtitle {
+    margin: 2px 0 0;
+    color: var(--muted);
+}
+
+main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+}
+
+.panel h2 {
+    margin: 0 0 14px;
+    font-size: 1.05rem;
+}
+
+#create-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: end;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 140px;
+    flex: 1 1 140px;
+}
+
+.field label {
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+
+input, select, button {
+    font: inherit;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: #0f1115;
+    color: var(--text);
+}
+
+/* Sans ca, l'option actuellement selectionnee retombe sur le style de
+   surbrillance propre au navigateur pour le menu deroulant ouvert (fond
+   clair par defaut) tout en gardant notre couleur de texte claire -
+   quasi illisible. Les <option> n'heritent pas de <select> ici. */
+select option {
+    background: #0f1115;
+    color: var(--text);
+}
+
+button {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+button.danger {
+    background: transparent;
+    border-color: var(--error);
+    color: var(--error);
+    padding: 4px 10px;
+    font-size: 0.85rem;
+}
+
+button.secondary {
+    background: transparent;
+    border-color: var(--muted);
+    color: var(--text);
+    padding: 4px 10px;
+    font-size: 0.85rem;
+}
+
+td.actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.status {
+    margin-top: 10px;
+    font-size: 0.9rem;
+}
+
+.status-ok { color: var(--ok); }
+.status-error { color: var(--error); white-space: pre-wrap; word-break: break-word; }
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+}
+
+th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+td[data-label="Role"] {
+    /* "sans-ecran"/"avec-ecran" : le tiret est un point de coupure valide
+       pour un navigateur, donc une colonne un peu etroite le scindait en
+       "sans-" / "ecran" sur deux lignes plutot que de rogner/scroller. */
+    white-space: nowrap;
+}
+
+th {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+td code {
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.empty {
+    color: var(--muted);
+    text-align: center;
+    padding: 20px;
+}
+
+.badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+}
+
+.badge-ok { background: rgba(62, 207, 142, 0.15); color: var(--ok); }
+.badge-pending { background: rgba(79, 140, 255, 0.15); color: var(--accent); }
+.badge-muted { background: rgba(154, 161, 172, 0.15); color: var(--muted); }
+
+#topology-wrap {
+    overflow-x: auto;
+}
+
+#topology-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-width: 480px;
+}
+
+.topo-line {
+    stroke: var(--border);
+    stroke-width: 1.5;
+    fill: none;
+}
+
+.topo-dot-ok { fill: var(--ok); }
+.topo-dot-pending { fill: var(--accent); }
+.topo-dot-muted { fill: var(--muted); }
+
+.topo-hub rect {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 1;
+}
+
+.topo-node rect {
+    fill: var(--panel);
+    stroke-width: 1.5;
+}
+
+.topo-node.status-running rect { stroke: var(--ok); }
+.topo-node.status-pending rect { stroke: var(--accent); }
+.topo-node.status-muted rect { stroke: var(--muted); }
+
+.topo-title {
+    fill: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.topo-sub {
+    fill: var(--muted);
+    font-size: 11px;
+}
+
+.topo-empty {
+    color: var(--muted);
+    text-align: center;
+    padding: 20px;
+}
+
+@media (max-width: 560px) {
+    #create-form { flex-direction: column; align-items: stretch; }
+    table, thead, tbody, th, td, tr { display: block; }
+    thead { display: none; }
+    tr { border-bottom: 1px solid var(--border); padding: 8px 0; }
+    td { border: none; padding: 4px 0; }
+    td:before {
+        content: attr(data-label);
+        display: block;
+        font-size: 0.75rem;
+        color: var(--muted);
+    }
+}

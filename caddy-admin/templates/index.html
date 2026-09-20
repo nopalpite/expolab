@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>expolab - caddy</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Caddy</h1>
+        <p class="subtitle">Services exposes par le reverse-proxy (&lt;nom&gt;.web.expolab.lan)</p>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>Ajouter un service</h2>
+            <form id="create-form">
+                <div class="field">
+                    <label for="name">Nom</label>
+                    <input type="text" id="name" name="name" placeholder="gitea" required>
+                </div>
+                <div class="field">
+                    <label for="backend_port">Port backend</label>
+                    <input type="number" id="backend_port" name="backend_port" placeholder="3030" min="1" max="65535" required>
+                </div>
+                <button type="submit" id="create-btn">Ajouter</button>
+            </form>
+            <p id="create-status" class="status" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Services actuels</h2>
+            <table id="services-table">
+                <thead>
+                    <tr>
+                        <th>Nom</th>
+                        <th>URL</th>
+                        <th>Port backend</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="services-body">
+                    <tr><td colspan="4" class="empty">Chargement...</td></tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

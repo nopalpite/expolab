@@ -15,3 +15,16 @@
         href: https://bastion.web.expolab.lan
         description: Dashboard SSH/VNC de la flotte
         icon: mdi-remote-desktop
+- Infrastructure:
+    - VPN:
+        href: https://vpn.web.expolab.lan
+        description: Creer/gerer les pairs WireGuard
+        icon: si-wireguard
+    - Caddy:
+        href: https://caddy.web.expolab.lan
+        description: Ajouter/retirer un service expose par le reverse-proxy
+        icon: si-caddy
+    - dnsmasq:
+        href: https://dnsmasq.web.expolab.lan
+        description: Baux DHCP actifs sur expo-lan
+        icon: mdi-dns

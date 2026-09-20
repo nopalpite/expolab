@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Deploie le "serveur d'expo" : Dockhand est lance seul (il ne peut pas se
-# creer via sa propre API), puis chaque service (dnsmasq, caddy, webui,
-# bastion, dashboard) est cree/redeploye comme stack Dockhand independante
-# via son API REST - voir server/dockhand-api.sh. C'est ce qui, en vraie vie,
+# creer via sa propre API), puis chaque service (dnsmasq, dnsmasq-admin,
+# caddy, caddy-admin, webui, bastion, dashboard) est cree/redeploye comme
+# stack Dockhand independante via son API REST - voir
+# server/dockhand-api.sh. C'est ce qui, en vraie vie,
 # tournerait sur le vrai serveur de l'exposition (Incus n'existe pas
 # la-bas, il ne sert qu'a simuler la flotte ici dans le lab).
 #
@@ -79,7 +80,7 @@ fi
 mkdir -p "$SCRIPT_DIR/stacks/dnsmasq/data"
 
 echo "[+] Creation/redeploiement des stacks applicatives via l'API Dockhand..."
-for stack in dnsmasq caddy webui bastion dashboard; do
+for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard; do
     dockhand_upsert_stack "$stack" "$SCRIPT_DIR/stacks/$stack/docker-compose.yml"
 done
 

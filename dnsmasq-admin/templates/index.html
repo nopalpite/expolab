@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>expolab - dnsmasq</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>dnsmasq</h1>
+        <p class="subtitle">Baux DHCP actifs sur expo-lan</p>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>Baux</h2>
+            <table id="leases-table">
+                <thead>
+                    <tr>
+                        <th>Hostname</th>
+                        <th>IP</th>
+                        <th>MAC</th>
+                        <th>Expire dans</th>
+                    </tr>
+                </thead>
+                <tbody id="leases-body">
+                    <tr><td colspan="4" class="empty">Chargement...</td></tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

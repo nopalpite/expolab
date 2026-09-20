@@ -19,6 +19,12 @@ services:
     backend_port: 3000
   - name: fleet
     backend_port: 5050
+  - name: dnsmasq
+    backend_port: 5051
+  - name: caddy
+    backend_port: 5052
+  - name: vpn
+    backend_port: 5053
   - name: bastion
     backend_port: 5000
     extra_routes:

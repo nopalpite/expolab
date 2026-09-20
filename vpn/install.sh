@@ -92,6 +92,9 @@ dockhand_require_env
 echo "[+] Creation/redeploiement de la stack 'wireguard'..."
 dockhand_upsert_stack wireguard "$SCRIPT_DIR/wireguard/docker-compose.yml"
 
+echo "[+] Creation/redeploiement de la stack 'vpn-admin'..."
+dockhand_upsert_stack vpn-admin "$REPO_ROOT/server/stacks/vpn-admin/docker-compose.yml"
+
 # La stack venant d'etre (re)creee via l'API, le conteneur met un court
 # instant a apparaitre cote Docker - add-peer.sh (docker exec wireguard...)
 # echouerait sinon en cas de course.
@@ -121,14 +124,17 @@ cat <<EOF
 
 [+] VPN pret :
     Stack Dockhand : wireguard (port UDP $WG_PORT)
+    Page d'admin   : https://vpn.web.expolab.lan (lister/creer/retirer un pair, QR code)
     Sous-reseau VPN : $WG_SUBNET
     Cle publique serveur : $(cat "$WG_DIR/server_public.key")
 
 Pair par defaut pret a distribuer : $WG_DIR/peers/${DEFAULT_PEER_NAME}.conf
 (a copier vers le poste client - jamais commite dans le depot git ; inutile
- ? le supprimer avec sudo ./remove-peer.sh $DEFAULT_PEER_NAME)
+ ? le supprimer avec sudo ./remove-peer.sh $DEFAULT_PEER_NAME ou depuis
+ https://vpn.web.expolab.lan)
 
-Pour ajouter un autre pair nommement (ex: le laptop d'un admin) :
+Pour ajouter un autre pair, depuis https://vpn.web.expolab.lan ou en ligne
+de commande (ex: le laptop d'un admin) :
     sudo ./add-peer.sh mon-laptop
 
 IMPORTANT : pour un acces depuis l'exterieur de votre reseau local, il faut

@@ -1,0 +1,12 @@
+# Stack Dockhand "dnsmasq-admin" - vue des baux DHCP actifs (lecture
+# seule). dnsmasq.conf lui-meme change rarement une fois deploye ; ce
+# qu'il est utile de surveiller au quotidien, ce sont les baux en cours.
+services:
+  dnsmasq-admin:
+    build: ${REPO_ROOT}/dnsmasq-admin
+    container_name: expolab-dnsmasq-admin
+    restart: unless-stopped
+    ports:
+      - "5051:5051"
+    volumes:
+      - ${REPO_ROOT}/server/stacks/dnsmasq/data:/dnsmasq-data:ro

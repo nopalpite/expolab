@@ -50,13 +50,43 @@ chaque service comme **stack Dockhand independante** via son API REST
   `server/stacks/bastion/{config,maps}/` (egalement non versionne, propre
   a chaque lab)
 - **dashboard** (https://dashboard.web.expolab.lan, point d'entree du lab)
-  - [Homepage](https://gethomepage.dev), page de liens vers les services
-  ayant une interface web propre (Dockhand, fleet, Bastion - dnsmasq/caddy/
-  wireguard n'en ont pas, deja pilotables depuis la tuile Dockhand). Config
-  statique versionnee (`server/stacks/dashboard/config/services.yaml`),
-  pas d'auto-decouverte via le socket Docker : la liste est petite et
-  connue a l'avance, pas besoin d'un acces supplementaire au socket pour
-  si peu
+  - [Homepage](https://gethomepage.dev), page de liens vers tous les
+  services ayant une interface web propre. Config statique versionnee
+  (`server/stacks/dashboard/config/services.yaml`), pas d'auto-decouverte
+  via le socket Docker : la liste est petite et connue a l'avance, pas
+  besoin d'un acces supplementaire au socket pour si peu
+- **dnsmasq-admin**, **caddy-admin**, **vpn-admin** - pages minimales
+  (Flask, meme style que la webui) pour piloter dnsmasq/Caddy/WireGuard
+  sans repasser par la ligne de commande, sur le meme principe que la
+  webui : editer/lire un fichier de config existant et reutiliser les
+  scripts/mecanismes deja en place, sans rien reimplementer.
+  - `dnsmasq-admin` (https://dnsmasq.web.expolab.lan) : lecture seule des
+    baux DHCP actifs (`server/stacks/dnsmasq/data/dnsmasq.leases`) - le
+    conf lui-meme change rarement une fois le lab deploye, la donnee
+    vivante utile au quotidien c'est le bail.
+  - `caddy-admin` (https://caddy.web.expolab.lan) : ajoute/retire une
+    entree dans `server/services.yaml`, regenere le Caddyfile et le
+    pousse a **l'admin API de Caddy lui-meme**
+    (`http://127.0.0.1:2019/load`, atteignable en `network_mode: host`
+    comme Caddy) pour un rechargement a chaud - pas de redeploiement de
+    stack, pas de coupure de service.
+  - `vpn-admin` (https://vpn.web.expolab.lan) : liste les pairs (avec
+    etat de connexion et trafic via `wg show wg0 dump`), QR code pour
+    import mobile, et appelle **directement** `vpn/add-peer.sh`/
+    `remove-peer.sh` (montes en volume) pour creer/retirer un pair -
+    aucune logique WireGuard reimplementee.
+
+**Pourquoi des pages maison plutot qu'un projet existant** : recherche
+faite sur les GUIs disponibles pour WireGuard/Caddy/dnsmasq - la seule
+option mature est [wg-easy](https://github.com/wg-easy/wg-easy), qui
+s'est averee **cassee sur ce materiel** : son iptables embarque (legacy)
+ne fonctionne pas sur le noyau Raspberry Pi 5 6.18+, qui a retire le
+module `ip_tables` au profit exclusif de nftables (plusieurs issues
+GitHub ouvertes sur exactement ce cas, non resolues en amont). Cote
+Caddy/dnsmasq, aucune option n'atteint un niveau de maturite suffisant.
+Vu que le vrai besoin est simple (CRUD sur des fichiers de config deja
+en place), des pages minimales par-dessus notre propre logique deja
+prouvee fonctionnelle evitent cette classe de probleme entierement.
 
 Les binds relatifs (`./x`) d'une stack creee via l'API Dockhand se
 resolvent dans le repertoire de donnees propre a Dockhand, pas dans ce
@@ -209,6 +239,9 @@ curl -k https://dashboard.web.expolab.lan  # point d'entree, liens vers tout le 
 curl -k https://fleet.web.expolab.lan      # webui flotte
 curl -k https://dockhand.web.expolab.lan   # Dockhand
 curl -k https://bastion.web.expolab.lan    # Bastion (admin/raspberry)
+curl -k https://dnsmasq.web.expolab.lan    # baux DHCP actifs
+curl -k https://caddy.web.expolab.lan      # ajouter/retirer un service expose
+curl -k https://vpn.web.expolab.lan        # pairs WireGuard (QR code, trafic)
 
 # VPN : importer vpn/wireguard/config/peers/default.conf (ou mon-laptop.conf)
 # sur le poste client (WireGuard app ou wg-quick), puis une fois connecte, les memes URLs
@@ -239,11 +272,12 @@ Ce script defait dans l'ordre exactement ce que `install.sh` /
 `network-setup.sh` / `deploy-fleet.sh` / `deploy-server.sh` /
 `vpn/install.sh` ont mis en place :
 
-1. `vpn/uninstall.sh` — arrete la stack Docker `wireguard`, supprime tous
-   les pairs et la config generee
+1. `vpn/uninstall.sh` — arrete les stacks Docker `wireguard` et
+   `vpn-admin`, supprime tous les pairs et la config generee
 2. `server/teardown-server.sh` — arrete Dockhand et les stacks Docker
-   (dnsmasq, caddy, webui, bastion), reactive le DHCP integre d'Incus sur
-   `expo-lan` (secours), desinstalle Docker
+   (dnsmasq, dnsmasq-admin, caddy, caddy-admin, webui, bastion,
+   dashboard), reactive le DHCP integre d'Incus sur `expo-lan` (secours),
+   desinstalle Docker
 3. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
 4. `incus/network-teardown.sh` — supprime le profil `fake-pi` et le
    reseau `expo-lan`
@@ -275,20 +309,26 @@ server/
   teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), reactive le DHCP integre d'Incus, desinstalle Docker
   docker-compose.yml            # bootstrap UNIQUEMENT : Dockhand (ne peut pas se creer via sa propre API)
   dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack via l'API
-  services.yaml                  # services applicatifs exposes au reverse-proxy (dashboard, dockhand, fleet, bastion)
+  services.yaml                  # services applicatifs exposes au reverse-proxy (dashboard, dockhand, fleet, bastion, dnsmasq/caddy/vpn-admin)
   render-caddyfile.py             # genere le Caddyfile a partir de server/services.yaml
   stacks/
     dnsmasq/{docker-compose.yml, Dockerfile, dnsmasq.conf, data/}   # data/ non versionne (baux DHCP)
+    dnsmasq-admin/docker-compose.yml                                  # build context = ../../dnsmasq-admin
     caddy/{docker-compose.yml, Caddyfile}                            # Caddyfile genere, non versionne
+    caddy-admin/docker-compose.yml                                    # build context = ../../caddy-admin
     webui/docker-compose.yml                                          # build context = ../../webui
     bastion/{docker-compose.yml, bastion.env, config/, maps/}        # ces 3 derniers non versionnes
     dashboard/{docker-compose.yml, config/}   # Homepage, liens vers les services web du lab
+    vpn-admin/docker-compose.yml                                      # build context = ../../vpn-admin
 webui/
   app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh
   Dockerfile                     # image (Flask + client Incus)
   templates/, static/            # page unique HTML/JS/CSS
+dnsmasq-admin/                  # meme forme que webui/ : app.py, Dockerfile, templates/, static/
+caddy-admin/                     # idem - edite server/services.yaml, recharge Caddy via son admin API
+vpn-admin/                       # idem - appelle vpn/add-peer.sh et vpn/remove-peer.sh
 vpn/
-  install.sh                  # genere wg0.conf, cree/redeploie la stack Dockhand "wireguard"
+  install.sh                  # genere wg0.conf, cree/redeploie les stacks Dockhand "wireguard" et "vpn-admin"
   uninstall.sh                 # arrete la stack (docker compose direct), supprime la config generee
   add-peer.sh                  # ajoute un pair VPN (docker exec wireguard wg ...) + config client
   remove-peer.sh                # retire un pair VPN

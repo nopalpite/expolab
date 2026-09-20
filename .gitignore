@@ -29,3 +29,7 @@ vpn/wireguard/config/
 # etat runtime, pas de l'infra-as-code.
 server/stacks/dashboard/config/logs/
 server/stacks/dashboard/config/kubernetes.yaml
+
+# Bytecode Python (genere localement par un simple `python -m py_compile`
+# de verification syntaxique, jamais volontairement).
+__pycache__/

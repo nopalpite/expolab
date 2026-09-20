@@ -22,7 +22,7 @@ echo "=== 1/5 : suppression du VPN (WireGuard) ==="
 "$SCRIPT_DIR/vpn/uninstall.sh" "${YES_FLAG[@]}"
 
 echo
-echo "=== 2/5 : suppression du serveur d'expo (Docker : dockhand, dnsmasq, caddy, webui, bastion) ==="
+echo "=== 2/5 : suppression du serveur d'expo (Docker : dockhand, dnsmasq, dnsmasq-admin, caddy, caddy-admin, webui, bastion, dashboard) ==="
 "$SCRIPT_DIR/server/teardown-server.sh" "${YES_FLAG[@]}"
 
 echo

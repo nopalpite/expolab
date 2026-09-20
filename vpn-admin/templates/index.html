@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>expolab - vpn</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>VPN</h1>
+        <p class="subtitle">Pairs WireGuard (sous-reseau 10.66.66.0/24)</p>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>Ajouter un pair</h2>
+            <form id="create-form">
+                <div class="field">
+                    <label for="name">Nom</label>
+                    <input type="text" id="name" name="name" placeholder="mon-laptop" required>
+                </div>
+                <button type="submit" id="create-btn">Creer</button>
+            </form>
+            <p id="create-status" class="status" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Pairs actuels</h2>
+            <table id="peers-table">
+                <thead>
+                    <tr>
+                        <th>Nom</th>
+                        <th>IP VPN</th>
+                        <th>Etat</th>
+                        <th>Trafic</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="peers-body">
+                    <tr><td colspan="5" class="empty">Chargement...</td></tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <div id="qr-modal" hidden>
+        <div id="qr-modal-content" class="panel">
+            <h2 id="qr-modal-title">QR code</h2>
+            <img id="qr-modal-img" alt="QR code de la config">
+            <p class="subtitle">A scanner depuis l'appli WireGuard (Importer &gt; Scanner un code QR)</p>
+            <button id="qr-modal-close" class="secondary">Fermer</button>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
