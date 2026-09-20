@@ -1,0 +1,8 @@
+# Secrets generes au premier deploiement (server/deploy-server.sh) -
+# jamais les memes d'un lab a l'autre, ne doivent pas finir dans git.
+server/bastion.env
+
+# Etat runtime de Bastion (inventaire de machines, identifiants
+# chiffres, historique de disponibilite, certificats TLS auto-signes
+# generes localement) - donnees de test, pas de l'infra-as-code.
+server/bastion/

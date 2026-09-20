@@ -19,7 +19,7 @@ fi
 
 if command -v docker &>/dev/null && [ -f "$SCRIPT_DIR/docker-compose.yml" ]; then
     if [ "$ASSUME_YES" -ne 1 ]; then
-        read -r -p "Arreter/supprimer le stack Docker (dnsmasq, caddy, dockhand, webui) ? [y/N] " ans
+        read -r -p "Arreter/supprimer le stack Docker (dnsmasq, caddy, dockhand, webui, bastion) ? [y/N] " ans
         [[ "$ans" =~ ^[yY]$ ]] || { echo "Annule."; exit 0; }
     fi
     echo "[+] Arret du stack Docker..."

@@ -41,6 +41,21 @@ fi
 echo "[+] Generation du Caddyfile a partir de $SERVICES..."
 python3 "$SCRIPT_DIR/render-caddyfile.py" "$SERVICES" > "$SCRIPT_DIR/Caddyfile"
 
+if [ ! -f "$SCRIPT_DIR/bastion.env" ]; then
+    echo "[+] Premiere generation des secrets Bastion (server/bastion.env, non versionne)..."
+    BASTION_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+    # Format Fernet (cle de chiffrement des identifiants SSH/VNC memorises)
+    # - juste du base64 urlsafe standard sur 32 octets aleatoires, pas
+    # besoin du paquet "cryptography" pour la generer (voir le README de
+    # Bastion).
+    BASTION_CREDENTIALS_KEY="$(python3 -c 'import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')"
+    cat > "$SCRIPT_DIR/bastion.env" <<EOF
+BASTION_SECRET_KEY=$BASTION_SECRET_KEY
+BASTION_CREDENTIALS_KEY=$BASTION_CREDENTIALS_KEY
+EOF
+    chmod 600 "$SCRIPT_DIR/bastion.env"
+fi
+
 echo "[+] (Re)demarrage du stack Docker..."
 (cd "$SCRIPT_DIR" && docker compose up -d --build)
 

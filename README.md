@@ -9,10 +9,10 @@ Deux couches bien separees :
   peut evidemment pas dupliquer sur une seule machine de lab. C'est un
   artifice propre au lab.
 - **Le serveur d'expo** (`server/`, `vpn/`, `webui/`) - DHCP/DNS,
-  reverse-proxy, et les services applicatifs (Dockhand, webui, plus tard
-  Gitea/Bastion) tournent en Docker **directement sur l'hote**, pas dans
-  Incus. C'est exactement ce qui sera deploye sur le vrai serveur de
-  l'exposition, qui n'aura pas besoin d'Incus du tout.
+  reverse-proxy, et les services applicatifs (Dockhand, webui, Bastion,
+  plus tard Gitea) tournent en Docker **directement sur l'hote**, pas
+  dans Incus. C'est exactement ce qui sera deploye sur le vrai serveur
+  de l'exposition, qui n'aura pas besoin d'Incus du tout.
 
 ## Architecture reseau
 
@@ -34,6 +34,14 @@ relais du DHCP integre d'Incus des qu'il est pret :
 - **Dockhand** (UI de gestion Docker) et la **webui** expolab
   (creation/suppression de faux Pi), sur le reseau Docker par defaut avec
   publication de port
+- **Bastion** (https://github.com/nopalpite/bastion, dashboard +
+  SSH/VNC web) en `network_mode: host` - image prete a l'emploi publiee
+  sur GHCR (`ghcr.io/nopalpite/bastion`), identifiants par defaut
+  `admin`/`raspberry`. Secrets (cle de session, cle de chiffrement des
+  identifiants memorises) generes une seule fois au premier
+  `deploy-server.sh` dans `server/bastion.env` (non versionne) ;
+  inventaire de machines et donnees persistees dans `server/bastion/`
+  (egalement non versionne, propre a chaque lab)
 
 Le reverse-proxy n'expose PAS les faux Pi (ils n'ont pas vocation a etre
 joignables en HTTPS individuellement) : il sert a exposer les services
@@ -117,6 +125,7 @@ docker compose -f server/docker-compose.yml ps   # etat du stack serveur
 # importer le CA interne de Caddy) :
 curl -k https://fleet.web.expolab.lan      # webui flotte
 curl -k https://dockhand.web.expolab.lan   # Dockhand
+curl -k https://bastion.web.expolab.lan    # Bastion (admin/raspberry)
 
 # VPN : importer /etc/wireguard/peers/mon-laptop.conf sur le poste client
 # (WireGuard app ou wg-quick), puis une fois connecte, les memes URLs
@@ -181,11 +190,13 @@ fleet/
 server/
   deploy-server.sh             # installe Docker sur l'hote, deploie/met a jour le stack
   teardown-server.sh            # arrete le stack, reactive le DHCP integre d'Incus, desinstalle Docker
-  docker-compose.yml            # stack : dnsmasq, caddy, dockhand, webui
+  docker-compose.yml            # stack : dnsmasq, caddy, dockhand, webui, bastion
   dnsmasq/Dockerfile             # image dnsmasq minimale
   dnsmasq.conf                    # config DHCP+DNS (plage, domaine expolab.lan)
-  services.yaml                    # services applicatifs exposes (dockhand, fleet)
+  services.yaml                    # services applicatifs exposes (dockhand, fleet, bastion)
   render-caddyfile.py               # genere le Caddyfile a partir de server/services.yaml
+  bastion.env                        # secrets Bastion generes au 1er deploiement (non versionne)
+  bastion/                            # inventaire + donnees persistees de Bastion (non versionne)
 webui/
   app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh
   Dockerfile                     # image (Flask + client Incus)
@@ -200,9 +211,8 @@ rollback.sh                   # orchestre les 5 teardown dans le bon ordre
 
 ## A venir
 
-- Deploiement effectif de Gitea/Bastion (conteneurs Docker sur l'hote,
-  geres depuis Dockhand), puis entree correspondante dans
-  `server/services.yaml`
+- Deploiement effectif de Gitea (conteneur Docker sur l'hote, gere depuis
+  Dockhand), puis entree correspondante dans `server/services.yaml`
 - Authentification sur la webui (aucune pour l'instant - protegee
   uniquement par l'isolation reseau d'`expo-lan`)
 - Renouvellement/rotation des certs Caddy au-dela du lab (hors scope d'un

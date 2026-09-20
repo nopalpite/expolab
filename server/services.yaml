@@ -7,6 +7,9 @@
 # - backend_host  : (optionnel, defaut "localhost") a ne renseigner que
 #                    pour un service qui vivrait ailleurs (ex: un futur
 #                    faux Pi si jamais besoin, via <nom>.expolab.lan)
+# - extra_routes  : (optionnel) chemins a faire suivre vers un port
+#                    different AVANT la route principale - voir
+#                    render-caddyfile.py
 #
 # https://<name>.web.expolab.lan  ->  Caddy  ->  http://<backend_host>:<backend_port>
 services:
@@ -14,3 +17,10 @@ services:
     backend_port: 3000
   - name: fleet
     backend_port: 5050
+  - name: bastion
+    backend_port: 5000
+    extra_routes:
+      # Pont VNC (websockify) de Bastion - a part de son app principale,
+      # voir son README section "Derriere un reverse proxy (TLS)".
+      - path: /vnc-ws/*
+        backend_port: 6080
