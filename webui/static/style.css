@@ -1,5 +1,12 @@
 :root {
-    color-scheme: light dark;
+    /* Uniquement "dark" (pas "light dark") : la page n'a aucune variante
+       claire, tout est code en dur sombre. Avec "light dark", Firefox
+       peut rendre les widgets natifs (dont la liste du <select> ouvert)
+       en palette claire si l'OS/le navigateur prefere "clair" - texte
+       clair (var(--text)) sur fond clair du navigateur, quasi illisible
+       pour l'option selectionnee. Chromium suit davantage nos surcharges
+       CSS et n'etait pas touche, d'ou l'ecart observe entre navigateurs. */
+    color-scheme: dark;
     --bg: #0f1115;
     --panel: #171a21;
     --border: #2a2e38;
@@ -82,6 +89,15 @@ input, select, button {
     padding: 8px 10px;
     border-radius: 6px;
     border: 1px solid var(--border);
+    background: #0f1115;
+    color: var(--text);
+}
+
+/* Sans ca, l'option actuellement selectionnee retombe sur le style de
+   surbrillance propre au navigateur pour le menu deroulant ouvert (fond
+   clair par defaut) tout en gardant notre couleur de texte claire -
+   quasi illisible. Les <option> n'heritent pas de <select> ici. */
+select option {
     background: #0f1115;
     color: var(--text);
 }
