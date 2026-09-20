@@ -13,20 +13,25 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME="${1:?usage: add-peer.sh <nom> [endpoint:port]}"
-WG_DIR="/etc/wireguard"
-WG_IFACE="wg0"
+WG_DIR="$SCRIPT_DIR/wireguard/config"
 WG_PORT="51820"
 LAN_SUBNET="10.42.0.0/24"
 VPN_SUBNET="10.66.66.0/24"
 
-if [ ! -f "$WG_DIR/$WG_IFACE.conf" ]; then
+if [ ! -f "$WG_DIR/wg0.conf" ]; then
     echo "WireGuard n'est pas configure. Lancer d'abord sudo ./install.sh" >&2
     exit 1
 fi
 
-if grep -q "^# peer: $NAME\$" "$WG_DIR/$WG_IFACE.conf" 2>/dev/null; then
-    echo "Un pair nomme '$NAME' existe deja dans $WG_IFACE.conf." >&2
+if ! docker inspect wireguard &>/dev/null; then
+    echo "Le conteneur 'wireguard' n'est pas demarre. Lancer d'abord sudo ./install.sh" >&2
+    exit 1
+fi
+
+if grep -q "^# peer: $NAME\$" "$WG_DIR/wg0.conf" 2>/dev/null; then
+    echo "Un pair nomme '$NAME' existe deja dans wg0.conf." >&2
     exit 1
 fi
 
@@ -35,7 +40,7 @@ ENDPOINT="${2:-${DEFAULT_ENDPOINT_IP}:${WG_PORT}}"
 
 # Prochaine IP libre dans le sous-reseau VPN (.1 = serveur, on part de .2).
 LAST_OCTET=1
-for used in $(grep -oP '(?<=AllowedIPs = 10\.66\.66\.)\d+' "$WG_DIR/$WG_IFACE.conf" 2>/dev/null || true); do
+for used in $(grep -oP '(?<=AllowedIPs = 10\.66\.66\.)\d+' "$WG_DIR/wg0.conf" 2>/dev/null || true); do
     [ "$used" -gt "$LAST_OCTET" ] && LAST_OCTET="$used"
 done
 NEXT_OCTET=$((LAST_OCTET + 1))
@@ -44,13 +49,13 @@ PEER_IP="10.66.66.${NEXT_OCTET}"
 echo "[+] Generation des cles pour '$NAME' (IP VPN: $PEER_IP)..."
 umask 077
 mkdir -p "$WG_DIR/peers"
-PEER_PRIVATE_KEY="$(wg genkey)"
-PEER_PUBLIC_KEY="$(echo "$PEER_PRIVATE_KEY" | wg pubkey)"
-PRESHARED_KEY="$(wg genpsk)"
+PEER_PRIVATE_KEY="$(docker exec wireguard wg genkey)"
+PEER_PUBLIC_KEY="$(echo "$PEER_PRIVATE_KEY" | docker exec -i wireguard wg pubkey)"
+PRESHARED_KEY="$(docker exec wireguard wg genpsk)"
 SERVER_PUBLIC_KEY="$(cat "$WG_DIR/server_public.key")"
 
-echo "[+] Ajout du pair a $WG_IFACE.conf..."
-cat >> "$WG_DIR/$WG_IFACE.conf" <<EOF
+echo "[+] Ajout du pair a wg0.conf..."
+cat >> "$WG_DIR/wg0.conf" <<EOF
 
 # peer: $NAME
 [Peer]
@@ -60,7 +65,10 @@ AllowedIPs = ${PEER_IP}/32
 EOF
 
 echo "[+] Application a chaud (sans couper le tunnel des autres pairs)..."
-wg set "$WG_IFACE" peer "$PEER_PUBLIC_KEY" preshared-key <(echo "$PRESHARED_KEY") allowed-ips "${PEER_IP}/32"
+# `<(...)` (substitution de processus) ne traverse pas la frontiere
+# docker exec - le descripteur de fichier n'existe que cote hote. On pipe
+# la cle via stdin et on pointe wg dessus (/dev/stdin, cote conteneur).
+echo "$PRESHARED_KEY" | docker exec -i wireguard wg set wg0 peer "$PEER_PUBLIC_KEY" preshared-key /dev/stdin allowed-ips "${PEER_IP}/32"
 
 CLIENT_CONF="$WG_DIR/peers/${NAME}.conf"
 cat > "$CLIENT_CONF" <<EOF

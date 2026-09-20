@@ -1,0 +1,28 @@
+# Stack Dockhand "wireguard" - VPN WAN/LAN, cree/deploye via
+# server/dockhand-api.sh (voir vpn/install.sh). wg0.conf (cle serveur,
+# regles PostUp/PostDown, pairs) est genere par vpn/install.sh et
+# vpn/add-peer.sh dans ./config - non versionne, persistant via le bind
+# absolu ci-dessous.
+services:
+  wireguard:
+    build: ${REPO_ROOT}/vpn/wireguard
+    container_name: wireguard
+    restart: unless-stopped
+    # network_mode: host - necessaire pour que les regles PostUp/PostDown
+    # de wg0.conf ("iptables -A FORWARD -i wg0 -o expo-lan ...") visent
+    # les vraies interfaces de l'hote, comme dnsmasq/caddy/bastion.
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    # Pas besoin de SYS_MODULE : le noyau de ce Pi a WireGuard integre
+    # nativement (6.x), pas de module a charger au demarrage.
+    #
+    # Pas de sysctls: net.ipv4.conf.all.src_valid_mark=1 (tentative
+    # initiale) - Docker le refuse avec network_mode: host ("not allowed
+    # in host network namespace", logique : pas de namespace reseau propre
+    # au conteneur a modifier, celui de l'hote s'applique directement).
+    # Sysctl surtout utile cote CLIENT pour eviter une boucle de routage en
+    # full-tunnel (fwmark) - pas notre cas ici, le serveur route juste via
+    # AllowedIPs + PostUp/PostDown iptables.
+    volumes:
+      - ${REPO_ROOT}/vpn/wireguard/config:/etc/wireguard

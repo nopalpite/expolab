@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
-# Installe WireGuard sur l'hote et l'attache au reseau expo-lan : la patte
-# WAN/VPN qui permet un acces distant au lab (cf README, architecture
-# cible "deux pattes" du serveur dedie).
+# Genere la config WireGuard et deploie la stack "wireguard" via l'API
+# Dockhand (voir server/dockhand-api.sh) - la patte WAN/VPN qui permet un
+# acces distant au lab (cf README, architecture cible "deux pattes" du
+# serveur dedie).
 #
-# Tourne sur l'HOTE directement (pas dans un conteneur) : donner une
-# deuxieme interface reseau a expo-gw demanderait du macvlan sur
-# l'interface physique, qui ne fonctionne pas de facon fiable en Wi-Fi
-# (meme constat que pour expo-lan, cf incus/network-setup.sh). L'hote a
-# deja naturellement les deux pattes : son interface physique (WAN reel) et
-# le bridge expo-lan (LAN simule) - c'est le point de frontiere naturel.
+# Conteneurise (vpn/wireguard/) plutot qu'installe directement sur l'hote
+# comme avant : coherence avec le reste du serveur d'expo, desormais
+# entierement pilotable depuis Dockhand. L'hote n'a plus besoin du paquet
+# wireguard-tools du tout - toutes les commandes `wg` passent par `docker
+# exec wireguard`.
 #
 # Usage: sudo ./install.sh [nom_interface_bridge_expo-lan]
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+export REPO_ROOT
+
+# shellcheck source=../server/dockhand-api.sh
+source "$REPO_ROOT/server/dockhand-api.sh"
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Ce script doit etre lance en root (sudo)." >&2
@@ -19,39 +26,47 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 BRIDGE_IFACE="${1:-expo-lan}"
-WG_IFACE="wg0"
 WG_PORT="51820"
 WG_SUBNET="10.66.66.0/24"
 WG_SERVER_IP="10.66.66.1/24"
-WG_DIR="/etc/wireguard"
+WG_DIR="$SCRIPT_DIR/wireguard/config"
 
 if ! ip link show "$BRIDGE_IFACE" &>/dev/null; then
     echo "Interface '$BRIDGE_IFACE' introuvable. Lancer d'abord incus/network-setup.sh" >&2
     exit 1
 fi
 
-echo "[+] Installation de wireguard-tools + iptables..."
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq wireguard iptables >/dev/null
+if ! docker inspect dockhand &>/dev/null; then
+    echo "Dockhand n'est pas demarre. Lancer d'abord ../server/deploy-server.sh" >&2
+    exit 1
+fi
 
 mkdir -p "$WG_DIR/peers"
 chmod 700 "$WG_DIR"
 
+echo "[+] Construction de l'image wireguard (pour generer les cles avant deploiement)..."
+docker build -q -t expolab-wireguard "$SCRIPT_DIR/wireguard" >/dev/null
+
 if [ ! -f "$WG_DIR/server_private.key" ]; then
     echo "[+] Generation de la paire de cles du serveur..."
     umask 077
-    wg genkey | tee "$WG_DIR/server_private.key" | wg pubkey > "$WG_DIR/server_public.key"
+    # wg genkey/pubkey sont de purs calculs crypto, aucun besoin d'une
+    # interface montee - wireguard-tools ne vit que dans l'image du
+    # conteneur desormais (l'hote n'a plus le paquet), d'ou ce detour via
+    # une instance jetable de notre propre image.
+    docker run --rm --entrypoint wg expolab-wireguard genkey > "$WG_DIR/server_private.key"
+    docker run --rm -i --entrypoint wg expolab-wireguard pubkey \
+        < "$WG_DIR/server_private.key" > "$WG_DIR/server_public.key"
 else
     echo "[=] Cle serveur deja presente, conservee."
 fi
 
 SERVER_PRIVATE_KEY="$(cat "$WG_DIR/server_private.key")"
 
-if [ ! -f "$WG_DIR/$WG_IFACE.conf" ]; then
-    echo "[+] Generation de $WG_DIR/$WG_IFACE.conf..."
+if [ ! -f "$WG_DIR/wg0.conf" ]; then
+    echo "[+] Generation de $WG_DIR/wg0.conf..."
     umask 077
-    cat > "$WG_DIR/$WG_IFACE.conf" <<EOF
+    cat > "$WG_DIR/wg0.conf" <<EOF
 [Interface]
 Address = $WG_SERVER_IP
 ListenPort = $WG_PORT
@@ -62,7 +77,7 @@ PostDown = iptables -D FORWARD -i %i -o $BRIDGE_IFACE -j ACCEPT; iptables -D FOR
 # Les pairs (clients VPN) sont ajoutes ci-dessous par vpn/add-peer.sh.
 EOF
 else
-    echo "[=] $WG_DIR/$WG_IFACE.conf deja present, conserve (peers existants preserves)."
+    echo "[=] $WG_DIR/wg0.conf deja present, conserve (peers existants preserves)."
 fi
 
 echo "[+] Activation de l'IP forwarding..."
@@ -71,13 +86,16 @@ net.ipv4.ip_forward=1
 EOF
 sysctl -p /etc/sysctl.d/99-expolab-wg.conf >/dev/null
 
-echo "[+] Demarrage de wg-quick@$WG_IFACE..."
-systemctl enable --now "wg-quick@$WG_IFACE"
+dockhand_wait_healthy
+dockhand_require_env
+
+echo "[+] Creation/redeploiement de la stack 'wireguard'..."
+dockhand_upsert_stack wireguard "$SCRIPT_DIR/wireguard/docker-compose.yml"
 
 cat <<EOF
 
 [+] VPN pret :
-    Interface   : $WG_IFACE (port UDP $WG_PORT)
+    Stack Dockhand : wireguard (port UDP $WG_PORT)
     Sous-reseau VPN : $WG_SUBNET
     Cle publique serveur : $(cat "$WG_DIR/server_public.key")
 

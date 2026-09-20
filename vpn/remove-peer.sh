@@ -9,10 +9,10 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME="${1:?usage: remove-peer.sh <nom>}"
-WG_DIR="/etc/wireguard"
-WG_IFACE="wg0"
-CONF="$WG_DIR/$WG_IFACE.conf"
+WG_DIR="$SCRIPT_DIR/wireguard/config"
+CONF="$WG_DIR/wg0.conf"
 
 if [ ! -f "$CONF" ]; then
     echo "WireGuard n'est pas configure, rien a faire."
@@ -29,8 +29,12 @@ if [ -z "$PEER_PUBLIC_KEY" ]; then
     exit 1
 fi
 
-echo "[+] Retrait a chaud du pair..."
-wg set "$WG_IFACE" peer "$PEER_PUBLIC_KEY" remove 2>/dev/null || true
+if docker inspect wireguard &>/dev/null; then
+    echo "[+] Retrait a chaud du pair..."
+    docker exec wireguard wg set wg0 peer "$PEER_PUBLIC_KEY" remove 2>/dev/null || true
+else
+    echo "[=] Conteneur 'wireguard' non demarre, retrait a chaud ignore (sera effectif au prochain demarrage)."
+fi
 
 echo "[+] Retrait du bloc [Peer] de $CONF..."
 python3 - "$CONF" "$NAME" <<'EOF'
