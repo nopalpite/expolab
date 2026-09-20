@@ -1,3 +1,5 @@
+let reservationsByMac = {};
+
 async function loadLeases() {
     const body = document.getElementById("leases-body");
     try {
@@ -7,19 +9,26 @@ async function loadLeases() {
             body.innerHTML = '<tr><td colspan="5" class="empty">Aucun bail actif</td></tr>';
             return;
         }
-        body.innerHTML = data.leases.map(l => `
+        body.innerHTML = data.leases.map(l => {
+            const reserved = reservationsByMac[l.mac];
+            const btn = reserved
+                ? `<button class="secondary" data-edit-mac="${l.mac}" data-edit-ip="${reserved.ip}" data-edit-hostname="${reserved.hostname || ''}">Modifier</button>`
+                : `<button class="secondary" data-lease-mac="${l.mac}" data-lease-ip="${l.ip}" data-lease-hostname="${l.hostname === '(inconnu)' ? '' : l.hostname}">Reserver</button>`;
+            return `
             <tr>
                 <td data-label="Hostname">${l.hostname}</td>
                 <td data-label="IP"><code>${l.ip}</code></td>
                 <td data-label="MAC"><code>${l.mac}</code></td>
                 <td data-label="Expire dans">${l.expires_in_min} min</td>
-                <td class="actions">
-                    <button class="secondary" data-lease-mac="${l.mac}" data-lease-ip="${l.ip}" data-lease-hostname="${l.hostname === '(inconnu)' ? '' : l.hostname}">Reserver</button>
-                </td>
+                <td class="actions">${btn}</td>
             </tr>
-        `).join("");
+        `;
+        }).join("");
         body.querySelectorAll("button[data-lease-mac]").forEach(btn => {
             btn.addEventListener("click", () => startReservationFromLease(btn.dataset.leaseMac, btn.dataset.leaseIp, btn.dataset.leaseHostname));
+        });
+        body.querySelectorAll("button[data-edit-mac]").forEach(btn => {
+            btn.addEventListener("click", () => startEditReservation(btn.dataset.editMac, btn.dataset.editIp, btn.dataset.editHostname));
         });
     } catch (e) {
         body.innerHTML = '<tr><td colspan="5" class="status-error">Erreur de chargement</td></tr>';
@@ -33,6 +42,7 @@ async function loadReservations() {
     try {
         const res = await fetch("/api/reservations");
         const data = await res.json();
+        reservationsByMac = Object.fromEntries(data.reservations.map(r => [r.mac, r]));
         if (!data.reservations.length) {
             body.innerHTML = '<tr><td colspan="4" class="empty">Aucune reservation</td></tr>';
             return;
@@ -65,7 +75,7 @@ async function deleteReservation(mac) {
     const data = await res.json();
     if (!res.ok) { alert(data.error || "Erreur"); return; }
     if (editingMac === mac) stopEditReservation();
-    loadReservations();
+    loadReservations().then(loadLeases);
 }
 
 function startEditReservation(mac, ip, hostname) {
@@ -136,7 +146,7 @@ document.getElementById("reservation-form").addEventListener("submit", async (e)
             status.className = "status status-ok";
             status.textContent = editingMac ? `Reservation ${mac} modifiee.` : `Reservation ajoutee pour ${mac}.`;
             stopEditReservation();
-            loadReservations();
+            loadReservations().then(loadLeases);
         }
     } catch (e) {
         status.hidden = false;
@@ -147,6 +157,8 @@ document.getElementById("reservation-form").addEventListener("submit", async (e)
     }
 });
 
-loadLeases();
-loadReservations();
+// L'ordre compte : loadLeases() lit reservationsByMac (pour savoir si un
+// bail a deja une reservation et afficher "Modifier" plutot que
+// "Reserver"), qui n'est peuple que par loadReservations().
+loadReservations().then(loadLeases);
 setInterval(loadLeases, 15000);
