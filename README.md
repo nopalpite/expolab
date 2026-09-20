@@ -88,6 +88,15 @@ eux (voir plus haut, le reverse-proxy ne les concerne pas).
   (2,5 Go pour 5 faux Pi, ajustable dans `incus/profiles/fake-pi.yaml`) +
   le stack Docker (leger : dnsmasq/Caddy/webui sont de petites images,
   Dockhand un peu plus)
+- Budget disque : la flotte vit sur un pool Incus dedie en
+  copie-sur-ecriture (`fake-pi-pool`, driver btrfs, cree par
+  `network-setup.sh` sur un fichier loop de 9 Gio - pas de
+  repartitionnement de la carte SD), ~250-300 Mio par faux Pi supplementaire
+  au lieu de dupliquer l'image de base a chaque fois. Incident reel sur ce
+  lab : le pool "default" (driver "dir", cree par `install.sh` pour
+  l'initialisation d'Incus) ne partage rien entre instances et sature une
+  carte SD de 15 Gio des 7-8 faux Pi, cassant silencieusement le
+  provisioning en cours - d'ou ce pool separe pour la flotte
 
 ## Mise en route (a executer directement sur le Pi 5)
 
@@ -181,7 +190,7 @@ incus/
   uninstall.sh               # desinstalle Incus (symetrique de install.sh)
   network-setup.sh           # cree le reseau expo-lan (bridge isole) + profil fake-pi
   network-teardown.sh        # defait network-setup.sh
-  profiles/fake-pi.yaml      # profil Incus flotte (reseau + limites CPU/RAM)
+  profiles/fake-pi.yaml      # profil Incus flotte (reseau + limites CPU/RAM + pool disque)
 fleet/
   inventory.yaml             # liste declarative des faux Pi (nom, MAC, role, identifiants)
   deploy-fleet.sh             # cree/provisionne les faux Pi manquants

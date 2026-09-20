@@ -10,7 +10,7 @@ fi
 
 echo "[+] Installation des prerequis..."
 apt-get update -qq
-apt-get install -y -qq curl ca-certificates gnupg python3-yaml
+apt-get install -y -qq curl ca-certificates gnupg python3-yaml btrfs-progs
 
 echo "[+] Ajout du depot Incus (Zabbly)..."
 mkdir -p /etc/apt/keyrings

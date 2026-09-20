@@ -40,6 +40,20 @@ else
         ipv6.address=none
 fi
 
+echo "[+] Creation du pool de stockage 'fake-pi-pool' (btrfs, copie-sur-ecriture)..."
+if incus storage show fake-pi-pool &>/dev/null; then
+    echo "[=] Le pool fake-pi-pool existe deja."
+else
+    # btrfs (fichier loop, pas de repartitionnement de la carte SD) plutot
+    # que le pool "default" (driver "dir", cree par install.sh) : "dir" ne
+    # partage rien entre instances et duplique integralement l'image de
+    # base a chaque faux Pi (~1,7 Gio/instance observe en pratique) - une
+    # carte SD de 15 Gio sature alors apres seulement 7-8 machines, cassant
+    # silencieusement le provisioning en cours (ecritures qui echouent).
+    # btrfs partage l'image de base entre toutes les instances.
+    incus storage create fake-pi-pool btrfs size=9GiB
+fi
+
 echo "[+] Application du profil 'fake-pi' (ressources + reseau)..."
 if incus profile show fake-pi &>/dev/null; then
     incus profile edit fake-pi < "$SCRIPT_DIR/profiles/fake-pi.yaml"

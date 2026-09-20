@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Annule ce que network-setup.sh a mis en place : profil fake-pi et
-# reseau expo-lan. Symetrique de network-setup.sh. A lancer APRES
+# Annule ce que network-setup.sh a mis en place : profil fake-pi, pool de
+# stockage fake-pi-pool et reseau expo-lan. Symetrique de
+# network-setup.sh. A lancer APRES
 # fleet/teardown-fleet.sh (un profil/reseau encore utilise par une
 # instance ne peut pas etre supprime). Note : server/teardown-server.sh
 # n'a pas de profil Incus a nettoyer, son stack tourne directement sur
@@ -28,6 +29,19 @@ if incus profile show fake-pi &>/dev/null; then
     rm -f /tmp/expolab-profile-err
 else
     echo "[=] Profil fake-pi deja absent."
+fi
+
+if incus storage show fake-pi-pool &>/dev/null; then
+    if incus storage delete fake-pi-pool 2>/tmp/expolab-storage-err; then
+        echo "[-] Pool fake-pi-pool supprime."
+    else
+        echo "[!] Impossible de supprimer le pool fake-pi-pool (encore utilise ?) :" >&2
+        cat /tmp/expolab-storage-err >&2
+        echo "    -> lancer d'abord ../fleet/teardown-fleet.sh" >&2
+    fi
+    rm -f /tmp/expolab-storage-err
+else
+    echo "[=] Pool fake-pi-pool deja absent."
 fi
 
 if incus network show expo-lan &>/dev/null; then

@@ -12,6 +12,15 @@ devices:
     type: nic
   root:
     path: /
-    pool: default
+    # Pool dedie en copie-sur-ecriture (btrfs, cree par network-setup.sh sur
+    # un fichier loop - pas de repartitionnement de la carte SD) plutot que
+    # "default" (driver "dir") : ce dernier duplique integralement l'image
+    # de base a chaque instance (~1,7 Gio/faux Pi observe en pratique), et
+    # la carte SD de 15 Gio du lab sature apres seulement 7-8 machines,
+    # cassant silencieusement le provisioning en cours (ecritures qui
+    # echouent, ex: config reseau) - voir l'incident documente dans
+    # l'historique du projet. btrfs partage l'image de base entre toutes
+    # les instances, ne stockant que leurs differences.
+    pool: fake-pi-pool
     type: disk
 name: fake-pi
