@@ -1,0 +1,17 @@
+# Liste statique et versionnee des services du serveur d'expo. A tenir a
+# jour a la main en meme temps que server/services.yaml (pas
+# d'auto-decouverte ici, voir docker-compose.yml de ce stack).
+---
+- Services:
+    - Dockhand:
+        href: https://dockhand.web.expolab.lan
+        description: Gestion de tous les stacks Docker (dnsmasq, caddy, webui, bastion, wireguard)
+        icon: si-docker
+    - Fleet:
+        href: https://fleet.web.expolab.lan
+        description: Creer/supprimer les faux Raspberry Pi de la flotte
+        icon: si-raspberrypi
+    - Bastion:
+        href: https://bastion.web.expolab.lan
+        description: Dashboard SSH/VNC de la flotte
+        icon: mdi-remote-desktop

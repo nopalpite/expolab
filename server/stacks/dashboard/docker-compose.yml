@@ -1,0 +1,23 @@
+# Stack Dockhand "dashboard" - page de liens vers les services
+# applicatifs du serveur d'expo (Homepage, https://gethomepage.dev).
+#
+# Config statique et versionnee (config/services.yaml) plutot
+# qu'auto-decouverte via le socket Docker : la liste des services de ce
+# lab est petite et connue a l'avance (Dockhand, fleet, Bastion - dnsmasq/
+# caddy/wireguard n'ont pas d'interface web propre, deja gerables depuis
+# la tuile Dockhand), pas besoin de donner a ce conteneur un acces
+# supplementaire au socket Docker pour ca.
+services:
+  dashboard:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: expolab-dashboard
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      # Next.js (moteur de Homepage) rejette par defaut toute requete dont
+      # le Host: ne correspond pas a l'origine attendue - necessaire ici
+      # puisqu'on y accede via le vhost Caddy, pas directement sur son port.
+      - HOMEPAGE_ALLOWED_HOSTS=dashboard.web.expolab.lan,localhost:3001
+    volumes:
+      - ${REPO_ROOT}/server/stacks/dashboard/config:/app/config

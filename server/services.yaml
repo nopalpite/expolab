@@ -13,6 +13,8 @@
 #
 # https://<name>.web.expolab.lan  ->  Caddy  ->  http://<backend_host>:<backend_port>
 services:
+  - name: dashboard
+    backend_port: 3001
   - name: dockhand
     backend_port: 3000
   - name: fleet

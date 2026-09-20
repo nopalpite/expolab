@@ -49,6 +49,14 @@ chaque service comme **stack Dockhand independante** via son API REST
   versionne) ; inventaire de machines et donnees persistees dans
   `server/stacks/bastion/{config,maps}/` (egalement non versionne, propre
   a chaque lab)
+- **dashboard** (https://dashboard.web.expolab.lan, point d'entree du lab)
+  - [Homepage](https://gethomepage.dev), page de liens vers les services
+  ayant une interface web propre (Dockhand, fleet, Bastion - dnsmasq/caddy/
+  wireguard n'en ont pas, deja pilotables depuis la tuile Dockhand). Config
+  statique versionnee (`server/stacks/dashboard/config/services.yaml`),
+  pas d'auto-decouverte via le socket Docker : la liste est petite et
+  connue a l'avance, pas besoin d'un acces supplementaire au socket pour
+  si peu
 
 Les binds relatifs (`./x`) d'une stack creee via l'API Dockhand se
 resolvent dans le repertoire de donnees propre a Dockhand, pas dans ce
@@ -193,10 +201,11 @@ incus exec pi-01 -- bash         # shell direct dans le conteneur
 ssh pi@<ip-de-pi-01>             # mot de passe: raspberry (a changer si besoin)
 
 # http://<ip-du-pi>:3000 - toutes les stacks (dnsmasq, caddy, webui,
-# bastion, wireguard) y sont visibles/pilotables
+# bastion, wireguard, dashboard) y sont visibles/pilotables
 
 # Reverse proxy HTTPS (TLS auto-signe, cert "not trusted" attendu sans
 # importer le CA interne de Caddy) :
+curl -k https://dashboard.web.expolab.lan  # point d'entree, liens vers tout le reste
 curl -k https://fleet.web.expolab.lan      # webui flotte
 curl -k https://dockhand.web.expolab.lan   # Dockhand
 curl -k https://bastion.web.expolab.lan    # Bastion (admin/raspberry)
@@ -266,13 +275,14 @@ server/
   teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), reactive le DHCP integre d'Incus, desinstalle Docker
   docker-compose.yml            # bootstrap UNIQUEMENT : Dockhand (ne peut pas se creer via sa propre API)
   dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack via l'API
-  services.yaml                  # services applicatifs exposes au reverse-proxy (dockhand, fleet, bastion)
+  services.yaml                  # services applicatifs exposes au reverse-proxy (dashboard, dockhand, fleet, bastion)
   render-caddyfile.py             # genere le Caddyfile a partir de server/services.yaml
   stacks/
     dnsmasq/{docker-compose.yml, Dockerfile, dnsmasq.conf, data/}   # data/ non versionne (baux DHCP)
     caddy/{docker-compose.yml, Caddyfile}                            # Caddyfile genere, non versionne
     webui/docker-compose.yml                                          # build context = ../../webui
     bastion/{docker-compose.yml, bastion.env, config/, maps/}        # ces 3 derniers non versionnes
+    dashboard/{docker-compose.yml, config/}   # Homepage, liens vers les services web du lab
 webui/
   app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh
   Dockerfile                     # image (Flask + client Incus)

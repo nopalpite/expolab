@@ -22,3 +22,10 @@ server/stacks/dnsmasq/data/
 # Config WireGuard generee (cles, pairs) - jamais la meme d'un lab a
 # l'autre, ne doit jamais finir dans git (secrets client compris).
 vpn/wireguard/config/
+
+# Fichiers auto-generes par Homepage au demarrage dans son dossier de
+# config (monte directement sur server/stacks/dashboard/config/, qui
+# contient par ailleurs nos fichiers versionnes services.yaml/settings.yaml) -
+# etat runtime, pas de l'infra-as-code.
+server/stacks/dashboard/config/logs/
+server/stacks/dashboard/config/kubernetes.yaml

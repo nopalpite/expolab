@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Deploie le "serveur d'expo" : Dockhand est lance seul (il ne peut pas se
 # creer via sa propre API), puis chaque service (dnsmasq, caddy, webui,
-# bastion) est cree/redeploye comme stack Dockhand independante via son
-# API REST - voir server/dockhand-api.sh. C'est ce qui, en vraie vie,
+# bastion, dashboard) est cree/redeploye comme stack Dockhand independante
+# via son API REST - voir server/dockhand-api.sh. C'est ce qui, en vraie vie,
 # tournerait sur le vrai serveur de l'exposition (Incus n'existe pas
 # la-bas, il ne sert qu'a simuler la flotte ici dans le lab).
 #
@@ -79,7 +79,7 @@ fi
 mkdir -p "$SCRIPT_DIR/stacks/dnsmasq/data"
 
 echo "[+] Creation/redeploiement des stacks applicatives via l'API Dockhand..."
-for stack in dnsmasq caddy webui bastion; do
+for stack in dnsmasq caddy webui bastion dashboard; do
     dockhand_upsert_stack "$stack" "$SCRIPT_DIR/stacks/$stack/docker-compose.yml"
 done
 
@@ -128,11 +128,12 @@ fi
 cat <<EOF
 
 [+] Serveur d'expo pret :
+    Dashboard     : https://dashboard.web.expolab.lan (liens vers tous les services)
     Dockhand      : http://<ip-du-pi>:3000 (toutes les stacks pilotables ici)
     DHCP/DNS      : dnsmasq, plage 10.42.0.100-250, domaine expolab.lan
     Reverse proxy : https://<service>.web.expolab.lan (TLS auto-signe Caddy)
                     services definis dans server/services.yaml
 
 Verification :
-    curl -k https://fleet.web.expolab.lan
+    curl -k https://dashboard.web.expolab.lan
 EOF
