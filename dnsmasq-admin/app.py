@@ -122,7 +122,17 @@ def api_leases():
 
 @app.route("/api/reservations", methods=["GET"])
 def api_reservations_list():
-    return jsonify({"reservations": load_reservations()})
+    reservations = load_reservations()
+    leases_by_mac = {l["mac"]: l for l in load_leases()}
+    for r in reservations:
+        # dnsmasq applique la reservation immediatement pour toute
+        # NOUVELLE negociation DHCP, mais un appareil qui a deja un bail
+        # actif garde son IP jusqu'a son prochain renouvellement naturel
+        # (ou un redemarrage) - signale ce cas plutot que de le
+        # redemarrer nous-memes (voir discussion).
+        lease = leases_by_mac.get(r["mac"])
+        r["pending_renewal"] = lease is not None and lease["ip"] != r["ip"]
+    return jsonify({"reservations": reservations})
 
 
 @app.route("/api/reservations", methods=["POST"])

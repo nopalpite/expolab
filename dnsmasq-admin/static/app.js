@@ -50,7 +50,10 @@ async function loadReservations() {
         body.innerHTML = data.reservations.map(r => `
             <tr>
                 <td data-label="MAC"><code>${r.mac}</code></td>
-                <td data-label="IP"><code>${r.ip}</code></td>
+                <td data-label="IP">
+                    <code>${r.ip}</code>
+                    ${r.pending_renewal ? '<span class="badge badge-pending" title="L\'appareil a encore un bail actif sur une autre IP - il prendra celle-ci a son prochain renouvellement ou redemarrage">en attente de renouvellement</span>' : ''}
+                </td>
                 <td data-label="Hostname">${r.hostname || "-"}</td>
                 <td class="actions">
                     <button class="secondary" data-edit-mac="${r.mac}" data-edit-ip="${r.ip}" data-edit-hostname="${r.hostname || ""}">Modifier</button>
