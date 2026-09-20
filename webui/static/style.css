@@ -171,6 +171,59 @@ td code {
 .badge-pending { background: rgba(79, 140, 255, 0.15); color: var(--accent); }
 .badge-muted { background: rgba(154, 161, 172, 0.15); color: var(--muted); }
 
+#topology-wrap {
+    overflow-x: auto;
+}
+
+#topology-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-width: 480px;
+}
+
+.topo-line {
+    stroke: var(--border);
+    stroke-width: 1.5;
+    fill: none;
+}
+
+.topo-dot-ok { fill: var(--ok); }
+.topo-dot-pending { fill: var(--accent); }
+.topo-dot-muted { fill: var(--muted); }
+
+.topo-hub rect {
+    fill: var(--panel);
+    stroke: var(--border);
+    stroke-width: 1;
+}
+
+.topo-node rect {
+    fill: var(--panel);
+    stroke-width: 1.5;
+}
+
+.topo-node.status-running rect { stroke: var(--ok); }
+.topo-node.status-pending rect { stroke: var(--accent); }
+.topo-node.status-muted rect { stroke: var(--muted); }
+
+.topo-title {
+    fill: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.topo-sub {
+    fill: var(--muted);
+    font-size: 11px;
+}
+
+.topo-empty {
+    color: var(--muted);
+    text-align: center;
+    padding: 20px;
+}
+
 @media (max-width: 560px) {
     #create-form { flex-direction: column; align-items: stretch; }
     table, thead, tbody, th, td, tr { display: block; }
