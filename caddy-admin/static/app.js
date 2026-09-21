@@ -1,4 +1,33 @@
 let editingName = null;
+let servicesByName = {};
+
+function addRouteRow(path = "", port = "") {
+    const list = document.getElementById("extra-routes-list");
+    const row = document.createElement("div");
+    row.className = "route-row";
+    row.innerHTML = `
+        <input type="text" class="route-path" placeholder="/vnc-ws/*" value="${path}">
+        <input type="number" class="route-port" placeholder="6080" min="1" max="65535" value="${port}">
+        <button type="button" class="danger">Retirer</button>
+    `;
+    row.querySelector("button").addEventListener("click", () => row.remove());
+    list.appendChild(row);
+}
+
+function clearRouteRows() {
+    document.getElementById("extra-routes-list").innerHTML = "";
+}
+
+function collectExtraRoutes() {
+    return Array.from(document.querySelectorAll("#extra-routes-list .route-row"))
+        .map(row => ({
+            path: row.querySelector(".route-path").value.trim(),
+            backend_port: parseInt(row.querySelector(".route-port").value, 10),
+        }))
+        .filter(r => r.path);
+}
+
+document.getElementById("add-route-btn").addEventListener("click", () => addRouteRow());
 
 async function loadServices() {
     const body = document.getElementById("services-body");
@@ -6,29 +35,37 @@ async function loadServices() {
         const res = await fetch("/api/services");
         const data = await res.json();
         const services = data.services || [];
+        servicesByName = Object.fromEntries(services.map(s => [s.name, s]));
         if (!services.length) {
-            body.innerHTML = '<tr><td colspan="4" class="empty">Aucun service</td></tr>';
+            body.innerHTML = '<tr><td colspan="5" class="empty">Aucun service</td></tr>';
             return;
         }
-        body.innerHTML = services.map(s => `
+        body.innerHTML = services.map(s => {
+            const routes = s.extra_routes || [];
+            const routesText = routes.length
+                ? routes.map(r => `<code>${r.path}</code> &rarr; ${r.backend_port}`).join("<br>")
+                : "-";
+            return `
             <tr>
                 <td data-label="Nom">${s.name}</td>
                 <td data-label="URL"><code>${s.name}.web.expolab.lan</code></td>
                 <td data-label="Port backend">${s.backend_port}</td>
+                <td data-label="Routes additionnelles">${routesText}</td>
                 <td class="actions">
-                    <button class="secondary" data-edit-name="${s.name}" data-edit-port="${s.backend_port}">Modifier</button>
+                    <button class="secondary" data-edit-name="${s.name}">Modifier</button>
                     <button class="danger" data-name="${s.name}">Retirer</button>
                 </td>
             </tr>
-        `).join("");
+        `;
+        }).join("");
         body.querySelectorAll("button.danger").forEach(btn => {
             btn.addEventListener("click", () => deleteService(btn.dataset.name));
         });
         body.querySelectorAll("button[data-edit-name]").forEach(btn => {
-            btn.addEventListener("click", () => startEditService(btn.dataset.editName, btn.dataset.editPort));
+            btn.addEventListener("click", () => startEditService(btn.dataset.editName));
         });
     } catch (e) {
-        body.innerHTML = '<tr><td colspan="4" class="status-error">Erreur de chargement</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="status-error">Erreur de chargement</td></tr>';
     }
 }
 
@@ -44,12 +81,16 @@ async function deleteService(name) {
     loadServices();
 }
 
-function startEditService(name, port) {
+function startEditService(name) {
+    const svc = servicesByName[name];
+    if (!svc) return;
     editingName = name;
     const nameField = document.getElementById("name");
     nameField.value = name;
     nameField.disabled = true;
-    document.getElementById("backend_port").value = port;
+    document.getElementById("backend_port").value = svc.backend_port;
+    clearRouteRows();
+    (svc.extra_routes || []).forEach(r => addRouteRow(r.path, r.backend_port));
     document.getElementById("create-btn").textContent = "Modifier";
     document.getElementById("create-cancel").hidden = false;
     document.getElementById("create-status").hidden = true;
@@ -60,6 +101,7 @@ function stopEditService() {
     const nameField = document.getElementById("name");
     nameField.disabled = false;
     document.getElementById("create-form").reset();
+    clearRouteRows();
     document.getElementById("create-btn").textContent = "Ajouter";
     document.getElementById("create-cancel").hidden = true;
 }
@@ -75,18 +117,19 @@ document.getElementById("create-form").addEventListener("submit", async (e) => {
 
     const name = document.getElementById("name").value.trim().toLowerCase();
     const backend_port = parseInt(document.getElementById("backend_port").value, 10);
+    const extra_routes = collectExtraRoutes();
 
     try {
         const res = editingName
             ? await fetch(`/api/services/${encodeURIComponent(editingName)}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ backend_port }),
+                body: JSON.stringify({ backend_port, extra_routes }),
             })
             : await fetch("/api/services", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, backend_port }),
+                body: JSON.stringify({ name, backend_port, extra_routes }),
             });
         const data = await res.json();
         status.hidden = false;

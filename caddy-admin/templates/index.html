@@ -24,6 +24,12 @@
                     <label for="backend_port">Port backend</label>
                     <input type="number" id="backend_port" name="backend_port" placeholder="3030" min="1" max="65535" required>
                 </div>
+                <div class="field" style="flex-basis: 100%;">
+                    <label>Routes additionnelles (optionnel)</label>
+                    <p class="subtitle" style="margin: 0 0 6px;">Chemin fait suivre vers un autre port AVANT la route principale (ex: pont VNC de Bastion).</p>
+                    <div id="extra-routes-list"></div>
+                    <button type="button" id="add-route-btn" class="secondary">+ Ajouter une route</button>
+                </div>
                 <button type="submit" id="create-btn">Ajouter</button>
                 <button type="button" id="create-cancel" class="secondary" hidden>Annuler</button>
             </form>
@@ -38,11 +44,12 @@
                         <th>Nom</th>
                         <th>URL</th>
                         <th>Port backend</th>
+                        <th>Routes additionnelles</th>
                         <th></th>
                     </tr>
                 </thead>
                 <tbody id="services-body">
-                    <tr><td colspan="4" class="empty">Chargement...</td></tr>
+                    <tr><td colspan="5" class="empty">Chargement...</td></tr>
                 </tbody>
             </table>
         </section>

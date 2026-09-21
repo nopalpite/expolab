@@ -84,6 +84,21 @@ main {
     color: var(--muted);
 }
 
+.route-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+    align-items: center;
+}
+
+.route-row .route-path {
+    flex: 2 1 auto;
+}
+
+.route-row .route-port {
+    flex: 1 1 90px;
+}
+
 input, select, button {
     font: inherit;
     padding: 8px 10px;

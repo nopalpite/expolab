@@ -29,6 +29,30 @@ CADDY_ADMIN_URL = "http://127.0.0.1:2019/load"
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 
 
+def parse_extra_routes(raw) -> tuple[list[dict] | None, str | None]:
+    """Valide et normalise la liste extra_routes soumise par le formulaire."""
+    if not raw:
+        return [], None
+    if not isinstance(raw, list):
+        return None, "extra_routes invalide"
+    routes = []
+    for entry in raw:
+        path = (entry.get("path") or "").strip()
+        port = entry.get("backend_port")
+        if not path:
+            continue
+        if not path.startswith("/"):
+            return None, f"Chemin invalide '{path}' (doit commencer par /)"
+        try:
+            port = int(port)
+            if not (1 <= port <= 65535):
+                raise ValueError
+        except (TypeError, ValueError):
+            return None, f"Port invalide pour le chemin '{path}' (1-65535)"
+        routes.append({"path": path, "backend_port": port})
+    return routes, None
+
+
 def load_services() -> dict:
     with open(SERVICES_PATH) as f:
         return yaml.safe_load(f) or {"services": []}
@@ -101,12 +125,19 @@ def api_services_create():
     except (TypeError, ValueError):
         return jsonify({"error": "Port invalide (1-65535)"}), 400
 
+    extra_routes, err = parse_extra_routes(body.get("extra_routes"))
+    if err:
+        return jsonify({"error": err}), 400
+
     data = load_services()
     services = data.setdefault("services", [])
     if any(s["name"] == name for s in services):
         return jsonify({"error": f"'{name}' existe deja"}), 409
 
-    services.append({"name": name, "backend_port": port})
+    entry = {"name": name, "backend_port": port}
+    if extra_routes:
+        entry["extra_routes"] = extra_routes
+    services.append(entry)
     save_services(data)
 
     ok, err = save_and_reload()
@@ -127,15 +158,21 @@ def api_services_update(name: str):
     except (TypeError, ValueError):
         return jsonify({"error": "Port invalide (1-65535)"}), 400
 
+    extra_routes, err = parse_extra_routes(body.get("extra_routes"))
+    if err:
+        return jsonify({"error": err}), 400
+
     data = load_services()
     services = data.get("services", [])
     target = next((s for s in services if s["name"] == name), None)
     if target is None:
         return jsonify({"error": f"'{name}' introuvable"}), 404
 
-    # extra_routes (Bastion, etc.) reste intact - seul backend_port est
-    # editable depuis cette page, pas les routes avancees (voir services.yaml).
     target["backend_port"] = port
+    if extra_routes:
+        target["extra_routes"] = extra_routes
+    else:
+        target.pop("extra_routes", None)
     save_services(data)
 
     ok, err = save_and_reload()
