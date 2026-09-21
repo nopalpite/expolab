@@ -128,10 +128,12 @@ cat <<EOF
     Sous-reseau VPN : $WG_SUBNET
     Cle publique serveur : $(cat "$WG_DIR/server_public.key")
 
-Pair par defaut pret a distribuer : $WG_DIR/peers/${DEFAULT_PEER_NAME}.conf
-(a copier vers le poste client - jamais commite dans le depot git ; inutile
- ? le supprimer avec sudo ./remove-peer.sh $DEFAULT_PEER_NAME ou depuis
- https://vpn.web.expolab.lan)
+Pair par defaut - a copier-coller directement dans un client WireGuard
+(fichier : $WG_DIR/peers/${DEFAULT_PEER_NAME}.conf ; inutile ? le
+supprimer avec sudo ./remove-peer.sh $DEFAULT_PEER_NAME ou depuis
+https://vpn.web.expolab.lan) :
+
+$(cat "$WG_DIR/peers/${DEFAULT_PEER_NAME}.conf")
 
 Pour ajouter un autre pair, depuis https://vpn.web.expolab.lan ou en ligne
 de commande (ex: le laptop d'un admin) :
