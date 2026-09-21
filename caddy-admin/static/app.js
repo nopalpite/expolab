@@ -1,5 +1,38 @@
 let editingName = null;
 let servicesByName = {};
+let usedPorts = {};
+
+function computeUsedPorts(services) {
+    const used = {};
+    services.forEach(s => {
+        used[s.backend_port] = s.name;
+        (s.extra_routes || []).forEach(r => {
+            used[r.backend_port] = `${s.name} (${r.path})`;
+        });
+    });
+    return used;
+}
+
+function renderUsedPortsHint() {
+    const hint = document.getElementById("used-ports-hint");
+    const entries = Object.entries(usedPorts)
+        .filter(([port]) => !editingName || usedPorts[port] !== editingName)
+        .sort((a, b) => a[0] - b[0]);
+    hint.textContent = entries.length
+        ? "Ports deja utilises : " + entries.map(([port, who]) => `${port} (${who})`).join(", ")
+        : "";
+}
+
+function checkPortConflict() {
+    const field = document.getElementById("backend_port");
+    const port = parseInt(field.value, 10);
+    const owner = usedPorts[port];
+    const conflict = owner && owner !== editingName;
+    field.style.borderColor = conflict ? "var(--error)" : "";
+    return !conflict;
+}
+
+document.getElementById("backend_port").addEventListener("input", checkPortConflict);
 
 function addRouteRow(path = "", port = "") {
     const list = document.getElementById("extra-routes-list");
@@ -36,6 +69,8 @@ async function loadServices() {
         const data = await res.json();
         const services = data.services || [];
         servicesByName = Object.fromEntries(services.map(s => [s.name, s]));
+        usedPorts = computeUsedPorts(services);
+        renderUsedPortsHint();
         if (!services.length) {
             body.innerHTML = '<tr><td colspan="5" class="empty">Aucun service</td></tr>';
             return;
@@ -94,6 +129,8 @@ function startEditService(name) {
     document.getElementById("create-btn").textContent = "Modifier";
     document.getElementById("create-cancel").hidden = false;
     document.getElementById("create-status").hidden = true;
+    renderUsedPortsHint();
+    checkPortConflict();
 }
 
 function stopEditService() {
@@ -104,6 +141,8 @@ function stopEditService() {
     clearRouteRows();
     document.getElementById("create-btn").textContent = "Ajouter";
     document.getElementById("create-cancel").hidden = true;
+    renderUsedPortsHint();
+    document.getElementById("backend_port").style.borderColor = "";
 }
 
 document.getElementById("create-cancel").addEventListener("click", stopEditService);

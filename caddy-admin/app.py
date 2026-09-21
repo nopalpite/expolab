@@ -58,6 +58,18 @@ def load_services() -> dict:
         return yaml.safe_load(f) or {"services": []}
 
 
+def used_ports(services: list[dict], exclude_name: str | None = None) -> dict[int, str]:
+    """port -> description de qui l'utilise deja (service principal ou extra_route)."""
+    used = {}
+    for s in services:
+        if s["name"] == exclude_name:
+            continue
+        used[s["backend_port"]] = s["name"]
+        for route in s.get("extra_routes", []):
+            used[route["backend_port"]] = f"{s['name']} ({route['path']})"
+    return used
+
+
 def save_services(data: dict) -> None:
     # Ecriture atomique (fichier temporaire + rename) : evite toute
     # fenetre ou une lecture concurrente verrait un fichier partiellement
@@ -134,6 +146,13 @@ def api_services_create():
     if any(s["name"] == name for s in services):
         return jsonify({"error": f"'{name}' existe deja"}), 409
 
+    used = used_ports(services)
+    if port in used:
+        return jsonify({"error": f"Port {port} deja utilise par '{used[port]}'"}), 409
+    for route in extra_routes:
+        if route["backend_port"] in used:
+            return jsonify({"error": f"Port {route['backend_port']} (route {route['path']}) deja utilise par '{used[route['backend_port']]}'"}), 409
+
     entry = {"name": name, "backend_port": port}
     if extra_routes:
         entry["extra_routes"] = extra_routes
@@ -167,6 +186,13 @@ def api_services_update(name: str):
     target = next((s for s in services if s["name"] == name), None)
     if target is None:
         return jsonify({"error": f"'{name}' introuvable"}), 404
+
+    used = used_ports(services, exclude_name=name)
+    if port in used:
+        return jsonify({"error": f"Port {port} deja utilise par '{used[port]}'"}), 409
+    for route in extra_routes:
+        if route["backend_port"] in used:
+            return jsonify({"error": f"Port {route['backend_port']} (route {route['path']}) deja utilise par '{used[route['backend_port']]}'"}), 409
 
     target["backend_port"] = port
     if extra_routes:
