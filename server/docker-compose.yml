@@ -9,6 +9,12 @@ services:
     image: fnsys/dockhand:latest
     container_name: dockhand
     restart: unless-stopped
+    environment:
+      # Par defaut un conteneur demarre en UTC quel que soit le fuseau
+      # de l'hote (meme si celui-ci est deja configure correctement,
+      # comme c'est le cas ici) - explicite plutot que de dependre du
+      # fuseau systeme de l'hote de deploiement.
+      - TZ=Europe/Paris
     ports:
       - "3000:3000"
     volumes:
