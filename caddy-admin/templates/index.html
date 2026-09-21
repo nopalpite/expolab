@@ -37,6 +37,21 @@
             <p id="create-status" class="status" hidden></p>
         </section>
 
+        <section class="panel" id="discover-panel" hidden>
+            <h2>Conteneurs detectes</h2>
+            <p class="subtitle">Conteneurs Docker avec un port publie pas encore expose par Caddy. "Proposer" pre-remplit le formulaire ci-dessus - rien n'est ajoute sans validation.</p>
+            <table id="discover-table">
+                <thead>
+                    <tr>
+                        <th>Conteneur</th>
+                        <th>Port</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="discover-body"></tbody>
+            </table>
+        </section>
+
         <section class="panel">
             <h2>Services actuels</h2>
             <table id="services-table">

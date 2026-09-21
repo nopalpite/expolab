@@ -71,12 +71,19 @@ chaque service comme **stack Dockhand independante** via son API REST
     vivent sous *.web.expolab.lan, un unique wildcard dans dnsmasq.conf
     (le tri par service se fait cote Caddy via le Host: HTTP, pas via
     DNS) - une liste par nom aurait ete redondante.
-  - `caddy-admin` (https://caddy.web.expolab.lan) : ajoute/retire une
-    entree dans `server/services.yaml`, regenere le Caddyfile et le
-    pousse a **l'admin API de Caddy lui-meme**
-    (`http://127.0.0.1:2019/load`, atteignable en `network_mode: host`
-    comme Caddy) pour un rechargement a chaud - pas de redeploiement de
-    stack, pas de coupure de service.
+  - `caddy-admin` (https://caddy.web.expolab.lan) : ajoute/retire/modifie
+    une entree dans `server/services.yaml` (port backend, `extra_routes`
+    incluses - ex: le pont VNC de Bastion), refuse tout port deja
+    utilise par un autre service (validation + avertissement en direct),
+    et regenere le Caddyfile puis le pousse a **l'admin API de Caddy
+    lui-meme** (`http://127.0.0.1:2019/load`, atteignable en
+    `network_mode: host` comme Caddy) pour un rechargement a chaud - pas
+    de redeploiement de stack, pas de coupure de service. Detecte aussi
+    les conteneurs Docker a port publie pas encore exposes (socket
+    Docker monte, meme precedent que `dnsmasq-admin`/`vpn-admin`) et
+    propose de les ajouter - toujours en pre-remplissant le formulaire,
+    jamais automatiquement ; les conteneurs en `network_mode: host` n'ont
+    pas de port "publie" au sens Docker, indetectables par ce biais.
   - `vpn-admin` (https://vpn.web.expolab.lan) : liste les pairs (avec
     etat de connexion et trafic via `wg show wg0 dump`), QR code pour
     import mobile, et appelle **directement** `vpn/add-peer.sh`/

@@ -7,7 +7,16 @@ Caddyfile et le pousse a Caddy via SON PROPRE admin API
 (http://127.0.0.1:2019/load, atteignable car Caddy tourne en
 network_mode: host comme ce conteneur) - rechargement a chaud, sans
 redemarrer le conteneur Caddy ni repasser par Dockhand.
+
+/api/discover liste les conteneurs Docker a ports publies pas encore
+references dans services.yaml - suggestion seulement, jamais ajoutee
+automatiquement : le formulaire de creation est juste pre-rempli, il
+faut toujours relire/ajuster et cliquer "Ajouter" soi-meme. Les
+conteneurs en network_mode: host (dnsmasq, caddy, bastion, wireguard...)
+n'ont pas de "port publie" au sens Docker - indetectables par ce biais,
+a ajouter a la main comme aujourd'hui.
 """
+import json
 import os
 import re
 import subprocess
@@ -70,6 +79,50 @@ def used_ports(services: list[dict], exclude_name: str | None = None) -> dict[in
     return used
 
 
+def discover_containers() -> list[dict]:
+    """Conteneurs Docker a port(s) publie(s) pas encore dans services.yaml."""
+    ids_result = subprocess.run(["docker", "ps", "-q"], capture_output=True, text=True, timeout=10)
+    if ids_result.returncode != 0:
+        return []
+    ids = ids_result.stdout.split()
+    if not ids:
+        return []
+
+    inspect_result = subprocess.run(
+        ["docker", "inspect", "--format", "{{.Name}}|{{json .NetworkSettings.Ports}}"] + ids,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if inspect_result.returncode != 0:
+        return []
+
+    used = used_ports(load_services().get("services", []))
+    suggestions = []
+    seen_ports = set()
+    for line in inspect_result.stdout.splitlines():
+        if "|" not in line:
+            continue
+        name, ports_json = line.split("|", 1)
+        name = name.lstrip("/")
+        try:
+            ports = json.loads(ports_json) or {}
+        except json.JSONDecodeError:
+            continue
+        host_ports = set()
+        for bindings in ports.values():
+            for b in bindings or []:
+                host_port = b.get("HostPort")
+                if host_port:
+                    host_ports.add(int(host_port))
+        for port in sorted(host_ports):
+            if port in used or port in seen_ports:
+                continue
+            seen_ports.add(port)
+            suggestions.append({"container": name, "port": port})
+    return suggestions
+
+
 def save_services(data: dict) -> None:
     # Ecriture atomique (fichier temporaire + rename) : evite toute
     # fenetre ou une lecture concurrente verrait un fichier partiellement
@@ -120,6 +173,11 @@ def index():
 @app.route("/api/services", methods=["GET"])
 def api_services_list():
     return jsonify(load_services())
+
+
+@app.route("/api/discover")
+def api_discover():
+    return jsonify({"suggestions": discover_containers()})
 
 
 @app.route("/api/services", methods=["POST"])

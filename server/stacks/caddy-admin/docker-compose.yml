@@ -12,3 +12,7 @@ services:
     network_mode: host
     volumes:
       - ${REPO_ROOT}/server:/server
+      # Necessaire pour detecter les conteneurs a ports publies pas
+      # encore exposes via Caddy (voir app.py, /api/discover) - meme
+      # precedent deja accepte pour dnsmasq-admin et vpn-admin.
+      - /var/run/docker.sock:/var/run/docker.sock

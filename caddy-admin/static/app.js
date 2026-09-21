@@ -104,7 +104,7 @@ async function deleteService(name) {
         return;
     }
     if (editingName === name) stopEditService();
-    loadServices();
+    loadServices().then(loadDiscoveries);
 }
 
 function startEditService(name) {
@@ -169,7 +169,7 @@ document.getElementById("create-form").addEventListener("submit", async (e) => {
             status.className = "status status-ok";
             status.textContent = editingName ? `Service '${name}' modifie et Caddy recharge.` : `Service '${name}' ajoute et Caddy recharge.`;
             stopEditService();
-            loadServices();
+            loadServices().then(loadDiscoveries);
         }
     } catch (e) {
         status.hidden = false;
@@ -180,4 +180,45 @@ document.getElementById("create-form").addEventListener("submit", async (e) => {
     }
 });
 
-loadServices();
+function suggestName(containerName) {
+    let name = containerName.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-+/, "");
+    if (!name || !/^[a-z]/.test(name)) name = "svc-" + name;
+    return name.slice(0, 32).replace(/-+$/, "");
+}
+
+function proposeService(container, port) {
+    stopEditService();
+    document.getElementById("name").value = suggestName(container);
+    document.getElementById("backend_port").value = port;
+    checkPortConflict();
+    document.getElementById("create-form").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+async function loadDiscoveries() {
+    const panel = document.getElementById("discover-panel");
+    const body = document.getElementById("discover-body");
+    try {
+        const res = await fetch("/api/discover");
+        const data = await res.json();
+        const suggestions = data.suggestions || [];
+        if (!suggestions.length) {
+            panel.hidden = true;
+            return;
+        }
+        panel.hidden = false;
+        body.innerHTML = suggestions.map(s => `
+            <tr>
+                <td data-label="Conteneur">${s.container}</td>
+                <td data-label="Port">${s.port}</td>
+                <td class="actions"><button class="secondary" data-container="${s.container}" data-port="${s.port}">Proposer</button></td>
+            </tr>
+        `).join("");
+        body.querySelectorAll("button[data-container]").forEach(btn => {
+            btn.addEventListener("click", () => proposeService(btn.dataset.container, btn.dataset.port));
+        });
+    } catch (e) {
+        panel.hidden = true;
+    }
+}
+
+loadServices().then(loadDiscoveries);
