@@ -132,11 +132,12 @@ else
     echo "[=] DHCP deja bascule vers dnsmasq (rien a refaire)."
 fi
 
+LAN_IP="$(ip route get 1.1.1.1 2>/dev/null | awk '/src/{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}')"
 cat <<EOF
 
 [+] Serveur d'expo pret :
     Dashboard     : https://dashboard.web.expolab.lan (liens vers tous les services)
-    Dockhand      : http://<ip-du-pi>:3000 (toutes les stacks pilotables ici)
+    Dockhand      : http://${LAN_IP:-<ip-du-pi>}:3000 (toutes les stacks pilotables ici)
     DHCP/DNS      : dnsmasq, plage 10.42.0.100-250, domaine expolab.lan
     Reverse proxy : https://<service>.web.expolab.lan (TLS auto-signe Caddy)
                     services definis dans server/services.yaml

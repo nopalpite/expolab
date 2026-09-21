@@ -74,12 +74,20 @@ dockhand_require_env() {
     if dockhand_get_env_id >/dev/null 2>&1; then
         return 0
     fi
+    # $DOCKHAND_URL vise 127.0.0.1 (correct pour nos propres appels curl,
+    # qui partent DU Pi) - mais inutile pour un humain qui doit ouvrir
+    # cette URL depuis SON PROPRE navigateur, sur un autre poste. Detecte
+    # l'IP LAN reelle de l'hote pour l'affichage (meme technique que
+    # vpn/add-peer.sh pour son IP de endpoint par defaut).
+    local lan_ip display_url
+    lan_ip="$(ip route get 1.1.1.1 2>/dev/null | awk '/src/{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}')"
+    display_url="http://${lan_ip:-<ip-du-pi>}:3000"
     cat >&2 <<EOF
 
 [!] Aucun environnement Dockhand configure - etape manuelle unique requise
     (aucun endpoint API ne permet de la faire a notre place) :
 
-    1. Ouvrir $DOCKHAND_URL dans un navigateur
+    1. Ouvrir $display_url dans un navigateur
     2. Settings > Environments > confirmer/ajouter l'environnement local
        (Unix socket - deja monte dans le conteneur dockhand)
 
