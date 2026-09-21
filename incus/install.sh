@@ -34,14 +34,16 @@ usermod -aG incus-admin "$REAL_USER"
 echo "[+] Utilisateur $REAL_USER ajoute au groupe incus-admin (deconnexion/reconnexion necessaire)."
 
 echo "[+] Initialisation d'Incus (stockage local 'dir', reseau NAT par defaut)..."
-incus admin init --auto --storage-backend=dir
+if incus storage show default &>/dev/null; then
+    echo "[=] Incus deja initialise, conserve."
+else
+    incus admin init --auto --storage-backend=dir
+fi
 
 cat <<EOF
 
 [+] Incus est installe.
 
 Prochaine etape :
-    sudo ./network-setup.sh eth0
-
-(remplacer eth0 par l'interface physique reellement utilisee sur le Pi 5)
+    sudo ./network-setup.sh
 EOF
