@@ -65,9 +65,16 @@ print(envs[0]["id"])
 '
 }
 
+# Bloque jusqu'a ce qu'un environnement Dockhand soit configure, plutot
+# que d'echouer immediatement - aucun endpoint API ne permet de creer un
+# environnement a la place de l'utilisateur (etape UI unique), mais rien
+# n'empeche d'attendre que ce soit fait au lieu de le forcer a relancer
+# le script lui-meme une fois le clic effectue dans le navigateur.
 dockhand_require_env() {
-    if ! dockhand_get_env_id >/dev/null 2>&1; then
-        cat >&2 <<EOF
+    if dockhand_get_env_id >/dev/null 2>&1; then
+        return 0
+    fi
+    cat >&2 <<EOF
 
 [!] Aucun environnement Dockhand configure - etape manuelle unique requise
     (aucun endpoint API ne permet de la faire a notre place) :
@@ -75,10 +82,15 @@ dockhand_require_env() {
     1. Ouvrir $DOCKHAND_URL dans un navigateur
     2. Settings > Environments > confirmer/ajouter l'environnement local
        (Unix socket - deja monte dans le conteneur dockhand)
-    3. Relancer ce script : il reprendra automatiquement a partir d'ici.
+
+En attente (verifie toutes les 5s, Ctrl+C pour annuler)...
 EOF
-        return 1
-    fi
+    while ! dockhand_get_env_id >/dev/null 2>&1; do
+        printf '.' >&2
+        sleep 5
+    done
+    echo >&2
+    echo "[+] Environnement Dockhand detecte, on poursuit." >&2
 }
 
 # dockhand_upsert_stack <nom> <fichier_docker-compose.yml>
@@ -94,7 +106,7 @@ dockhand_upsert_stack() {
     local name="$1" compose_file="$2" env_id compose_content payload
 
     : "${REPO_ROOT:?REPO_ROOT doit etre exporte avant un appel a dockhand_upsert_stack}"
-    env_id="$(dockhand_get_env_id)" || { dockhand_require_env; return 1; }
+    env_id="$(dockhand_get_env_id)" || { dockhand_require_env; env_id="$(dockhand_get_env_id)"; }
     compose_content="$(REPO_ROOT="$REPO_ROOT" envsubst '${REPO_ROOT}' < "$compose_file")"
 
     # Pas de PUT documente pour mettre a jour le contenu compose d'une

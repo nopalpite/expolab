@@ -111,10 +111,11 @@ avant l'envoi, pour que nos fichiers de config restent les notres
 
 **Etape manuelle unique** au tout premier `deploy-server.sh` : Dockhand ne
 propose aucun endpoint API pour creer un environnement (connexion au
-Docker local) - le script s'arrete avec des instructions si aucun
-environnement n'est configure ; ouvrir `http://<ip>:3000`, confirmer
-l'environnement local (Unix socket) dans *Settings > Environments*, puis
-relancer le script, qui reprend automatiquement a partir de la.
+Docker local) - si aucun environnement n'est configure, le script
+affiche des instructions et **patiente** (verifie toutes les 5s) plutot
+que d'echouer ; ouvrir `http://<ip>:3000`, confirmer l'environnement
+local (Unix socket) dans *Settings > Environments*, et le script reprend
+tout seul, rien a relancer.
 
 Le reverse-proxy n'expose PAS les faux Pi (ils n'ont pas vocation a etre
 joignables en HTTPS individuellement) : il sert a exposer les services
@@ -216,10 +217,10 @@ Point d'entree unique - installe tout dans l'ordre :
 
 ```bash
 sudo ./install.sh
-# S'arrete la 1ere fois a l'etape Dockhand avec des instructions : ouvrir
-# Dockhand (http://<ip>:3000), confirmer l'environnement local dans
-# Settings > Environments, puis relancer EXACTEMENT LA MEME COMMANDE -
-# idempotent de bout en bout, ne repete que ce qui manque.
+# S'arrete (attend, en fait) la 1ere fois a l'etape Dockhand avec des
+# instructions : ouvrir Dockhand (http://<ip>:3000), confirmer
+# l'environnement local dans Settings > Environments - le script patiente
+# et reprend tout seul des que c'est fait, rien a relancer.
 ```
 
 Pas de `chmod +x` a faire a la main : les scripts sont versionnes
@@ -239,9 +240,9 @@ sudo ./incus/network-setup.sh
 ./fleet/deploy-fleet.sh
 
 sudo ./server/deploy-server.sh
-# S'arrete la 1ere fois avec des instructions : ouvrir Dockhand
+# Patiente la 1ere fois avec des instructions : ouvrir Dockhand
 # (http://<ip>:3000), confirmer l'environnement local dans Settings >
-# Environments, puis relancer la meme commande.
+# Environments - reprend tout seul des que c'est fait.
 
 sudo ./vpn/install.sh
 # Cree aussi un pair "default" pret a distribuer (vpn/wireguard/config/peers/default.conf)

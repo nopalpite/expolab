@@ -5,8 +5,10 @@
 # seule (voir README) si besoin de ne relancer qu'une partie.
 #
 # Idempotent de bout en bout : relancer cette meme commande apres coup
-# (ou apres l'avoir laissee s'arreter a l'etape Dockhand, voir plus bas)
-# ne repete que ce qui manque.
+# ne repete que ce qui manque. A l'etape Dockhand (aucun endpoint API ne
+# permet de creer un environnement a notre place), le script patiente
+# tout seul jusqu'a ce que l'environnement soit confirme dans l'UI - pas
+# besoin de le relancer soi-meme.
 #
 # Usage: sudo ./install.sh
 set -euo pipefail
