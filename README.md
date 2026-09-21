@@ -212,9 +212,27 @@ eux (voir plus haut, le reverse-proxy ne les concerne pas).
 
 ## Mise en route (a executer directement sur le Pi 5)
 
+Point d'entree unique - installe tout dans l'ordre :
+
+```bash
+sudo ./install.sh
+# S'arrete la 1ere fois a l'etape Dockhand avec des instructions : ouvrir
+# Dockhand (http://<ip>:3000), confirmer l'environnement local dans
+# Settings > Environments, puis relancer EXACTEMENT LA MEME COMMANDE -
+# idempotent de bout en bout, ne repete que ce qui manque.
+```
+
+Pas de `chmod +x` a faire a la main : les scripts sont versionnes
+executables dans git (mode 100755), un `git clone`/`git archive` les
+recupere deja prets a l'emploi.
+
+Detail de chaque etape (`install.sh` n'est qu'un enchainement de
+celles-ci - utile pour n'en relancer qu'une seule) :
+
 ```bash
 sudo ./incus/install.sh
 # se deconnecter/reconnecter pour prendre en compte le groupe incus-admin
+# (install.sh contourne ca avec `sg incus-admin`, pas besoin en isole)
 
 sudo ./incus/network-setup.sh
 
@@ -307,6 +325,7 @@ disque si un retour a l'etat initial *exact* est requis.
 ## Structure
 
 ```
+install.sh                    # point d'entree unique, enchaine tout ce qui suit
 incus/
   install.sh                # installe Incus sur l'hote
   uninstall.sh               # desinstalle Incus (symetrique de install.sh)
