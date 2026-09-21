@@ -181,7 +181,13 @@ document.getElementById("create-form").addEventListener("submit", async (e) => {
 });
 
 function suggestName(containerName) {
-    let name = containerName.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-+/, "");
+    // Tous nos propres conteneurs sont prefixes "expolab-" (docker ps),
+    // mais leurs entrees Caddy utilisent des noms courts (dashboard,
+    // dnsmasq, caddy...) - retire ce prefixe avant de suggerer, pour
+    // rester coherent avec le reste du tableau plutot que de proposer
+    // "expolab-machin" a chaque fois.
+    let name = containerName.toLowerCase().replace(/^expolab-/, "");
+    name = name.replace(/[^a-z0-9-]/g, "-").replace(/^-+/, "");
     if (!name || !/^[a-z]/.test(name)) name = "svc-" + name;
     return name.slice(0, 32).replace(/-+$/, "");
 }
