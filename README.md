@@ -90,6 +90,23 @@ chaque service comme **stack Dockhand independante** via son API REST
     `remove-peer.sh` (montes en volume) pour creer/retirer un pair -
     aucune logique WireGuard reimplementee.
 
+- **git-mirror** (https://git-mirror.web.expolab.lan) : mirroir git
+  minimaliste, pas un forge - Gitea ecarte volontairement pour ce besoin
+  (trop de fonctionnalites : navigation de fichiers, PR, issues...).
+  Garde des clones **bare** (`git clone --mirror`) de depots distants
+  (GitLab, GitHub...) sous `server/stacks/git-mirror/data/repos/` (non
+  versionne), avec sync manuel (bouton) ou programme (thread de fond,
+  intervalle par mirroir - pas de cron/celery separe pour si peu).
+  Contrairement a `dnsmasq-admin`/`caddy-admin`/`vpn-admin`, ce conteneur
+  n'administre pas un service voisin : il fait lui-meme le travail git, en
+  plus de servir l'UI - pas de `network_mode: host` ni de socket Docker
+  necessaires, il ne parle qu'en sortant vers les remotes. Authentification
+  (depot prive) via token integre a l'URL distante
+  (`https://oauth2:TOKEN@...`), stocke en clair dans
+  `server/stacks/git-mirror/data/mirrors.yaml` (non versionne) - plus
+  simple que le chiffrement Fernet de Bastion, juge suffisant ici (enjeu
+  moindre qu'un identifiant SSH/VNC vers une vraie machine).
+
 **Pourquoi des pages maison plutot qu'un projet existant** : recherche
 faite sur les GUIs disponibles pour WireGuard/Caddy/dnsmasq - la seule
 option mature est [wg-easy](https://github.com/wg-easy/wg-easy), qui
@@ -309,8 +326,8 @@ Ce script defait dans l'ordre exactement ce que `install.sh` /
    `vpn-admin`, supprime tous les pairs et la config generee
 2. `server/teardown-server.sh` — arrete Dockhand et les stacks Docker
    (dnsmasq, dnsmasq-admin, caddy, caddy-admin, webui, bastion,
-   dashboard), reactive le DHCP integre d'Incus sur `expo-lan` (secours),
-   desinstalle Docker
+   dashboard, git-mirror), reactive le DHCP integre d'Incus sur
+   `expo-lan` (secours), desinstalle Docker
 3. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
 4. `incus/network-teardown.sh` — supprime le profil `fake-pi` et le
    reseau `expo-lan`
@@ -343,7 +360,7 @@ server/
   teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), reactive le DHCP integre d'Incus, desinstalle Docker
   docker-compose.yml            # bootstrap UNIQUEMENT : Dockhand (ne peut pas se creer via sa propre API)
   dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack via l'API
-  services.yaml                  # services applicatifs exposes au reverse-proxy (dashboard, dockhand, fleet, bastion, dnsmasq/caddy/vpn-admin)
+  services.yaml                  # services applicatifs exposes au reverse-proxy (dashboard, dockhand, fleet, bastion, dnsmasq/caddy/vpn-admin, git-mirror)
   render-caddyfile.py             # genere le Caddyfile a partir de server/services.yaml
   stacks/
     dnsmasq/{docker-compose.yml, Dockerfile, dnsmasq.conf, data/, admin-config/}   # data/ et admin-config/ non versionnes (baux, reservations, enregistrements DNS)
@@ -354,6 +371,7 @@ server/
     bastion/{docker-compose.yml, bastion.env, config/, maps/}        # ces 3 derniers non versionnes
     dashboard/{docker-compose.yml, config/}   # Homepage, liens vers les services web du lab
     vpn-admin/docker-compose.yml                                      # build context = ../../vpn-admin
+    git-mirror/{docker-compose.yml, data/}                            # data/ non versionne (clones bare + mirrors.yaml)
 webui/
   app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh
   Dockerfile                     # image (Flask + client Incus)
@@ -361,6 +379,7 @@ webui/
 dnsmasq-admin/                  # meme forme que webui/ : app.py, Dockerfile, templates/, static/
 caddy-admin/                     # idem - edite server/services.yaml, recharge Caddy via son admin API
 vpn-admin/                       # idem - appelle vpn/add-peer.sh et vpn/remove-peer.sh
+git-mirror/                      # idem, mais fait lui-meme le travail git (clone/fetch), rien a piloter
 vpn/
   install.sh                  # genere wg0.conf, cree/redeploie les stacks Dockhand "wireguard" et "vpn-admin"
   uninstall.sh                 # arrete la stack (docker compose direct), supprime la config generee

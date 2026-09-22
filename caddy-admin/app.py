@@ -24,8 +24,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-import yaml
 from flask import Flask, jsonify, render_template, request
+from ruamel.yaml import YAML
 
 app = Flask(__name__)
 
@@ -36,6 +36,17 @@ CADDYFILE_PATH = SERVER_DIR / "stacks" / "caddy" / "Caddyfile"
 CADDY_ADMIN_URL = "http://127.0.0.1:2019/load"
 
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
+
+# ruamel (round-trip) plutot que PyYAML : PyYAML relit/reecrit une
+# structure Python pure, ce qui perd TOUS les commentaires du fichier a
+# la premiere modification faite depuis cette page (constate en
+# pratique : l'entete documentant le schema de services.yaml disparaissait
+# des le premier ajout/retrait). ruamel garde les commentaires attaches
+# aux noeuds qu'il n'a pas touches. L'indentation choisie reproduit le
+# style deja utilise dans le fichier (liste alignee sous 2 espaces).
+_yaml = YAML()
+_yaml.indent(mapping=2, sequence=4, offset=2)
+_yaml.preserve_quotes = True
 
 
 def parse_extra_routes(raw) -> tuple[list[dict] | None, str | None]:
@@ -64,7 +75,7 @@ def parse_extra_routes(raw) -> tuple[list[dict] | None, str | None]:
 
 def load_services() -> dict:
     with open(SERVICES_PATH) as f:
-        return yaml.safe_load(f) or {"services": []}
+        return _yaml.load(f) or {"services": []}
 
 
 def used_ports(services: list[dict], exclude_name: str | None = None) -> dict[int, str]:
@@ -123,14 +134,14 @@ def discover_containers() -> list[dict]:
     return suggestions
 
 
-def save_services(data: dict) -> None:
+def save_services(data) -> None:
     # Ecriture atomique (fichier temporaire + rename) : evite toute
     # fenetre ou une lecture concurrente verrait un fichier partiellement
     # ecrit, et garantit qu'un crash en cours d'ecriture ne laisse jamais
     # un services.yaml tronque a la place.
     tmp_path = SERVICES_PATH.with_suffix(".tmp")
     with open(tmp_path, "w") as f:
-        yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+        _yaml.dump(data, f)
     os.replace(tmp_path, SERVICES_PATH)
 
 
@@ -269,11 +280,14 @@ def api_services_update(name: str):
 def api_services_delete(name: str):
     data = load_services()
     services = data.get("services", [])
-    new_services = [s for s in services if s["name"] != name]
-    if len(new_services) == len(services):
+    target = next((s for s in services if s["name"] == name), None)
+    if target is None:
         return jsonify({"error": f"'{name}' introuvable"}), 404
 
-    data["services"] = new_services
+    # .remove() plutot qu'une liste reconstruite par comprehension :
+    # garde la MEME sequence (et donc les commentaires que ruamel lui a
+    # associes) au lieu d'en fabriquer une nouvelle sans historique.
+    services.remove(target)
     save_services(data)
 
     ok, err = save_and_reload()

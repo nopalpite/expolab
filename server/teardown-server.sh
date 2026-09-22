@@ -29,14 +29,14 @@ fi
 
 if command -v docker &>/dev/null; then
     if [ "$ASSUME_YES" -ne 1 ]; then
-        read -r -p "Arreter/supprimer le serveur d'expo (dockhand, dnsmasq, dnsmasq-admin, caddy, caddy-admin, webui, bastion, dashboard) ? [y/N] " ans
+        read -r -p "Arreter/supprimer le serveur d'expo (dockhand, dnsmasq, dnsmasq-admin, caddy, caddy-admin, webui, bastion, dashboard, git-mirror) ? [y/N] " ans
         [[ "$ans" =~ ^[yY]$ ]] || { echo "Annule."; exit 0; }
     fi
 
     TMP_COMPOSE="$(mktemp)"
     trap 'rm -f "$TMP_COMPOSE"' EXIT
 
-    for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard; do
+    for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard git-mirror; do
         compose_file="$SCRIPT_DIR/stacks/$stack/docker-compose.yml"
         if [ -f "$compose_file" ]; then
             echo "[+] Arret de la stack '$stack'..."

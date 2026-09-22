@@ -23,6 +23,10 @@ server/stacks/dnsmasq/data/
 # dnsmasq-admin - propres a chaque lab, pas de l'infra-as-code.
 server/stacks/dnsmasq/admin-config/
 
+# Clones bare git + config des mirroirs (mirrors.yaml, tokens compris) -
+# etat runtime propre a chaque lab, pas de l'infra-as-code.
+server/stacks/git-mirror/data/
+
 # Config WireGuard generee (cles, pairs) - jamais la meme d'un lab a
 # l'autre, ne doit jamais finir dans git (secrets client compris).
 vpn/wireguard/config/

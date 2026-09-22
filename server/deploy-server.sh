@@ -85,8 +85,10 @@ mkdir -p "$SCRIPT_DIR/stacks/dnsmasq/data"
 mkdir -p "$SCRIPT_DIR/stacks/dnsmasq/admin-config"
 touch "$SCRIPT_DIR/stacks/dnsmasq/admin-config/reservations.conf"
 
+mkdir -p "$SCRIPT_DIR/stacks/git-mirror/data"
+
 echo "[+] Creation/redeploiement des stacks applicatives via l'API Dockhand..."
-for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard; do
+for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard git-mirror; do
     dockhand_upsert_stack "$stack" "$SCRIPT_DIR/stacks/$stack/docker-compose.yml"
 done
 

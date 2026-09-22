@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>expolab - git-mirror</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Git mirror</h1>
+        <p class="subtitle">Clones bare de depots distants (GitLab, GitHub...), sync manuel ou programme</p>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>Ajouter un mirroir</h2>
+            <form id="create-form">
+                <div class="field">
+                    <label for="name">Nom</label>
+                    <input type="text" id="name" name="name" placeholder="mon-projet" required>
+                </div>
+                <div class="field" style="flex-basis: 100%;">
+                    <label for="remote_url">URL distante</label>
+                    <input type="text" id="remote_url" name="remote_url" placeholder="https://oauth2:TOKEN@gitlab.com/groupe/projet.git" required>
+                    <p class="subtitle" style="margin: 4px 0 0;">Pour un depot prive, integrer le token directement dans l'URL (ex: <code>https://oauth2:TOKEN@...</code>).</p>
+                </div>
+                <div class="field">
+                    <label for="interval_minutes">Sync automatique</label>
+                    <select id="interval_minutes" name="interval_minutes">
+                        <option value="0">Manuel seulement</option>
+                        <option value="60">Toutes les heures</option>
+                        <option value="360">Toutes les 6h</option>
+                        <option value="1440">Quotidien</option>
+                    </select>
+                </div>
+                <button type="submit" id="create-btn">Ajouter</button>
+                <button type="button" id="create-cancel" class="secondary" hidden>Annuler</button>
+            </form>
+            <p id="create-status" class="status" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Mirroirs</h2>
+            <table id="mirrors-table">
+                <thead>
+                    <tr>
+                        <th>Nom</th>
+                        <th>URL distante</th>
+                        <th>Statut</th>
+                        <th>Derniere sync</th>
+                        <th>Auto</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="mirrors-body">
+                    <tr><td colspan="6" class="empty">Chargement...</td></tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

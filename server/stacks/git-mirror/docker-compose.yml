@@ -1,0 +1,17 @@
+# Stack Dockhand "git-mirror" - clones bare de depots distants (GitLab,
+# GitHub...) et leur sync manuel/programme. Contrairement aux autres apps
+# "-admin" du lab, ce conteneur n'administre pas un service voisin : il
+# fait lui-meme le travail git (voir git-mirror/app.py), d'ou l'absence
+# de network_mode: host ou de socket Docker - il ne parle qu'en sortant
+# vers les remotes git.
+services:
+  git-mirror:
+    build: ${REPO_ROOT}/git-mirror
+    container_name: expolab-git-mirror
+    restart: unless-stopped
+    ports:
+      - "5054:5054"
+    volumes:
+      # Clones bare + mirrors.yaml (etat runtime, pas de l'infra-as-code -
+      # voir .gitignore).
+      - ${REPO_ROOT}/server/stacks/git-mirror/data:/data
