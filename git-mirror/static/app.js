@@ -22,6 +22,17 @@ function intervalLabel(minutes) {
     return labels[minutes] || "Manuel";
 }
 
+async function copyCloneUrl(btn, url) {
+    try {
+        await navigator.clipboard.writeText(url);
+        const original = btn.textContent;
+        btn.textContent = "Copie !";
+        setTimeout(() => { btn.textContent = original; }, 1500);
+    } catch (e) {
+        prompt("Copier manuellement :", url);
+    }
+}
+
 async function loadMirrors() {
     const body = document.getElementById("mirrors-body");
     try {
@@ -30,13 +41,17 @@ async function loadMirrors() {
         const mirrors = data.mirrors || [];
         mirrorsByName = Object.fromEntries(mirrors.map(m => [m.name, m]));
         if (!mirrors.length) {
-            body.innerHTML = '<tr><td colspan="6" class="empty">Aucun mirroir</td></tr>';
+            body.innerHTML = '<tr><td colspan="7" class="empty">Aucun mirroir</td></tr>';
             return;
         }
         body.innerHTML = mirrors.map(m => `
             <tr>
                 <td data-label="Nom">${m.name}</td>
                 <td data-label="URL distante"><code>${m.remote_url}</code></td>
+                <td data-label="Adresse a cloner">
+                    <code>${m.clone_url}</code>
+                    <button type="button" class="secondary" data-copy-url="${m.clone_url}">Copier</button>
+                </td>
                 <td data-label="Statut">${statusBadge(m)}</td>
                 <td data-label="Derniere sync">${formatDate(m.last_synced)}</td>
                 <td data-label="Auto">${intervalLabel(m.interval_minutes)}</td>
@@ -47,6 +62,9 @@ async function loadMirrors() {
                 </td>
             </tr>
         `).join("");
+        body.querySelectorAll("button[data-copy-url]").forEach(btn => {
+            btn.addEventListener("click", () => copyCloneUrl(btn, btn.dataset.copyUrl));
+        });
         body.querySelectorAll("button[data-sync-name]").forEach(btn => {
             btn.addEventListener("click", () => syncMirror(btn.dataset.syncName));
         });
@@ -57,7 +75,7 @@ async function loadMirrors() {
             btn.addEventListener("click", () => deleteMirror(btn.dataset.name));
         });
     } catch (e) {
-        body.innerHTML = '<tr><td colspan="6" class="status-error">Erreur de chargement</td></tr>';
+        body.innerHTML = '<tr><td colspan="7" class="status-error">Erreur de chargement</td></tr>';
     }
 }
 

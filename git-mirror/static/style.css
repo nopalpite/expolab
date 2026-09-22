@@ -162,6 +162,13 @@ td code {
     color: var(--muted);
 }
 
+td[data-label="Adresse a cloner"] {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .empty {
     color: var(--muted);
     text-align: center;

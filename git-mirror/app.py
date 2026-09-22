@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 
 app = Flask(__name__)
 
@@ -71,6 +71,14 @@ def find_mirror(data: dict, name: str) -> dict | None:
 
 def repo_path(name: str) -> Path:
     return REPOS_DIR / f"{name}.git"
+
+
+def clone_url(name: str) -> str:
+    # https:// code en dur (pas request.scheme) : ce conteneur repond en
+    # HTTP simple, la terminaison TLS se fait chez Caddy en amont (meme
+    # convention que tout le reste du lab) - request.scheme refleterait
+    # "http" en interne, jamais ce que l'utilisateur tape reellement.
+    return f"https://{request.host}/git/{name}.git"
 
 
 def run_git(args: list[str], timeout: int) -> subprocess.CompletedProcess:
@@ -156,6 +164,7 @@ def api_mirrors_list():
         mirrors.append({
             "name": m["name"],
             "remote_url": mask_url(m["remote_url"]),
+            "clone_url": clone_url(m["name"]),
             "interval_minutes": m.get("interval_minutes") or 0,
             "last_synced": m.get("last_synced"),
             "up_to_date": check_up_to_date(m),
@@ -248,6 +257,66 @@ def api_mirrors_sync(name: str):
     if not ok:
         return jsonify({"error": err}), 502 if "introuvable" not in err else 404
     return jsonify({"ok": True})
+
+
+# Protocole HTTP intelligent de git (smart HTTP), pour que les mirroirs
+# soient directement clonables (`git clone https://.../git/<nom>.git`) -
+# sans ca, ils n'etaient accessibles qu'en passant par SSH sur le fichier
+# bare directement. `git http-backend` est le binaire officiel de git
+# pour ce protocole (meme chose qu'Apache/nginx+fcgi utiliseraient) - on
+# l'invoque ici comme un CGI classique (variables d'environnement +
+# stdin/stdout) plutot que de reimplementer le protocole. Lecture seule
+# par defaut (git-receive-pack/push reste desactive tant que
+# http.receivepack n'est pas active sur un repo - jamais fait ici, ces
+# mirroirs ne sont pas censes recevoir de push).
+GIT_HTTP_BACKEND_TIMEOUT = 300  # clone initial d'un gros depot peut prendre du temps
+
+
+@app.route("/git/<path:git_path>", methods=["GET", "POST"])
+def git_http_backend(git_path: str):
+    env = {
+        **os.environ,
+        "GIT_PROJECT_ROOT": str(REPOS_DIR),
+        "GIT_HTTP_EXPORT_ALL": "1",
+        "REQUEST_METHOD": request.method,
+        "PATH_INFO": "/" + git_path,
+        "QUERY_STRING": request.query_string.decode(),
+        "CONTENT_TYPE": request.content_type or "",
+        "CONTENT_LENGTH": str(request.content_length or 0),
+        "REMOTE_ADDR": request.remote_addr or "",
+        "GATEWAY_INTERFACE": "CGI/1.1",
+        "SERVER_PROTOCOL": "HTTP/1.1",
+    }
+    try:
+        result = subprocess.run(
+            ["git", "http-backend"],
+            input=request.get_data(),
+            capture_output=True,
+            env=env,
+            timeout=GIT_HTTP_BACKEND_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return "Timeout", 504
+
+    raw = result.stdout
+    for sep in (b"\r\n\r\n", b"\n\n"):
+        if sep in raw:
+            header_block, body = raw.split(sep, 1)
+            break
+    else:
+        return result.stderr.decode(errors="replace") or "Erreur git http-backend", 500
+
+    status_code = 200
+    headers = []
+    for line in header_block.replace(b"\r\n", b"\n").split(b"\n"):
+        key, _, value = line.decode(errors="replace").partition(":")
+        key, value = key.strip(), value.strip()
+        if key.lower() == "status":
+            status_code = int(value.split()[0])
+        elif key.lower() not in ("content-length", "transfer-encoding"):
+            headers.append((key, value))
+
+    return Response(body, status=status_code, headers=headers)
 
 
 if __name__ == "__main__":

@@ -105,7 +105,14 @@ chaque service comme **stack Dockhand independante** via son API REST
   (`https://oauth2:TOKEN@...`), stocke en clair dans
   `server/stacks/git-mirror/data/mirrors.yaml` (non versionne) - plus
   simple que le chiffrement Fernet de Bastion, juge suffisant ici (enjeu
-  moindre qu'un identifiant SSH/VNC vers une vraie machine).
+  moindre qu'un identifiant SSH/VNC vers une vraie machine). Chaque
+  mirroir est directement clonable (`git clone
+  https://git-mirror.web.expolab.lan/git/<nom>.git`, adresse affichee et
+  copiable en un clic dans l'UI) via le protocole HTTP intelligent de git
+  (`git http-backend` invoque en CGI depuis `app.py`, meme binaire
+  qu'utiliserait Apache/nginx) - lecture seule par defaut (le push HTTP
+  reste desactive tant que `http.receivepack` n'est pas active sur un
+  repo, jamais fait ici).
 
 **Pourquoi des pages maison plutot qu'un projet existant** : recherche
 faite sur les GUIs disponibles pour WireGuard/Caddy/dnsmasq - la seule
