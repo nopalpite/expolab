@@ -162,11 +162,36 @@ td code {
     color: var(--muted);
 }
 
+table {
+    table-layout: fixed;
+}
+
+td[data-label="URL distante"] code,
+td[data-label="Adresse a cloner"] code {
+    /* Les URL completes sont trop longues pour tenir sur une ligne dans
+       une colonne de largeur fixe - tronquees avec ellipsis plutot que de
+       forcer des lignes sur 3 niveaux, survol (title) pour voir la valeur
+       complete, bouton "Copier" pour la recuperer sans avoir a la lire. */
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 td[data-label="Adresse a cloner"] {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
+}
+
+td[data-label="Adresse a cloner"] code {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+td[data-label="Adresse a cloner"] button {
+    flex: 0 0 auto;
 }
 
 .empty {

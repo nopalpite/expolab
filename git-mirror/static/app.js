@@ -47,9 +47,9 @@ async function loadMirrors() {
         body.innerHTML = mirrors.map(m => `
             <tr>
                 <td data-label="Nom">${m.name}</td>
-                <td data-label="URL distante"><code>${m.remote_url}</code></td>
+                <td data-label="URL distante"><code title="${m.remote_url}">${m.remote_url}</code></td>
                 <td data-label="Adresse a cloner">
-                    <code>${m.clone_url}</code>
+                    <code title="${m.clone_url}">${m.clone_url}</code>
                     <button type="button" class="secondary" data-copy-url="${m.clone_url}">Copier</button>
                 </td>
                 <td data-label="Statut">${statusBadge(m)}</td>
