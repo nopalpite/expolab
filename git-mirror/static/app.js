@@ -22,6 +22,19 @@ function intervalLabel(minutes) {
     return labels[minutes] || "Manuel";
 }
 
+function escapeHtml(str) {
+    // remote_url vient de l'utilisateur et n'est pas restreint a un jeu
+    // de caracteres sur (contrairement a name, valide par NAME_RE cote
+    // serveur) - echappe avant insertion dans innerHTML/attributs pour
+    // eviter une injection HTML via une URL distante malveillante.
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 async function copyCloneUrl(btn, url) {
     try {
         await navigator.clipboard.writeText(url);
@@ -34,48 +47,58 @@ async function copyCloneUrl(btn, url) {
 }
 
 async function loadMirrors() {
-    const body = document.getElementById("mirrors-body");
+    const list = document.getElementById("mirrors-list");
     try {
         const res = await fetch("/api/mirrors");
         const data = await res.json();
         const mirrors = data.mirrors || [];
         mirrorsByName = Object.fromEntries(mirrors.map(m => [m.name, m]));
         if (!mirrors.length) {
-            body.innerHTML = '<tr><td colspan="7" class="empty">Aucun mirroir</td></tr>';
+            list.innerHTML = '<p class="empty">Aucun mirroir</p>';
             return;
         }
-        body.innerHTML = mirrors.map(m => `
-            <tr>
-                <td data-label="Nom">${m.name}</td>
-                <td data-label="URL distante"><code title="${m.remote_url}">${m.remote_url}</code></td>
-                <td data-label="Adresse a cloner">
-                    <code title="${m.clone_url}">${m.clone_url}</code>
-                    <button type="button" class="secondary" data-copy-url="${m.clone_url}">Copier</button>
-                </td>
-                <td data-label="Statut">${statusBadge(m)}</td>
-                <td data-label="Derniere sync">${formatDate(m.last_synced)}</td>
-                <td data-label="Auto">${intervalLabel(m.interval_minutes)}</td>
-                <td class="actions">
-                    <button class="secondary" data-sync-name="${m.name}">Sync maintenant</button>
-                    <button class="secondary" data-edit-name="${m.name}">Modifier</button>
-                    <button class="danger" data-name="${m.name}">Retirer</button>
-                </td>
-            </tr>
+        list.innerHTML = mirrors.map(m => `
+            <div class="mirror-card">
+                <div class="mirror-card-header">
+                    <div class="mirror-card-title">
+                        <span>${escapeHtml(m.name)}</span>
+                        ${statusBadge(m)}
+                    </div>
+                    <div class="mirror-card-actions">
+                        <button class="secondary" data-sync-name="${escapeHtml(m.name)}">Sync maintenant</button>
+                        <button class="secondary" data-edit-name="${escapeHtml(m.name)}">Modifier</button>
+                        <button class="danger" data-name="${escapeHtml(m.name)}">Retirer</button>
+                    </div>
+                </div>
+                <div class="mirror-card-row">
+                    <span class="field-label">Source</span>
+                    <code title="${escapeHtml(m.remote_url)}">${escapeHtml(m.remote_url)}</code>
+                </div>
+                <div class="mirror-card-row">
+                    <span class="field-label">Cloner</span>
+                    <code title="${escapeHtml(m.clone_url)}">${escapeHtml(m.clone_url)}</code>
+                    <button type="button" class="secondary" data-copy-url="${escapeHtml(m.clone_url)}">Copier</button>
+                </div>
+                <div class="mirror-card-meta">
+                    <span>Derniere sync : ${formatDate(m.last_synced)}</span>
+                    <span>Auto : ${intervalLabel(m.interval_minutes)}</span>
+                </div>
+            </div>
         `).join("");
-        body.querySelectorAll("button[data-copy-url]").forEach(btn => {
+        list.querySelectorAll("button[data-copy-url]").forEach(btn => {
             btn.addEventListener("click", () => copyCloneUrl(btn, btn.dataset.copyUrl));
         });
-        body.querySelectorAll("button[data-sync-name]").forEach(btn => {
+        list.querySelectorAll("button[data-sync-name]").forEach(btn => {
             btn.addEventListener("click", () => syncMirror(btn.dataset.syncName));
         });
-        body.querySelectorAll("button[data-edit-name]").forEach(btn => {
+        list.querySelectorAll("button[data-edit-name]").forEach(btn => {
             btn.addEventListener("click", () => startEditMirror(btn.dataset.editName));
         });
-        body.querySelectorAll("button.danger").forEach(btn => {
+        list.querySelectorAll("button.danger").forEach(btn => {
             btn.addEventListener("click", () => deleteMirror(btn.dataset.name));
         });
     } catch (e) {
-        body.innerHTML = '<tr><td colspan="7" class="status-error">Erreur de chargement</td></tr>';
+        list.innerHTML = '<p class="status-error">Erreur de chargement</p>';
     }
 }
 
