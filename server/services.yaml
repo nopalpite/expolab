@@ -27,8 +27,8 @@ services:
     backend_port: 5053
   - name: git-mirror
     backend_port: 5054
-  - name: bastion-ansible
-    backend_port: 5055
+  - name: semaphore
+    backend_port: 5056
   - name: bastion
     backend_port: 5000
     extra_routes:

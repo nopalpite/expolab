@@ -1,0 +1,26 @@
+# Stack Dockhand "semaphore" - executeur/scheduler pour bastion-ansible
+# (depot separe github.com/nopalpite/bastion-ansible, mirroire localement
+# via git-mirror - voir son README). Remplace le webui/runner maison :
+# Semaphore clone lui-meme le depot a chaque run (pas d'image a publier
+# depuis bastion-ansible), gere declenchement/historique/planification
+# nativement.
+#
+# network_mode: host - necessaire pour joindre git-mirror (127.0.0.1:5054)
+# et Bastion (127.0.0.1:5000) en direct, et atteindre expo-lan en SSH
+# sans route Docker bridge (meme raison que les autres apps de ce lab).
+# SEMAPHORE_PORT=:5056 (3000 deja pris par Dockhand, network_mode: host
+# n'a pas de mapping de port a decaler).
+services:
+  semaphore:
+    image: semaphoreui/semaphore:latest
+    container_name: expolab-semaphore
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ${REPO_ROOT}/server/stacks/semaphore/semaphore.env
+    environment:
+      - SEMAPHORE_DB_DIALECT=sqlite
+      - SEMAPHORE_PORT=:5056
+      - SEMAPHORE_WEB_ROOT=https://semaphore.web.expolab.lan
+    volumes:
+      - ${REPO_ROOT}/server/stacks/semaphore/data:/var/lib/semaphore

@@ -49,43 +49,36 @@ chaque service comme **stack Dockhand independante** via son API REST
   versionne) ; inventaire de machines et donnees persistees dans
   `server/stacks/bastion/{config,maps}/` (egalement non versionne, propre
   a chaque lab)
-- **bastion-ansible** (https://github.com/nopalpite/bastion-ansible,
-  depot separe - pas de source ici, juste l'image publiee
-  `ghcr.io/nopalpite/bastion-ansible`) : execute `site.yml` (Ansible,
-  mode push) contre le parc **reference dans Bastion** via son
-  `GET /api/machines` (jamais un second inventaire maintenu a la main).
-  Pas de demon : chaque redeploiement de la stack (via `deploy-server.sh`)
-  = une execution du playbook, puis le conteneur s'arrete. `network_mode:
-  host` pour joindre Bastion en direct (`127.0.0.1:5000`, pas de
-  resolution DNS `*.web.expolab.lan` requise) et atteindre `expo-lan`
-  (ou vivent les machines listees dans Bastion). `deploy-server.sh`
-  genere automatiquement, une seule fois : un `BASTION_API_TOKEN`
-  partage (ajoute a la fois dans `bastion.env` pour activer
-  `/api/machines`, et dans `server/stacks/bastion-ansible/bastion-ansible.env`
-  non versionne) et une cle SSH "automatisation" dediee au lab
-  (`server/stacks/bastion-ansible/secrets/`, non versionnee, distincte
-  de toute cle de vraie production) - authentification jamais mediee par
-  Bastion, meme choix que la vraie infra (voir le README de
-  bastion-ansible). Les roles livres avec l'image sont volontairement
-  vides (squelettes) - a date, ce conteneur ne fait donc rien de destructif
-  meme s'il echoue a joindre une machine du parc. **Valide de bout en
-  bout** contre `pi-01` (faux Pi ajoute manuellement dans Bastion) :
-  inventaire, auth par cle dediee, escalade sudo et execution reussis.
-  - **bastion-ansible-webui** (https://bastion-ansible.web.expolab.lan) :
-    meme image, entrypoint different (`webui/app.py` au lieu du runner) -
-    liste/edite les roles (textarea YAML brut par fichier), detecte les
-    tags Bastion sans role et propose de scaffolder, **reordonne
-    l'execution** (`order.yaml` -> `site.yml` regenere - une machine
-    multi-tags recoit ses roles empiles dans cet ordre), declenche
-    `site.yml` (tout le parc ou une seule typologie) et garde
-    l'historique des runs
-    (`server/stacks/bastion-ansible/{roles,order.yaml,site.yml,runs}/`,
-    non versionnes, lecture-ecriture - seedes une seule fois depuis
-    l'image au premier demarrage). La stack `bastion-ansible` (runner
-    CLI) monte les memes `roles/order.yaml/site.yml` en **lecture
-    seule** - sans ca elle utiliserait toujours la copie figee dans
-    l'image, ignorant toute edition/reordonnancement fait depuis l'UI.
-    Pas d'authentification (comme le reste des apps admin du lab).
+- **semaphore** (https://semaphore.web.expolab.lan,
+  [semaphoreui/semaphore](https://semaphoreui.com), image officielle -
+  pas de source ici) : declenchement/historique/planification pour
+  [bastion-ansible](https://github.com/nopalpite/bastion-ansible) (Ansible,
+  mode push, execute contre le parc **reference dans Bastion** via son
+  `GET /api/machines` - jamais un second inventaire maintenu a la main).
+  Remplace un webui/runner maison retire (dupliquait git et un
+  ordonnanceur mature) - AWX ecarte comme trop lourd pour ce parc.
+  `network_mode: host` pour joindre `git-mirror` et Bastion en direct
+  (`127.0.0.1:5054`/`5000`, pas de resolution DNS `*.web.expolab.lan`
+  requise) et atteindre `expo-lan` en SSH. `SEMAPHORE_DB_DIALECT=sqlite`
+  (pas de Postgres/Redis a operer). `deploy-server.sh` genere
+  automatiquement, une seule fois : les secrets Semaphore (admin,
+  cookies, chiffrement des access keys -
+  `server/stacks/semaphore/semaphore.env`), une cle SSH
+  "automatisation" dediee au lab
+  (`server/stacks/semaphore/automation_key/`, distincte de toute cle de
+  vraie production - authentification jamais mediee par Bastion, meme
+  choix que la vraie infra) et un fichier de reference
+  `BASTION_URL`/`BASTION_API_TOKEN`
+  (`server/stacks/semaphore/bastion-ansible-vars.env`). Pointe sur le
+  mirroir `git-mirror` de `bastion-ansible`, pas directement sur GitHub -
+  sync manuel sur le mirroir avant chaque campagne. Configuration
+  initiale (Repository/Key Store/Inventory/Variable Group/Task Template)
+  **manuelle dans l'UI Semaphore**, comme la configuration de
+  l'environnement Dockhand - detail dans le README de bastion-ansible,
+  section "Executeur : Semaphore UI". **Valide de bout en bout** contre
+  `pi-01` (faux Pi ajoute manuellement dans Bastion) avant ce passage a
+  Semaphore : inventaire, auth par cle dediee, escalade sudo et
+  execution reussis avec le runner maison retire depuis.
 - **dashboard** (https://dashboard.web.expolab.lan, point d'entree du lab)
   - [Homepage](https://gethomepage.dev), page de liens vers tous les
   services ayant une interface web propre. Config statique versionnee
@@ -370,7 +363,7 @@ Ce script defait dans l'ordre exactement ce que `install.sh` /
    `vpn-admin`, supprime tous les pairs et la config generee
 2. `server/teardown-server.sh` — arrete Dockhand et les stacks Docker
    (dnsmasq, dnsmasq-admin, caddy, caddy-admin, webui, bastion,
-   dashboard, git-mirror, bastion-ansible), reactive le DHCP integre
+   dashboard, git-mirror, semaphore), reactive le DHCP integre
    d'Incus sur `expo-lan` (secours), desinstalle Docker
 3. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
 4. `incus/network-teardown.sh` — supprime le profil `fake-pi` et le
@@ -416,7 +409,7 @@ server/
     dashboard/{docker-compose.yml, config/}   # Homepage, liens vers les services web du lab
     vpn-admin/docker-compose.yml                                      # build context = ../../vpn-admin
     git-mirror/{docker-compose.yml, data/}                            # data/ non versionne (clones bare + mirrors.yaml)
-    bastion-ansible/{docker-compose.yml, bastion-ansible.env, secrets/, roles/, order.yaml, site.yml, runs/}  # tout sauf docker-compose.yml non versionne ; source dans un depot separe
+    semaphore/{docker-compose.yml, semaphore.env, automation_key/, bastion-ansible-vars.env, data/}  # tout sauf docker-compose.yml non versionne ; execute bastion-ansible (depot separe)
 webui/
   app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh
   Dockerfile                     # image (Flask + client Incus)

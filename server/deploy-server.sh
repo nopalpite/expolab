@@ -92,33 +92,49 @@ else
     BASTION_API_TOKEN="$(grep '^BASTION_API_TOKEN=' "$SCRIPT_DIR/stacks/bastion/bastion.env" | cut -d= -f2-)"
 fi
 
-mkdir -p "$SCRIPT_DIR/stacks/bastion-ansible/secrets"
-if [ ! -f "$SCRIPT_DIR/stacks/bastion-ansible/bastion-ansible.env" ]; then
-    # 127.0.0.1:5000 (pas le vhost Caddy) : bastion-ansible tourne en
-    # network_mode: host comme Bastion lui-meme, pas besoin de passer par
-    # le reverse-proxy ni de resoudre *.web.expolab.lan.
-    cat > "$SCRIPT_DIR/stacks/bastion-ansible/bastion-ansible.env" <<EOF
+# Cle SSH dediee automatisation (Phase 3 de la roadmap Ansible) : a
+# importer a la main dans le Key Store de Semaphore (voir le message de
+# fin de script) - jamais montee dans un conteneur, Semaphore s'execute
+# a partir du depot bastion-ansible clone via git-mirror, pas d'une
+# image publiee par ce depot.
+mkdir -p "$SCRIPT_DIR/stacks/semaphore/automation_key" "$SCRIPT_DIR/stacks/semaphore/data"
+if [ ! -f "$SCRIPT_DIR/stacks/semaphore/automation_key/automation_ed25519" ]; then
+    echo "[+] Generation de la cle SSH dediee automatisation du lab (distincte de toute cle de vraie prod)..."
+    ssh-keygen -t ed25519 -N "" -C "expolab-semaphore" -f "$SCRIPT_DIR/stacks/semaphore/automation_key/automation_ed25519" -q
+fi
+
+if [ ! -f "$SCRIPT_DIR/stacks/semaphore/semaphore.env" ]; then
+    echo "[+] Premiere generation des secrets Semaphore (server/stacks/semaphore/semaphore.env, non versionne)..."
+    SEMAPHORE_ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')"
+    # cookie_hash/cookie_encryption/access_key_encryption : generes une
+    # seule fois et persistes ici plutot que laisses a un eventuel defaut
+    # auto-genere par Semaphore - garantit qu'un redeploiement de la
+    # stack (delete+recreate, voir dockhand_upsert_stack) ne deconnecte
+    # pas tout le monde ni ne rende les identifiants du Key Store
+    # illisibles.
+    SEMAPHORE_COOKIE_HASH="$(python3 -c 'import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())')"
+    SEMAPHORE_COOKIE_ENCRYPTION="$(python3 -c 'import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())')"
+    SEMAPHORE_ACCESS_KEY_ENCRYPTION="$(python3 -c 'import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())')"
+    cat > "$SCRIPT_DIR/stacks/semaphore/semaphore.env" <<EOF
+SEMAPHORE_ADMIN=admin
+SEMAPHORE_ADMIN_PASSWORD=$SEMAPHORE_ADMIN_PASSWORD
+SEMAPHORE_ADMIN_NAME=Admin
+SEMAPHORE_ADMIN_EMAIL=admin@expolab.lan
+SEMAPHORE_COOKIE_HASH=$SEMAPHORE_COOKIE_HASH
+SEMAPHORE_COOKIE_ENCRYPTION=$SEMAPHORE_COOKIE_ENCRYPTION
+SEMAPHORE_ACCESS_KEY_ENCRYPTION=$SEMAPHORE_ACCESS_KEY_ENCRYPTION
+EOF
+    chmod 600 "$SCRIPT_DIR/stacks/semaphore/semaphore.env"
+fi
+
+# BASTION_URL/BASTION_API_TOKEN a coller dans le Variable Group Semaphore
+# (voir le message de fin de script) - fichier de reference uniquement,
+# rien ne le monte dans un conteneur.
+cat > "$SCRIPT_DIR/stacks/semaphore/bastion-ansible-vars.env" <<EOF
 BASTION_URL=http://127.0.0.1:5000
 BASTION_API_TOKEN=$BASTION_API_TOKEN
 EOF
-    chmod 600 "$SCRIPT_DIR/stacks/bastion-ansible/bastion-ansible.env"
-fi
-
-if [ ! -f "$SCRIPT_DIR/stacks/bastion-ansible/secrets/automation_ed25519" ]; then
-    echo "[+] Generation de la cle SSH dediee automatisation du lab (distincte de toute cle de vraie prod)..."
-    ssh-keygen -t ed25519 -N "" -C "expolab-bastion-ansible" -f "$SCRIPT_DIR/stacks/bastion-ansible/secrets/automation_ed25519" -q
-fi
-
-# roles/ et runs/ : lecture-ecriture pour la stack bastion-ansible-webui
-# (voir docker-compose.yml) - roles/ vide au premier demarrage, seede
-# automatiquement depuis l'image (webui/app.py) ; jamais ecrase ensuite.
-mkdir -p "$SCRIPT_DIR/stacks/bastion-ansible/roles" "$SCRIPT_DIR/stacks/bastion-ansible/runs"
-
-# order.yaml et site.yml sont montes comme des FICHIERS (pas des
-# dossiers) par les deux services de la stack bastion-ansible - sans ce
-# `touch` prealable, un bind mount Docker sur un chemin absent cree un
-# DOSSIER vide a la place, empechant tout seed ulterieur par webui/app.py.
-touch "$SCRIPT_DIR/stacks/bastion-ansible/order.yaml" "$SCRIPT_DIR/stacks/bastion-ansible/site.yml"
+chmod 600 "$SCRIPT_DIR/stacks/semaphore/bastion-ansible-vars.env"
 
 mkdir -p "$SCRIPT_DIR/stacks/dnsmasq/data"
 
@@ -131,7 +147,7 @@ touch "$SCRIPT_DIR/stacks/dnsmasq/admin-config/reservations.conf"
 mkdir -p "$SCRIPT_DIR/stacks/git-mirror/data"
 
 echo "[+] Creation/redeploiement des stacks applicatives via l'API Dockhand..."
-for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard git-mirror bastion-ansible; do
+for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard git-mirror semaphore; do
     dockhand_upsert_stack "$stack" "$SCRIPT_DIR/stacks/$stack/docker-compose.yml"
 done
 
@@ -189,4 +205,13 @@ cat <<EOF
 
 Verification :
     curl -k https://dashboard.web.expolab.lan
+
+Semaphore (executeur bastion-ansible) - configuration manuelle unique a
+faire dans son UI (https://semaphore.web.expolab.lan, admin/$(grep '^SEMAPHORE_ADMIN_PASSWORD=' "$SCRIPT_DIR/stacks/semaphore/semaphore.env" | cut -d= -f2-)) :
+    1. Repository -> mirroir git-mirror de bastion-ansible
+    2. Key Store  -> importer $SCRIPT_DIR/stacks/semaphore/automation_key/automation_ed25519
+    3. Inventory  -> fichier inventory/bastion_inventory.py, credential = cle ci-dessus
+    4. Variable Group -> valeurs dans $SCRIPT_DIR/stacks/semaphore/bastion-ansible-vars.env
+    5. Task Template -> playbook site.yml
+    Detail complet : README de bastion-ansible, section "Executeur : Semaphore UI".
 EOF

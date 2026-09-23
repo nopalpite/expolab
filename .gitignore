@@ -27,20 +27,18 @@ server/stacks/dnsmasq/admin-config/
 # etat runtime propre a chaque lab, pas de l'infra-as-code.
 server/stacks/git-mirror/data/
 
-# Token API Bastion + cle SSH dediee automatisation du runner
-# bastion-ansible (generes par deploy-server.sh) - jamais les memes d'un
-# lab a l'autre, distincts de toute cle de vraie production.
-server/stacks/bastion-ansible/bastion-ansible.env
-server/stacks/bastion-ansible/secrets/
+# Secrets Semaphore (admin, cookies, chiffrement des access keys) + cle
+# SSH dediee automatisation pour bastion-ansible + fichier de reference
+# BASTION_URL/BASTION_API_TOKEN (generes par deploy-server.sh) - jamais
+# les memes d'un lab a l'autre, cle distincte de toute cle de vraie
+# production.
+server/stacks/semaphore/semaphore.env
+server/stacks/semaphore/automation_key/
+server/stacks/semaphore/bastion-ansible-vars.env
 
-# Roles, ordre d'execution (order.yaml) et site.yml genere (edites via
-# l'UI bastion-ansible-webui, seedes depuis l'image au premier
-# demarrage) + historique des runs (logs, index.yaml) - etat runtime
-# propre a chaque lab, pas de l'infra-as-code.
-server/stacks/bastion-ansible/roles/
-server/stacks/bastion-ansible/order.yaml
-server/stacks/bastion-ansible/site.yml
-server/stacks/bastion-ansible/runs/
+# Base SQLite + config Semaphore - etat runtime propre a chaque lab, pas
+# de l'infra-as-code.
+server/stacks/semaphore/data/
 
 # Config WireGuard generee (cles, pairs) - jamais la meme d'un lab a
 # l'autre, ne doit jamais finir dans git (secrets client compris).
