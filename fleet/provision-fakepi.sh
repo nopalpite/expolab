@@ -12,7 +12,10 @@ FAKEPI_PASSWORD="${4:-raspberry}"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq openssh-server sudo avahi-daemon >/dev/null
+apt-get install -y -qq openssh-server sudo avahi-daemon python3 >/dev/null
+# python3 : deja present sur un vrai Raspberry Pi OS (realisme du lab),
+# et requis par Ansible pour executer ses modules sur la machine geree
+# (voir bastion-ansible) - sans lui, meme "Gathering Facts" echoue.
 
 echo "[+] Hostname -> $NAME"
 hostnamectl set-hostname "$NAME"
