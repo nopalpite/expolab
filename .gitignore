@@ -27,6 +27,12 @@ server/stacks/dnsmasq/admin-config/
 # etat runtime propre a chaque lab, pas de l'infra-as-code.
 server/stacks/git-mirror/data/
 
+# Token API Bastion + cle SSH dediee automatisation du runner
+# bastion-ansible (generes par deploy-server.sh) - jamais les memes d'un
+# lab a l'autre, distincts de toute cle de vraie production.
+server/stacks/bastion-ansible/bastion-ansible.env
+server/stacks/bastion-ansible/secrets/
+
 # Config WireGuard generee (cles, pairs) - jamais la meme d'un lab a
 # l'autre, ne doit jamais finir dans git (secrets client compris).
 vpn/wireguard/config/

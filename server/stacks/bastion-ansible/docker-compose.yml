@@ -1,0 +1,23 @@
+# Stack Dockhand "bastion-ansible" - execute site.yml (depot separe
+# github.com/nopalpite/bastion-ansible) contre le parc reference dans
+# Bastion. Pas de demon : ce conteneur execute le playbook puis s'arrete
+# - chaque redeploiement de cette stack (via deploy-server.sh) = une
+# execution (modele "declenchement manuel" retenu pour le runner, voir
+# le README de bastion-ansible).
+#
+# network_mode: host - necessaire pour joindre Bastion en direct
+# (127.0.0.1:5000, pas de resolution DNS *.web.expolab.lan requise, meme
+# raison que caddy-admin) ET pour atteindre expo-lan (10.42.0.0/24, ou
+# vivent les machines listees dans Bastion) - le reseau bridge Docker
+# par defaut n'a de route vers aucun des deux.
+services:
+  bastion-ansible:
+    image: ghcr.io/nopalpite/bastion-ansible:latest
+    container_name: expolab-bastion-ansible
+    network_mode: host
+    env_file:
+      - ${REPO_ROOT}/server/stacks/bastion-ansible/bastion-ansible.env
+    volumes:
+      # Cle SSH dediee automatisation (voir deploy-server.sh) - jamais
+      # celle utilisee en vrai vie, une cle propre au lab.
+      - ${REPO_ROOT}/server/stacks/bastion-ansible/secrets:/repo/secrets:ro

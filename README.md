@@ -49,6 +49,26 @@ chaque service comme **stack Dockhand independante** via son API REST
   versionne) ; inventaire de machines et donnees persistees dans
   `server/stacks/bastion/{config,maps}/` (egalement non versionne, propre
   a chaque lab)
+- **bastion-ansible** (https://github.com/nopalpite/bastion-ansible,
+  depot separe - pas de source ici, juste l'image publiee
+  `ghcr.io/nopalpite/bastion-ansible`) : execute `site.yml` (Ansible,
+  mode push) contre le parc **reference dans Bastion** via son
+  `GET /api/machines` (jamais un second inventaire maintenu a la main).
+  Pas de demon : chaque redeploiement de la stack (via `deploy-server.sh`)
+  = une execution du playbook, puis le conteneur s'arrete. `network_mode:
+  host` pour joindre Bastion en direct (`127.0.0.1:5000`, pas de
+  resolution DNS `*.web.expolab.lan` requise) et atteindre `expo-lan`
+  (ou vivent les machines listees dans Bastion). `deploy-server.sh`
+  genere automatiquement, une seule fois : un `BASTION_API_TOKEN`
+  partage (ajoute a la fois dans `bastion.env` pour activer
+  `/api/machines`, et dans `server/stacks/bastion-ansible/bastion-ansible.env`
+  non versionne) et une cle SSH "automatisation" dediee au lab
+  (`server/stacks/bastion-ansible/secrets/`, non versionnee, distincte
+  de toute cle de vraie production) - authentification jamais mediee par
+  Bastion, meme choix que la vraie infra (voir le README de
+  bastion-ansible). Les roles livres avec l'image sont volontairement
+  vides (squelettes) - a date, ce conteneur ne fait donc rien de destructif
+  meme s'il echoue a joindre une machine du parc.
 - **dashboard** (https://dashboard.web.expolab.lan, point d'entree du lab)
   - [Homepage](https://gethomepage.dev), page de liens vers tous les
   services ayant une interface web propre. Config statique versionnee
@@ -333,8 +353,8 @@ Ce script defait dans l'ordre exactement ce que `install.sh` /
    `vpn-admin`, supprime tous les pairs et la config generee
 2. `server/teardown-server.sh` — arrete Dockhand et les stacks Docker
    (dnsmasq, dnsmasq-admin, caddy, caddy-admin, webui, bastion,
-   dashboard, git-mirror), reactive le DHCP integre d'Incus sur
-   `expo-lan` (secours), desinstalle Docker
+   dashboard, git-mirror, bastion-ansible), reactive le DHCP integre
+   d'Incus sur `expo-lan` (secours), desinstalle Docker
 3. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
 4. `incus/network-teardown.sh` — supprime le profil `fake-pi` et le
    reseau `expo-lan`
@@ -379,6 +399,7 @@ server/
     dashboard/{docker-compose.yml, config/}   # Homepage, liens vers les services web du lab
     vpn-admin/docker-compose.yml                                      # build context = ../../vpn-admin
     git-mirror/{docker-compose.yml, data/}                            # data/ non versionne (clones bare + mirrors.yaml)
+    bastion-ansible/{docker-compose.yml, bastion-ansible.env, secrets/}  # env + secrets/ non versionnes ; source du runner dans un depot separe
 webui/
   app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh
   Dockerfile                     # image (Flask + client Incus)

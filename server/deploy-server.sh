@@ -77,6 +77,38 @@ EOF
     chmod 600 "$SCRIPT_DIR/stacks/bastion/bastion.env"
 fi
 
+# BASTION_API_TOKEN active /api/machines cote Bastion (desactive par
+# defaut, voir son README) - meme jeton ecrit dans bastion.env (cote
+# serveur) et bastion-ansible.env (cote client) pour que la stack
+# bastion-ansible ci-dessous puisse s'authentifier sans rien configurer
+# a la main. Bloc hors du "if [ ! -f bastion.env ]" ci-dessus : s'applique
+# aussi a un bastion.env deja existant (deploiement anterieur a cette
+# fonctionnalite) et pas seulement a la toute premiere generation.
+if ! grep -q '^BASTION_API_TOKEN=' "$SCRIPT_DIR/stacks/bastion/bastion.env" 2>/dev/null; then
+    echo "[+] Ajout de BASTION_API_TOKEN a bastion.env (active /api/machines pour bastion-ansible)..."
+    BASTION_API_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+    echo "BASTION_API_TOKEN=$BASTION_API_TOKEN" >> "$SCRIPT_DIR/stacks/bastion/bastion.env"
+else
+    BASTION_API_TOKEN="$(grep '^BASTION_API_TOKEN=' "$SCRIPT_DIR/stacks/bastion/bastion.env" | cut -d= -f2-)"
+fi
+
+mkdir -p "$SCRIPT_DIR/stacks/bastion-ansible/secrets"
+if [ ! -f "$SCRIPT_DIR/stacks/bastion-ansible/bastion-ansible.env" ]; then
+    # 127.0.0.1:5000 (pas le vhost Caddy) : bastion-ansible tourne en
+    # network_mode: host comme Bastion lui-meme, pas besoin de passer par
+    # le reverse-proxy ni de resoudre *.web.expolab.lan.
+    cat > "$SCRIPT_DIR/stacks/bastion-ansible/bastion-ansible.env" <<EOF
+BASTION_URL=http://127.0.0.1:5000
+BASTION_API_TOKEN=$BASTION_API_TOKEN
+EOF
+    chmod 600 "$SCRIPT_DIR/stacks/bastion-ansible/bastion-ansible.env"
+fi
+
+if [ ! -f "$SCRIPT_DIR/stacks/bastion-ansible/secrets/automation_ed25519" ]; then
+    echo "[+] Generation de la cle SSH dediee automatisation du lab (distincte de toute cle de vraie prod)..."
+    ssh-keygen -t ed25519 -N "" -C "expolab-bastion-ansible" -f "$SCRIPT_DIR/stacks/bastion-ansible/secrets/automation_ed25519" -q
+fi
+
 mkdir -p "$SCRIPT_DIR/stacks/dnsmasq/data"
 
 # dnsmasq refuse de demarrer si dhcp-hostsfile pointe vers un fichier
@@ -88,7 +120,7 @@ touch "$SCRIPT_DIR/stacks/dnsmasq/admin-config/reservations.conf"
 mkdir -p "$SCRIPT_DIR/stacks/git-mirror/data"
 
 echo "[+] Creation/redeploiement des stacks applicatives via l'API Dockhand..."
-for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard git-mirror; do
+for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard git-mirror bastion-ansible; do
     dockhand_upsert_stack "$stack" "$SCRIPT_DIR/stacks/$stack/docker-compose.yml"
 done
 
