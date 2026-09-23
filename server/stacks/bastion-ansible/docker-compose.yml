@@ -17,6 +17,13 @@ services:
     network_mode: host
     env_file:
       - ${REPO_ROOT}/server/stacks/bastion-ansible/bastion-ansible.env
+    environment:
+      # Uniquement pour ce lab : les faux Pi sont recrees souvent
+      # (nouvelle cle hote a chaque fois), la verification stricte
+      # d'ansible.cfg y serait juste une nuisance permanente - pas touche
+      # a la valeur par defaut du vrai outil (securisee, voulue pour la
+      # vraie prod), seulement surchargee ici pour cette stack.
+      - ANSIBLE_HOST_KEY_CHECKING=false
     volumes:
       # Cle SSH dediee automatisation (voir deploy-server.sh) - jamais
       # celle utilisee en vrai vie, une cle propre au lab.
