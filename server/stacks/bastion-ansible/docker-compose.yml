@@ -36,3 +36,9 @@ services:
       # Cle SSH dediee automatisation (voir deploy-server.sh) - jamais
       # celle utilisee en vrai vie, une cle propre au lab.
       - ${REPO_ROOT}/server/stacks/bastion-ansible/secrets:/repo/secrets:ro
+    # site.yml utilise "become: true" (escalade sudo) - "raspberry" est
+    # le mot de passe "pi" par defaut de tout ce lab, deja en clair
+    # ailleurs (ex: BASTION_ADMIN_PASSWORD dans bastion/docker-compose.yml).
+    # Un vrai parc utiliserait plutot des vars chiffrees (Ansible Vault)
+    # ou du sudo NOPASSWD sur la cle "automatisation" - hors-scope ici.
+    command: ["--extra-vars", "ansible_become_pass=raspberry"]
