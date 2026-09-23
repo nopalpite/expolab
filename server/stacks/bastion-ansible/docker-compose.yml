@@ -36,6 +36,13 @@ services:
       # Cle SSH dediee automatisation (voir deploy-server.sh) - jamais
       # celle utilisee en vrai vie, une cle propre au lab.
       - ${REPO_ROOT}/server/stacks/bastion-ansible/secrets:/repo/secrets:ro
+      # Lecture seule : seul le webui ecrit (voir plus bas). Partage les
+      # memes roles/order.yaml/site.yml que l'UI - sans ca, ce runner
+      # utiliserait toujours la copie figee dans l'image, ignorant toute
+      # edition/reordonnancement fait depuis le webui.
+      - ${REPO_ROOT}/server/stacks/bastion-ansible/roles:/repo/roles:ro
+      - ${REPO_ROOT}/server/stacks/bastion-ansible/order.yaml:/repo/order.yaml:ro
+      - ${REPO_ROOT}/server/stacks/bastion-ansible/site.yml:/repo/site.yml:ro
     # site.yml utilise "become: true" (escalade sudo) - "raspberry" est
     # le mot de passe "pi" par defaut de tout ce lab, deja en clair
     # ailleurs (ex: BASTION_ADMIN_PASSWORD dans bastion/docker-compose.yml).
@@ -65,8 +72,12 @@ services:
     volumes:
       - ${REPO_ROOT}/server/stacks/bastion-ansible/secrets:/repo/secrets:ro
       # Lecture-ecriture (contrairement au runner) : l'UI edite les
-      # roles et ecrit l'historique des runs. roles/ est vide au premier
-      # demarrage - seede automatiquement depuis /opt/roles-seed (bake
-      # dans l'image) par webui/app.py.
+      # roles, l'ordre d'execution et ecrit l'historique des runs.
+      # roles/order.yaml/site.yml sont vides/absents au premier
+      # demarrage - seedes automatiquement depuis l'image (bake au
+      # build, voir webui/app.py:seed_state_if_empty) des que ce
+      # conteneur demarre.
       - ${REPO_ROOT}/server/stacks/bastion-ansible/roles:/repo/roles:rw
+      - ${REPO_ROOT}/server/stacks/bastion-ansible/order.yaml:/repo/order.yaml:rw
+      - ${REPO_ROOT}/server/stacks/bastion-ansible/site.yml:/repo/site.yml:rw
       - ${REPO_ROOT}/server/stacks/bastion-ansible/runs:/repo/runs:rw

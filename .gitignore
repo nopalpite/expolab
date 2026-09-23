@@ -33,10 +33,13 @@ server/stacks/git-mirror/data/
 server/stacks/bastion-ansible/bastion-ansible.env
 server/stacks/bastion-ansible/secrets/
 
-# Roles (edites via l'UI bastion-ansible-webui, seedes depuis l'image au
-# premier demarrage) + historique des runs (logs, index.yaml) - etat
-# runtime propre a chaque lab, pas de l'infra-as-code.
+# Roles, ordre d'execution (order.yaml) et site.yml genere (edites via
+# l'UI bastion-ansible-webui, seedes depuis l'image au premier
+# demarrage) + historique des runs (logs, index.yaml) - etat runtime
+# propre a chaque lab, pas de l'infra-as-code.
 server/stacks/bastion-ansible/roles/
+server/stacks/bastion-ansible/order.yaml
+server/stacks/bastion-ansible/site.yml
 server/stacks/bastion-ansible/runs/
 
 # Config WireGuard generee (cles, pairs) - jamais la meme d'un lab a

@@ -114,6 +114,12 @@ fi
 # automatiquement depuis l'image (webui/app.py) ; jamais ecrase ensuite.
 mkdir -p "$SCRIPT_DIR/stacks/bastion-ansible/roles" "$SCRIPT_DIR/stacks/bastion-ansible/runs"
 
+# order.yaml et site.yml sont montes comme des FICHIERS (pas des
+# dossiers) par les deux services de la stack bastion-ansible - sans ce
+# `touch` prealable, un bind mount Docker sur un chemin absent cree un
+# DOSSIER vide a la place, empechant tout seed ulterieur par webui/app.py.
+touch "$SCRIPT_DIR/stacks/bastion-ansible/order.yaml" "$SCRIPT_DIR/stacks/bastion-ansible/site.yml"
+
 mkdir -p "$SCRIPT_DIR/stacks/dnsmasq/data"
 
 # dnsmasq refuse de demarrer si dhcp-hostsfile pointe vers un fichier
