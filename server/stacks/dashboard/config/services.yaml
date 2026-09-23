@@ -15,6 +15,10 @@
         href: https://bastion.web.expolab.lan
         description: Dashboard SSH/VNC de la flotte
         icon: mdi-remote-desktop
+    - Semaphore:
+        href: https://semaphore.web.expolab.lan
+        description: Declenchement/historique des runs Ansible (bastion-ansible)
+        icon: si-ansible
 - Infrastructure:
     - VPN:
         href: https://vpn.web.expolab.lan
@@ -28,3 +32,7 @@
         href: https://dnsmasq.web.expolab.lan
         description: Baux DHCP actifs sur expo-lan
         icon: mdi-dns
+    - git-mirror:
+        href: https://git-mirror.web.expolab.lan
+        description: Mirroirs git locaux (source des repos pour Semaphore)
+        icon: si-git

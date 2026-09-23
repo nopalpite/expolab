@@ -98,6 +98,11 @@ fi
 # a partir du depot bastion-ansible clone via git-mirror, pas d'une
 # image publiee par ce depot.
 mkdir -p "$SCRIPT_DIR/stacks/semaphore/automation_key" "$SCRIPT_DIR/stacks/semaphore/data"
+# L'image semaphoreui/semaphore tourne en non-root fixe (UID 1001) - un
+# dossier cree ici (root, via sudo) reste sinon root:root et le conteneur
+# ne peut pas y ouvrir sa base SQLite ("unable to open database file (14)",
+# constate en pratique au premier deploiement).
+chown -R 1001:1001 "$SCRIPT_DIR/stacks/semaphore/data"
 if [ ! -f "$SCRIPT_DIR/stacks/semaphore/automation_key/automation_ed25519" ]; then
     echo "[+] Generation de la cle SSH dediee automatisation du lab (distincte de toute cle de vraie prod)..."
     ssh-keygen -t ed25519 -N "" -C "expolab-semaphore" -f "$SCRIPT_DIR/stacks/semaphore/automation_key/automation_ed25519" -q
