@@ -24,6 +24,14 @@ services:
       # a la valeur par defaut du vrai outil (securisee, voulue pour la
       # vraie prod), seulement surchargee ici pour cette stack.
       - ANSIBLE_HOST_KEY_CHECKING=false
+      # Bastion n'expose pas de nom d'utilisateur SSH dans /api/machines
+      # (uniquement id/name/host/os/site/ssh_port/tags) - Ansible se
+      # rabat donc sur root par defaut, qui n'existe pas sur les faux Pi
+      # (utilisateur "pi", voir fleet/provision-fakepi.sh). Fige ici pour
+      # ce lab ou tout le monde est "pi" ; un vrai parc heterogene (users
+      # differents par machine) demanderait que Bastion expose ce champ
+      # dans son API plutot qu'une valeur globale comme celle-ci.
+      - ANSIBLE_REMOTE_USER=pi
     volumes:
       # Cle SSH dediee automatisation (voir deploy-server.sh) - jamais
       # celle utilisee en vrai vie, une cle propre au lab.
