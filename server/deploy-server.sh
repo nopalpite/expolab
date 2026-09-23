@@ -109,6 +109,11 @@ if [ ! -f "$SCRIPT_DIR/stacks/bastion-ansible/secrets/automation_ed25519" ]; the
     ssh-keygen -t ed25519 -N "" -C "expolab-bastion-ansible" -f "$SCRIPT_DIR/stacks/bastion-ansible/secrets/automation_ed25519" -q
 fi
 
+# roles/ et runs/ : lecture-ecriture pour la stack bastion-ansible-webui
+# (voir docker-compose.yml) - roles/ vide au premier demarrage, seede
+# automatiquement depuis l'image (webui/app.py) ; jamais ecrase ensuite.
+mkdir -p "$SCRIPT_DIR/stacks/bastion-ansible/roles" "$SCRIPT_DIR/stacks/bastion-ansible/runs"
+
 mkdir -p "$SCRIPT_DIR/stacks/dnsmasq/data"
 
 # dnsmasq refuse de demarrer si dhcp-hostsfile pointe vers un fichier

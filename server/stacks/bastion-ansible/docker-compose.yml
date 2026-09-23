@@ -42,3 +42,31 @@ services:
     # Un vrai parc utiliserait plutot des vars chiffrees (Ansible Vault)
     # ou du sudo NOPASSWD sur la cle "automatisation" - hors-scope ici.
     command: ["--extra-vars", "ansible_become_pass=raspberry"]
+
+  # UI web (roles, declenchement de runs, historique) - meme image,
+  # entrypoint different (webui/app.py au lieu de ansible-playbook direct).
+  # Exposee via Caddy (services.yaml) contrairement au runner ci-dessus,
+  # qui n'a pas d'interface. Memes raisons de network_mode: host.
+  bastion-ansible-webui:
+    image: ghcr.io/nopalpite/bastion-ansible:latest
+    container_name: expolab-bastion-ansible-webui
+    restart: unless-stopped
+    network_mode: host
+    entrypoint: ["python3", "webui/app.py"]
+    env_file:
+      - ${REPO_ROOT}/server/stacks/bastion-ansible/bastion-ansible.env
+    environment:
+      - ANSIBLE_HOST_KEY_CHECKING=false
+      - ANSIBLE_REMOTE_USER=pi
+      # Meme raison que le "command" du runner ci-dessus, mais pour les
+      # runs que l'UI declenche elle-meme (voir BASTION_ANSIBLE_EXTRA_ARGS
+      # dans le README de bastion-ansible).
+      - BASTION_ANSIBLE_EXTRA_ARGS=--extra-vars ansible_become_pass=raspberry
+    volumes:
+      - ${REPO_ROOT}/server/stacks/bastion-ansible/secrets:/repo/secrets:ro
+      # Lecture-ecriture (contrairement au runner) : l'UI edite les
+      # roles et ecrit l'historique des runs. roles/ est vide au premier
+      # demarrage - seede automatiquement depuis /opt/roles-seed (bake
+      # dans l'image) par webui/app.py.
+      - ${REPO_ROOT}/server/stacks/bastion-ansible/roles:/repo/roles:rw
+      - ${REPO_ROOT}/server/stacks/bastion-ansible/runs:/repo/runs:rw

@@ -33,6 +33,12 @@ server/stacks/git-mirror/data/
 server/stacks/bastion-ansible/bastion-ansible.env
 server/stacks/bastion-ansible/secrets/
 
+# Roles (edites via l'UI bastion-ansible-webui, seedes depuis l'image au
+# premier demarrage) + historique des runs (logs, index.yaml) - etat
+# runtime propre a chaque lab, pas de l'infra-as-code.
+server/stacks/bastion-ansible/roles/
+server/stacks/bastion-ansible/runs/
+
 # Config WireGuard generee (cles, pairs) - jamais la meme d'un lab a
 # l'autre, ne doit jamais finir dans git (secrets client compris).
 vpn/wireguard/config/

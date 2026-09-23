@@ -68,7 +68,18 @@ chaque service comme **stack Dockhand independante** via son API REST
   Bastion, meme choix que la vraie infra (voir le README de
   bastion-ansible). Les roles livres avec l'image sont volontairement
   vides (squelettes) - a date, ce conteneur ne fait donc rien de destructif
-  meme s'il echoue a joindre une machine du parc.
+  meme s'il echoue a joindre une machine du parc. **Valide de bout en
+  bout** contre `pi-01` (faux Pi ajoute manuellement dans Bastion) :
+  inventaire, auth par cle dediee, escalade sudo et execution reussis.
+  - **bastion-ansible-webui** (https://bastion-ansible.web.expolab.lan) :
+    meme image, entrypoint different (`webui/app.py` au lieu du runner) -
+    liste/edite les roles (textarea YAML brut par fichier), detecte les
+    tags Bastion sans role et propose de scaffolder, declenche `site.yml`
+    (tout le parc ou une seule typologie) et garde l'historique des runs
+    (`server/stacks/bastion-ansible/{roles,runs}/`, non versionnes,
+    lecture-ecriture - `roles/` seede une seule fois depuis l'image au
+    premier demarrage). Pas d'authentification (comme le reste des apps
+    admin du lab).
 - **dashboard** (https://dashboard.web.expolab.lan, point d'entree du lab)
   - [Homepage](https://gethomepage.dev), page de liens vers tous les
   services ayant une interface web propre. Config statique versionnee
@@ -399,7 +410,7 @@ server/
     dashboard/{docker-compose.yml, config/}   # Homepage, liens vers les services web du lab
     vpn-admin/docker-compose.yml                                      # build context = ../../vpn-admin
     git-mirror/{docker-compose.yml, data/}                            # data/ non versionne (clones bare + mirrors.yaml)
-    bastion-ansible/{docker-compose.yml, bastion-ansible.env, secrets/}  # env + secrets/ non versionnes ; source du runner dans un depot separe
+    bastion-ansible/{docker-compose.yml, bastion-ansible.env, secrets/, roles/, runs/}  # tout sauf docker-compose.yml non versionne ; source dans un depot separe
 webui/
   app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh
   Dockerfile                     # image (Flask + client Incus)
