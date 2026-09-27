@@ -339,8 +339,10 @@ cat <<EOF
     Dockhand      : http://${LAN_IP:-<ip-du-pi>}:3000 (toutes les stacks pilotables ici)
     DHCP/DNS      : dnsmasq, plage 10.42.0.100-250, domaine expolab.lan
     Reverse proxy : https://<service>.$PUBLIC_DOMAIN (TLS_MODE=$TLS_MODE)
-                    services definis dans server/services.yaml, certificat
-                    TLS modifiable depuis caddy-admin
+                    services definis dans server/services.yaml
+
+Certificat TLS (actuellement $TLS_MODE) : modifiable a tout moment sur
+    https://caddy.$PUBLIC_DOMAIN, section "Certificat TLS".
 
 Verification :
     curl -k https://dashboard.$PUBLIC_DOMAIN

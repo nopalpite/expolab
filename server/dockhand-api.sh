@@ -159,7 +159,40 @@ print(json.dumps({
     "deploy": True,
 }))
 ' "$name" "$compose_content" "$env_id")"
-    dockhand_curl -X POST "$DOCKHAND_URL/api/stacks" \
+    local job_id
+    job_id="$(dockhand_curl -X POST "$DOCKHAND_URL/api/stacks" \
         -H 'Content-Type: application/json' \
-        -d "$payload" >/dev/null
+        -d "$payload" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("jobId", ""))
+except Exception:
+    print("")
+')"
+    [ -z "$job_id" ] && return 0
+
+    # Le POST ci-dessus retourne immediatement un jobId (build+deploy
+    # asynchrone cote Dockhand, voir GET /api/jobs/{jobId}) - sans
+    # attendre sa fin ici, un appelant qui verifie tout de suite l'etat du
+    # conteneur (ex: vpn/install.sh avant de creer le pair VPN par
+    # defaut) peut tomber en pleine construction d'image et echouer a
+    # tort. Constate en pratique sur un Pi : la toute premiere
+    # construction (jamais en cache) peut largement depasser quelques
+    # secondes, en particulier pour un Dockerfile qui compile quelque
+    # chose (xcaddy pour Caddy).
+    local i status
+    for i in $(seq 1 180); do
+        status="$(dockhand_curl "$DOCKHAND_URL/api/jobs/$job_id" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("status", ""))
+except Exception:
+    print("")
+')"
+        case "$status" in
+            pending|running|queued|"") sleep 2 ;;
+            *) return 0 ;;
+        esac
+    done
+    echo "[!] '$name' : le deploiement (job $job_id) prend plus de 6 minutes, on continue quand meme." >&2
 }
