@@ -38,10 +38,13 @@ chaque service comme **stack Dockhand independante** via son API REST
   Docker isole ne permet pas. Bail DHCP persiste dans
   `server/stacks/dnsmasq/data/` (survit a une recreation du conteneur).
 - **Caddy** (reverse-proxy), egalement en `network_mode: host`. Deux
-  modes TLS, config dans `server/stacks/caddy/tls.env` (non versionne,
-  cree avec des valeurs par defaut au premier `deploy-server.sh`) -
+  modes TLS, config dans `server/stacks/caddy/tls.env` (non versionne) -
   editable a la main OU depuis **caddy-admin** (section "Certificat
-  TLS", voir plus bas) :
+  TLS", voir plus bas). Au tout premier `deploy-server.sh` (ce fichier
+  n'existe pas encore), le script propose interactivement de le
+  configurer tout de suite (domaine + identifiants OVH) plutot que de
+  se contenter du defaut auto-signe - reste modifiable plus tard de
+  toute facon, jamais redemande sur les runs suivants :
   - `internal` (defaut) : certificat auto-signe (CA interne de Caddy) sur
     `*.web.expolab.lan` - fonctionne hors-ligne, mais chaque
     appareil/navigateur doit accepter l'avertissement une fois.
@@ -56,12 +59,15 @@ chaque service comme **stack Dockhand independante** via son API REST
     `*.web.expolab.lan`, donc resolu automatiquement par le meme pair VPN
     (voir plus bas). Necessite un token API OVH (droits GET/PUT/POST/DELETE
     sur `/domain/zone/*`, cree sur
-    https://www.ovh.com/auth/api/createToken/) - a saisir dans
-    caddy-admin, qui redemarre Caddy lui-meme apres sauvegarde (necessaire
-    pour qu'il relise ses identifiants OVH comme variables
-    d'environnement - un simple rechargement a chaud de son Caddyfile ne
-    suffit pas). `deploy-server.sh` relit ce meme fichier a chaque
-    deploiement, donc un choix fait depuis l'UI survit a un redeploiement.
+    https://www.ovh.com/auth/api/createToken/) - saisi au premier
+    `deploy-server.sh` (voir ci-dessus) ou plus tard dans caddy-admin, qui
+    redeploie alors les stacks `caddy`/`dashboard`/`semaphore` via l'API
+    Dockhand apres sauvegarde (necessaire pour qu'elles relisent leurs
+    variables d'environnement - OVH_\* pour Caddy, HOMEPAGE_ALLOWED_HOSTS
+    pour dashboard, SEMAPHORE_WEB_ROOT pour semaphore - un simple
+    rechargement a chaud ne suffit jamais pour ca). `deploy-server.sh`
+    relit ce meme fichier a chaque deploiement, donc un choix fait depuis
+    l'UI survit a un redeploiement.
 - **webui** expolab (creation/suppression de faux Pi), publication de port
 - **Bastion** (https://github.com/nopalpite/bastion, dashboard +
   SSH/VNC web) en `network_mode: host` - image prete a l'emploi publiee

@@ -70,13 +70,46 @@ dockhand_require_env
 # chez OVH (voir server/render-caddyfile.py et stacks/caddy/Dockerfile).
 mkdir -p "$SCRIPT_DIR/stacks/caddy/data" "$SCRIPT_DIR/stacks/caddy/config"
 if [ ! -f "$SCRIPT_DIR/stacks/caddy/tls.env" ]; then
+    PROMPT_TLS_MODE=internal
+    PROMPT_TLS_SIGNED_DOMAIN=
+    PROMPT_OVH_ENDPOINT=
+    PROMPT_OVH_APPLICATION_KEY=
+    PROMPT_OVH_APPLICATION_SECRET=
+    PROMPT_OVH_CONSUMER_KEY=
+    # Propose le choix a la toute premiere installation (ce fichier
+    # n'existe pas encore), jamais aux runs suivants (idempotence, voir
+    # l'usage de ce script) - et seulement si un terminal est attache,
+    # jamais en execution non-interactive (CI, script automatise) : sans
+    # ca un `read` sans entree bloquerait indefiniment. Reste modifiable
+    # plus tard de toute facon, a la main dans ce fichier ou depuis
+    # caddy-admin (section "Certificat TLS").
+    if [ -t 0 ]; then
+        echo
+        read -r -p "Configurer un certificat TLS signe (Let's Encrypt via OVH, DNS-01) des maintenant ? Sinon certificat auto-signe. [y/N] " ans
+        if [[ "$ans" =~ ^[yY]$ ]]; then
+            read -r -p "Domaine public (ex: expolab.tondomaine.fr) : " PROMPT_TLS_SIGNED_DOMAIN
+            read -r -p "Endpoint OVH [ovh-eu] : " ovh_endpoint_input
+            PROMPT_OVH_ENDPOINT="${ovh_endpoint_input:-ovh-eu}"
+            echo "Jeton API OVH a creer sur https://www.ovh.com/auth/api/createToken/ (droits GET/PUT/POST/DELETE sur /domain/zone/*) :"
+            read -r -p "  Application key : " PROMPT_OVH_APPLICATION_KEY
+            read -rs -p "  Application secret : " PROMPT_OVH_APPLICATION_SECRET
+            echo
+            read -rs -p "  Consumer key : " PROMPT_OVH_CONSUMER_KEY
+            echo
+            if [ -n "$PROMPT_TLS_SIGNED_DOMAIN" ] && [ -n "$PROMPT_OVH_APPLICATION_KEY" ] && [ -n "$PROMPT_OVH_APPLICATION_SECRET" ] && [ -n "$PROMPT_OVH_CONSUMER_KEY" ]; then
+                PROMPT_TLS_MODE=signed
+            else
+                echo "[!] Champ(s) manquant(s) - reste en certificat auto-signe (completable plus tard via caddy-admin)." >&2
+            fi
+        fi
+    fi
     cat > "$SCRIPT_DIR/stacks/caddy/tls.env" <<EOF
-TLS_MODE=internal
-TLS_SIGNED_DOMAIN=
-OVH_ENDPOINT=
-OVH_APPLICATION_KEY=
-OVH_APPLICATION_SECRET=
-OVH_CONSUMER_KEY=
+TLS_MODE=$PROMPT_TLS_MODE
+TLS_SIGNED_DOMAIN=$PROMPT_TLS_SIGNED_DOMAIN
+OVH_ENDPOINT=$PROMPT_OVH_ENDPOINT
+OVH_APPLICATION_KEY=$PROMPT_OVH_APPLICATION_KEY
+OVH_APPLICATION_SECRET=$PROMPT_OVH_APPLICATION_SECRET
+OVH_CONSUMER_KEY=$PROMPT_OVH_CONSUMER_KEY
 EOF
 fi
 chmod 600 "$SCRIPT_DIR/stacks/caddy/tls.env"
@@ -300,12 +333,14 @@ fi
 LAN_IP="$(ip route get 1.1.1.1 2>/dev/null | awk '/src/{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}')"
 cat <<EOF
 
-[+] Serveur d'expo pret :
-    Dashboard     : https://dashboard.$PUBLIC_DOMAIN (liens vers tous les services)
+[+] Serveur d'expo pret - ouvre https://dashboard.$PUBLIC_DOMAIN dans ton
+    navigateur pour commencer (liens vers tous les services du lab).
+
     Dockhand      : http://${LAN_IP:-<ip-du-pi>}:3000 (toutes les stacks pilotables ici)
     DHCP/DNS      : dnsmasq, plage 10.42.0.100-250, domaine expolab.lan
     Reverse proxy : https://<service>.$PUBLIC_DOMAIN (TLS_MODE=$TLS_MODE)
-                    services definis dans server/services.yaml
+                    services definis dans server/services.yaml, certificat
+                    TLS modifiable depuis caddy-admin
 
 Verification :
     curl -k https://dashboard.$PUBLIC_DOMAIN
