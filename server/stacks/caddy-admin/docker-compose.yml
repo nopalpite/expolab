@@ -10,6 +10,13 @@ services:
     # (127.0.0.1:2019, lui-meme en network_mode: host) pour le
     # rechargement a chaud, sans passer par Dockhand ni redemarrer Caddy.
     network_mode: host
+    environment:
+      # Necessaire pour recreer d'autres stacks (caddy, dashboard,
+      # semaphore) via l'API Dockhand apres un changement de config TLS -
+      # voir app.py, dockhand_recreate_stack() - leurs docker-compose.yml
+      # referencent des binds absolus via ${REPO_ROOT}, jamais resolus
+      # par Dockhand lui-meme (voir server/dockhand-api.sh).
+      - REPO_ROOT=${REPO_ROOT}
     volumes:
       - ${REPO_ROOT}/server:/server
       # Necessaire pour detecter les conteneurs a ports publies pas

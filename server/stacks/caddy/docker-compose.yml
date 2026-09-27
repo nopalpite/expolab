@@ -1,17 +1,31 @@
-# Stack Dockhand "caddy" - reverse-proxy TLS auto-signe. Caddyfile genere
-# par server/render-caddyfile.py a partir de server/services.yaml (non
-# versionne, regenere a chaque deploiement).
+# Stack Dockhand "caddy" - reverse-proxy TLS. Caddyfile genere par
+# server/render-caddyfile.py a partir de server/services.yaml (non
+# versionne, regenere a chaque deploiement) - TLS auto-signe par defaut
+# (TLS_MODE=internal), ou signe Let's Encrypt via DNS-01/OVH si
+# TLS_MODE=signed (voir deploy-server.sh). Image buildee localement
+# (Dockerfile) plutot que caddy:latest - besoin du plugin caddy-dns/ovh,
+# absent de l'image officielle.
 services:
   caddy:
-    image: caddy:latest
+    build: ${REPO_ROOT}/server/stacks/caddy
     container_name: expolab-caddy
     restart: unless-stopped
     network_mode: host
+    env_file:
+      # TLS_MODE/TLS_SIGNED_DOMAIN/OVH_* - seuls les OVH_* sont
+      # effectivement lus par Caddy (le Caddyfile genere y reference
+      # {env.OVH_*} en TLS_MODE=signed) ; les autres cles ne servent qu'a
+      # deploy-server.sh/caddy-admin. Fichier toujours present (voir
+      # deploy-server.sh), jamais commite (secrets).
+      - ${REPO_ROOT}/server/stacks/caddy/tls.env
     volumes:
       - ${REPO_ROOT}/server/stacks/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-
-volumes:
-  caddy_data:
-  caddy_config:
+      # Bind-mounts (pas de volumes Docker nommes) : meme convention que
+      # toutes les autres stacks de ce projet (data/config visibles et
+      # sauvegardables comme de simples fichiers, pas d'ambiguite sur ce
+      # qu'un `docker volume prune` ou une suppression de stack via
+      # Dockhand peut emporter avec elles). Contient les certificats TLS
+      # (et la cle privee de la CA interne en mode internal) - jamais
+      # commite, voir .gitignore.
+      - ${REPO_ROOT}/server/stacks/caddy/data:/data
+      - ${REPO_ROOT}/server/stacks/caddy/config:/config

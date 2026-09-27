@@ -1,38 +1,48 @@
 # Liste statique et versionnee des services du serveur d'expo. A tenir a
 # jour a la main en meme temps que server/services.yaml (pas
 # d'auto-decouverte ici, voir docker-compose.yml de ce stack).
+#
+# __PUBLIC_DOMAIN__ est un placeholder substitue par deploy-server.sh (et
+# caddy-admin lors d'un changement de config TLS) en web.expolab.lan
+# (TLS_MODE=internal) ou en TLS_SIGNED_DOMAIN (TLS_MODE=signed) - jamais
+# ecrit en dur, sinon ces liens resteraient casses des qu'on bascule de
+# mode (constate en pratique : dashboard pointait encore vers
+# *.web.expolab.lan apres passage en signed). Le fichier reellement lu
+# par Homepage est services.yaml (genere, non versionne, voir .gitignore)
+# - c'est CE fichier-ci (.template) qu'il faut editer a la main pour
+# ajouter/retirer une carte.
 ---
 - Services:
     - Dockhand:
-        href: https://dockhand.web.expolab.lan
+        href: https://dockhand.__PUBLIC_DOMAIN__
         description: Gestion de tous les stacks Docker (dnsmasq, caddy, webui, bastion, wireguard)
         icon: si-docker
     - Fleet:
-        href: https://fleet.web.expolab.lan
+        href: https://fleet.__PUBLIC_DOMAIN__
         description: Creer/supprimer les faux Raspberry Pi de la flotte
         icon: si-raspberrypi
     - Bastion:
-        href: https://bastion.web.expolab.lan
+        href: https://bastion.__PUBLIC_DOMAIN__
         description: Dashboard SSH/VNC de la flotte
         icon: mdi-remote-desktop
     - Semaphore:
-        href: https://semaphore.web.expolab.lan
+        href: https://semaphore.__PUBLIC_DOMAIN__
         description: Declenchement/historique des runs Ansible (bastion-ansible)
         icon: si-ansible
 - Infrastructure:
     - VPN:
-        href: https://vpn.web.expolab.lan
+        href: https://vpn.__PUBLIC_DOMAIN__
         description: Creer/gerer les pairs WireGuard
         icon: si-wireguard
     - Caddy:
-        href: https://caddy.web.expolab.lan
+        href: https://caddy.__PUBLIC_DOMAIN__
         description: Ajouter/retirer un service expose par le reverse-proxy
         icon: si-caddy
     - dnsmasq:
-        href: https://dnsmasq.web.expolab.lan
+        href: https://dnsmasq.__PUBLIC_DOMAIN__
         description: Baux DHCP actifs sur expo-lan
         icon: mdi-dns
     - git-mirror:
-        href: https://git-mirror.web.expolab.lan
+        href: https://git-mirror.__PUBLIC_DOMAIN__
         description: Mirroirs git locaux (source des repos pour Semaphore)
         icon: si-git

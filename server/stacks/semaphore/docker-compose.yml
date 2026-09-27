@@ -17,10 +17,16 @@ services:
     restart: unless-stopped
     network_mode: host
     env_file:
+      # SEMAPHORE_WEB_ROOT y est ecrit (et remis a jour a chaque
+      # deploiement, pas seulement a la premiere generation des secrets) -
+      # pas en dur ici : doit suivre le domaine public actuel
+      # (server/stacks/caddy/tls.env, TLS_MODE=internal/signed), sinon la
+      # verification d'origine a la connexion echoue silencieusement
+      # (voir la doc Semaphore : web_host doit correspondre exactement a
+      # l'URL publique utilisee).
       - ${REPO_ROOT}/server/stacks/semaphore/semaphore.env
     environment:
       - SEMAPHORE_DB_DIALECT=sqlite
       - SEMAPHORE_PORT=:5056
-      - SEMAPHORE_WEB_ROOT=https://semaphore.web.expolab.lan
     volumes:
       - ${REPO_ROOT}/server/stacks/semaphore/data:/var/lib/semaphore

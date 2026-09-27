@@ -37,8 +37,31 @@ chaque service comme **stack Dockhand independante** via son API REST
   `expo-lan` - besoin d'un acces bas niveau (broadcast DHCP) qu'un reseau
   Docker isole ne permet pas. Bail DHCP persiste dans
   `server/stacks/dnsmasq/data/` (survit a une recreation du conteneur).
-- **Caddy** (reverse-proxy TLS auto-signe), egalement en
-  `network_mode: host`
+- **Caddy** (reverse-proxy), egalement en `network_mode: host`. Deux
+  modes TLS, config dans `server/stacks/caddy/tls.env` (non versionne,
+  cree avec des valeurs par defaut au premier `deploy-server.sh`) -
+  editable a la main OU depuis **caddy-admin** (section "Certificat
+  TLS", voir plus bas) :
+  - `internal` (defaut) : certificat auto-signe (CA interne de Caddy) sur
+    `*.web.expolab.lan` - fonctionne hors-ligne, mais chaque
+    appareil/navigateur doit accepter l'avertissement une fois.
+  - `signed` : vrai certificat Let's Encrypt via challenge **DNS-01 chez
+    OVH** (image buildee localement avec le plugin `caddy-dns/ovh`, voir
+    `server/stacks/caddy/Dockerfile`) sur un vrai domaine public (ex:
+    `expolab.tondomaine.fr`). Aucun port a ouvrir (contrairement a un
+    challenge HTTP-01) : seule l'API DNS d'OVH est contactee, en sortant -
+    `dnsmasq` fait pointer ce domaine vers l'hote en local
+    (`server/stacks/dnsmasq/admin-config/public-domain.conf`, genere par
+    `deploy-server.sh` a partir de `tls.env`), exactement comme pour
+    `*.web.expolab.lan`, donc resolu automatiquement par le meme pair VPN
+    (voir plus bas). Necessite un token API OVH (droits GET/PUT/POST/DELETE
+    sur `/domain/zone/*`, cree sur
+    https://www.ovh.com/auth/api/createToken/) - a saisir dans
+    caddy-admin, qui redemarre Caddy lui-meme apres sauvegarde (necessaire
+    pour qu'il relise ses identifiants OVH comme variables
+    d'environnement - un simple rechargement a chaud de son Caddyfile ne
+    suffit pas). `deploy-server.sh` relit ce meme fichier a chaque
+    deploiement, donc un choix fait depuis l'UI survit a un redeploiement.
 - **webui** expolab (creation/suppression de faux Pi), publication de port
 - **Bastion** (https://github.com/nopalpite/bastion, dashboard +
   SSH/VNC web) en `network_mode: host` - image prete a l'emploi publiee
@@ -114,6 +137,13 @@ chaque service comme **stack Dockhand independante** via son API REST
     propose de les ajouter - toujours en pre-remplissant le formulaire,
     jamais automatiquement ; les conteneurs en `network_mode: host` n'ont
     pas de port "publie" au sens Docker, indetectables par ce biais.
+    Section "Certificat TLS" (comme le gestionnaire de certificats d'un
+    outil type Nginx Proxy Manager) : bascule `internal`/`signed` et
+    identifiants OVH, ecrits dans `server/stacks/caddy/tls.env` (les
+    identifiants deja enregistres ne sont jamais renvoyes au navigateur -
+    un champ laisse vide au prochain enregistrement les garde
+    inchanges), puis redemarre le conteneur `caddy` (necessaire pour
+    qu'il relise ses variables d'environnement).
   - `vpn-admin` (https://vpn.web.expolab.lan) : liste les pairs (avec
     etat de connexion et trafic via `wg show wg0 dump`), QR code pour
     import mobile, et appelle **directement** `vpn/add-peer.sh`/

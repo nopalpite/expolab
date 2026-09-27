@@ -14,10 +14,15 @@ services:
     restart: unless-stopped
     ports:
       - "3001:3000"
-    environment:
-      # Next.js (moteur de Homepage) rejette par defaut toute requete dont
-      # le Host: ne correspond pas a l'origine attendue - necessaire ici
-      # puisqu'on y accede via le vhost Caddy, pas directement sur son port.
-      - HOMEPAGE_ALLOWED_HOSTS=dashboard.web.expolab.lan,localhost:3001
+    env_file:
+      # HOMEPAGE_ALLOWED_HOSTS - Next.js (moteur de Homepage) rejette par
+      # defaut toute requete dont le Host: ne correspond pas a l'origine
+      # attendue, necessaire ici puisqu'on y accede via le vhost Caddy,
+      # pas directement sur son port. Genere par deploy-server.sh (pas en
+      # dur ici) : la liste depend du domaine public actuel
+      # (server/stacks/caddy/tls.env, TLS_MODE=internal/signed) - constate
+      # en pratique, un domaine signe pas encore dans cette liste renvoie
+      # une 400 "Host validation failed".
+      - ${REPO_ROOT}/server/stacks/dashboard/dashboard.env
     volumes:
       - ${REPO_ROOT}/server/stacks/dashboard/config:/app/config

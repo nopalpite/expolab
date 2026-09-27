@@ -1,6 +1,7 @@
 let editingName = null;
 let servicesByName = {};
 let usedPorts = {};
+let currentDomain = "web.expolab.lan";
 
 function computeUsedPorts(services) {
     const used = {};
@@ -74,7 +75,7 @@ async function loadServices() {
             return `
             <tr>
                 <td data-label="Nom">${s.name}</td>
-                <td data-label="URL"><code>${s.name}.web.expolab.lan</code></td>
+                <td data-label="URL"><code>${s.name}.${currentDomain}</code></td>
                 <td data-label="Port backend">${s.backend_port}</td>
                 <td data-label="Routes additionnelles">${routesText}</td>
                 <td class="actions">
@@ -227,4 +228,82 @@ async function loadDiscoveries() {
     }
 }
 
-loadServices().then(loadDiscoveries);
+function updateTlsFieldsVisibility() {
+    const signed = document.querySelector('input[name="tls_mode"]:checked').value === "signed";
+    document.getElementById("tls-signed-fields").hidden = !signed;
+}
+
+document.querySelectorAll('input[name="tls_mode"]').forEach(radio => {
+    radio.addEventListener("change", updateTlsFieldsVisibility);
+});
+
+async function loadTls() {
+    try {
+        const res = await fetch("/api/tls");
+        const data = await res.json();
+        document.querySelector(`input[name="tls_mode"][value="${data.TLS_MODE || "internal"}"]`).checked = true;
+        document.getElementById("tls_signed_domain").value = data.TLS_SIGNED_DOMAIN || "";
+        document.getElementById("ovh_endpoint").value = data.OVH_ENDPOINT || "ovh-eu";
+        const placeholder = (set) => (set ? "•••• (deja configure, laisser vide pour garder)" : "");
+        document.getElementById("ovh_application_key").placeholder = placeholder(data.ovh_application_key_set);
+        document.getElementById("ovh_application_secret").placeholder = placeholder(data.ovh_application_secret_set);
+        document.getElementById("ovh_consumer_key").placeholder = placeholder(data.ovh_consumer_key_set);
+        updateTlsFieldsVisibility();
+        currentDomain = data.TLS_MODE === "signed" && data.TLS_SIGNED_DOMAIN ? data.TLS_SIGNED_DOMAIN : "web.expolab.lan";
+        document.getElementById("current-domain").textContent = currentDomain;
+    } catch (e) {
+        // Formulaire reste sur ses valeurs par defaut (mode internal) si
+        // le chargement echoue - non bloquant pour le reste de la page.
+    }
+}
+
+document.getElementById("tls-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("tls-save-btn");
+    const status = document.getElementById("tls-status");
+    btn.disabled = true;
+    status.hidden = true;
+
+    const body = {
+        tls_mode: document.querySelector('input[name="tls_mode"]:checked').value,
+        tls_signed_domain: document.getElementById("tls_signed_domain").value.trim(),
+        ovh_endpoint: document.getElementById("ovh_endpoint").value,
+        ovh_application_key: document.getElementById("ovh_application_key").value.trim(),
+        ovh_application_secret: document.getElementById("ovh_application_secret").value.trim(),
+        ovh_consumer_key: document.getElementById("ovh_consumer_key").value.trim(),
+    };
+
+    try {
+        const res = await fetch("/api/tls", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        status.hidden = false;
+        if (!res.ok) {
+            status.className = "status status-error";
+            status.textContent = data.error || "Erreur";
+        } else {
+            status.className = "status status-ok";
+            status.textContent = "Configuration TLS enregistree, services redeployes.";
+            document.getElementById("ovh_application_key").value = "";
+            document.getElementById("ovh_application_secret").value = "";
+            document.getElementById("ovh_consumer_key").value = "";
+            loadTls().then(loadServices);
+        }
+    } catch (e) {
+        // Attendu ici (pas forcement un echec) : cette page est
+        // elle-meme servie via Caddy, que cet enregistrement redemarre -
+        // la sauvegarde a deja eu lieu avant ce redemarrage, cote
+        // serveur (voir api_tls_update). Rien a faire cote utilisateur a
+        // part recharger la page dans quelques secondes.
+        status.hidden = false;
+        status.className = "status status-ok";
+        status.textContent = "Enregistre - Caddy redemarre (coupure normale de quelques secondes), recharge la page pour verifier.";
+    } finally {
+        btn.disabled = false;
+    }
+});
+
+loadTls().then(() => loadServices().then(loadDiscoveries));

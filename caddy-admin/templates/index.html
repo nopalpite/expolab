@@ -9,7 +9,7 @@
 <body>
     <header>
         <h1>Caddy</h1>
-        <p class="subtitle">Services exposes par le reverse-proxy (&lt;nom&gt;.web.expolab.lan)</p>
+        <p class="subtitle">Services exposes par le reverse-proxy (&lt;nom&gt;.<span id="current-domain">web.expolab.lan</span>)</p>
     </header>
 
     <main>
@@ -35,6 +35,46 @@
                 <button type="button" id="create-cancel" class="secondary" hidden>Annuler</button>
             </form>
             <p id="create-status" class="status" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Certificat TLS</h2>
+            <p class="subtitle">Mode global, s'applique a tous les services ci-dessous.</p>
+            <form id="tls-form">
+                <div class="field" style="flex-basis: 100%;">
+                    <label><input type="radio" name="tls_mode" value="internal" checked> Auto-signe (interne) - fonctionne hors-ligne, avertissement navigateur a accepter une fois</label><br>
+                    <label><input type="radio" name="tls_mode" value="signed"> Signe (Let's Encrypt via OVH, DNS-01) - vrai certificat, necessite un domaine public</label>
+                </div>
+                <div id="tls-signed-fields" hidden style="display: flex; flex-wrap: wrap; gap: 12px; flex-basis: 100%;">
+                    <div class="field">
+                        <label for="tls_signed_domain">Domaine public</label>
+                        <input type="text" id="tls_signed_domain" placeholder="expolab.tondomaine.fr">
+                    </div>
+                    <div class="field">
+                        <label for="ovh_endpoint">Endpoint OVH</label>
+                        <select id="ovh_endpoint">
+                            <option value="ovh-eu">ovh-eu</option>
+                            <option value="ovh-ca">ovh-ca</option>
+                            <option value="ovh-us">ovh-us</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="ovh_application_key">Application key</label>
+                        <input type="password" id="ovh_application_key" autocomplete="off">
+                    </div>
+                    <div class="field">
+                        <label for="ovh_application_secret">Application secret</label>
+                        <input type="password" id="ovh_application_secret" autocomplete="off">
+                    </div>
+                    <div class="field">
+                        <label for="ovh_consumer_key">Consumer key</label>
+                        <input type="password" id="ovh_consumer_key" autocomplete="off">
+                    </div>
+                    <p class="subtitle" style="flex-basis: 100%; margin: 0;">Champ laisse vide = garde la valeur deja enregistree. Jeton a creer sur <a href="https://www.ovh.com/auth/api/createToken/" target="_blank" rel="noopener">ovh.com/auth/api/createToken</a> (droits GET/PUT/POST/DELETE sur /domain/zone/*).</p>
+                </div>
+                <button type="submit" id="tls-save-btn">Enregistrer</button>
+            </form>
+            <p id="tls-status" class="status" hidden></p>
         </section>
 
         <section class="panel" id="discover-panel" hidden>

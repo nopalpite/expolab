@@ -16,6 +16,16 @@ server/stacks/bastion/maps/
 # a partir de server/services.yaml (la vraie source de verite).
 server/stacks/caddy/Caddyfile
 
+# Config TLS (mode + domaine signe + identifiants API OVH pour le DNS-01)
+# - editable a la main ou depuis caddy-admin, jamais les memes d'un lab a
+# l'autre, ne doit jamais finir dans git.
+server/stacks/caddy/tls.env
+
+# Certificats TLS + cle privee de la CA interne (mode internal) - etat
+# runtime propre a chaque lab, jamais commite (secrets).
+server/stacks/caddy/data/
+server/stacks/caddy/config/
+
 # Baux DHCP - etat runtime, pas de l'infra-as-code.
 server/stacks/dnsmasq/data/
 
@@ -50,6 +60,16 @@ vpn/wireguard/config/
 # etat runtime, pas de l'infra-as-code.
 server/stacks/dashboard/config/logs/
 server/stacks/dashboard/config/kubernetes.yaml
+
+# HOMEPAGE_ALLOWED_HOSTS - regenere a chaque deploiement/changement TLS
+# (deploy-server.sh ou caddy-admin) a partir du domaine public actuel,
+# jamais en dur - voir server/stacks/dashboard/docker-compose.yml.
+server/stacks/dashboard/dashboard.env
+
+# Liste de liens Homepage generee depuis services.yaml.template (celui-ci
+# reste versionne, a editer a la main) - meme raison que le point
+# precedent, voir son en-tete.
+server/stacks/dashboard/config/services.yaml
 
 # Bytecode Python (genere localement par un simple `python -m py_compile`
 # de verification syntaxique, jamais volontairement).

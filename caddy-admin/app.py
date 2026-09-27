@@ -34,6 +34,29 @@ SERVICES_PATH = SERVER_DIR / "services.yaml"
 RENDER_SCRIPT = SERVER_DIR / "render-caddyfile.py"
 CADDYFILE_PATH = SERVER_DIR / "stacks" / "caddy" / "Caddyfile"
 CADDY_ADMIN_URL = "http://127.0.0.1:2019/load"
+DOCKHAND_URL = "http://127.0.0.1:3000"
+# Necessaire pour resoudre les binds ${REPO_ROOT} des docker-compose.yml
+# d'AUTRES stacks (caddy, dashboard, semaphore) avant de les repousser a
+# Dockhand - meme raison que server/dockhand-api.sh. Fourni par
+# server/stacks/caddy-admin/docker-compose.yml.
+REPO_ROOT = os.environ.get("REPO_ROOT", "")
+
+# Config TLS (mode interne/signe + identifiants OVH pour le DNS-01) -
+# meme fichier que celui lu par server/deploy-server.sh, seule source de
+# verite commune aux deux (voir son en-tete pour le format).
+TLS_PATH = SERVER_DIR / "stacks" / "caddy" / "tls.env"
+TLS_KEYS = [
+    "TLS_MODE",
+    "TLS_SIGNED_DOMAIN",
+    "OVH_ENDPOINT",
+    "OVH_APPLICATION_KEY",
+    "OVH_APPLICATION_SECRET",
+    "OVH_CONSUMER_KEY",
+]
+# Jamais renvoyes en clair par GET /api/tls - seul un booleen "deja
+# configure" l'est (voir api_tls_get). Un champ laisse vide dans le
+# formulaire de sauvegarde garde alors la valeur deja enregistree.
+SECRET_TLS_KEYS = {"OVH_APPLICATION_KEY", "OVH_APPLICATION_SECRET", "OVH_CONSUMER_KEY"}
 
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 
@@ -134,6 +157,31 @@ def discover_containers() -> list[dict]:
     return suggestions
 
 
+def load_tls() -> dict:
+    values = {k: "" for k in TLS_KEYS}
+    if TLS_PATH.exists():
+        for line in TLS_PATH.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key in values:
+                values[key] = value
+    if not values["TLS_MODE"]:
+        values["TLS_MODE"] = "internal"
+    return values
+
+
+def save_tls(values: dict) -> None:
+    # Ecriture atomique, meme raison que save_services ci-dessous.
+    tmp_path = TLS_PATH.with_suffix(".tmp")
+    with open(tmp_path, "w") as f:
+        for key in TLS_KEYS:
+            f.write(f"{key}={values.get(key, '')}\n")
+    os.replace(tmp_path, TLS_PATH)
+    os.chmod(TLS_PATH, 0o600)
+
+
 def save_services(data) -> None:
     # Ecriture atomique (fichier temporaire + rename) : evite toute
     # fenetre ou une lecture concurrente verrait un fichier partiellement
@@ -145,14 +193,99 @@ def save_services(data) -> None:
     os.replace(tmp_path, SERVICES_PATH)
 
 
-def save_and_reload() -> tuple[bool, str]:
-    """Regenere le Caddyfile depuis services.yaml et le pousse a Caddy."""
-    result = subprocess.run(
-        ["python3", str(RENDER_SCRIPT), str(SERVICES_PATH)],
-        capture_output=True,
-        text=True,
-        timeout=15,
+def dockhand_env_id() -> int | None:
+    try:
+        with urllib.request.urlopen(f"{DOCKHAND_URL}/api/environments", timeout=10) as resp:
+            envs = json.loads(resp.read())
+        if isinstance(envs, dict):
+            envs = envs.get("environments") or envs.get("data") or []
+        return envs[0]["id"] if envs else None
+    except Exception:
+        return None
+
+
+def dockhand_recreate_stack(name: str, compose_path: Path) -> tuple[bool, str]:
+    """Supprime puis recree une stack Dockhand (meme principe que
+    dockhand_upsert_stack dans server/dockhand-api.sh, reimplemente ici en
+    Python) - seul moyen fiable pour qu'un conteneur relise un env_file
+    modifie : `docker restart` garde l'environnement fige a la creation du
+    conteneur, constate en pratique (identifiants/domaine mis a jour
+    restes ignores apres un simple restart)."""
+    env_id = dockhand_env_id()
+    if env_id is None:
+        return False, "Aucun environnement Dockhand configure"
+    compose_content = compose_path.read_text().replace("${REPO_ROOT}", REPO_ROOT)
+
+    del_req = urllib.request.Request(f"{DOCKHAND_URL}/api/stacks/{name}?env={env_id}", method="DELETE")
+    try:
+        urllib.request.urlopen(del_req, timeout=15)
+    except urllib.error.HTTPError:
+        pass  # stack deja absente ou jamais deployee - sans consequence
+    except urllib.error.URLError as exc:
+        return False, f"Impossible de joindre Dockhand : {exc.reason}"
+
+    payload = json.dumps({"name": name, "compose": compose_content, "envId": env_id, "deploy": True}).encode()
+    create_req = urllib.request.Request(
+        f"{DOCKHAND_URL}/api/stacks",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
+    try:
+        urllib.request.urlopen(create_req, timeout=30)
+    except urllib.error.HTTPError as exc:
+        return False, f"Dockhand : {exc.read().decode(errors='replace')}"
+    except urllib.error.URLError as exc:
+        return False, f"Impossible de joindre Dockhand : {exc.reason}"
+    return True, ""
+
+
+def sync_public_domain_dependents(tls: dict) -> None:
+    """Met a jour dashboard.env et SEMAPHORE_WEB_ROOT (semaphore.env) pour
+    qu'ils suivent le domaine public actuel - meme logique que
+    deploy-server.sh (dupliquee ici : ce chemin est une sauvegarde depuis
+    l'UI, pas un redeploiement complet via ce script). Sans ca, Homepage
+    et Semaphore refusent les requetes sur le nouveau domaine (validation
+    de Host/origine cote applicatif, independante de Caddy)."""
+    domain = tls["TLS_SIGNED_DOMAIN"] if tls["TLS_MODE"] == "signed" else "web.expolab.lan"
+
+    if tls["TLS_MODE"] == "signed":
+        hosts = f"dashboard.web.expolab.lan,dashboard.{domain},localhost:3001"
+    else:
+        hosts = "dashboard.web.expolab.lan,localhost:3001"
+    dashboard_env = SERVER_DIR / "stacks" / "dashboard" / "dashboard.env"
+    dashboard_env.write_text(f"HOMEPAGE_ALLOWED_HOSTS={hosts}\n")
+
+    semaphore_env = SERVER_DIR / "stacks" / "semaphore" / "semaphore.env"
+    if semaphore_env.exists():
+        lines = [l for l in semaphore_env.read_text().splitlines() if not l.startswith("SEMAPHORE_WEB_ROOT=")]
+        lines.append(f"SEMAPHORE_WEB_ROOT=https://semaphore.{domain}")
+        semaphore_env.write_text("\n".join(lines) + "\n")
+        os.chmod(semaphore_env, 0o600)
+
+    # Liste de liens Homepage - meme raison, voir l'en-tete de
+    # services.yaml.template (source editable a la main, jamais
+    # services.yaml lui-meme, regenere ici a chaque sauvegarde TLS).
+    dashboard_links_template = SERVER_DIR / "stacks" / "dashboard" / "config" / "services.yaml.template"
+    dashboard_links = SERVER_DIR / "stacks" / "dashboard" / "config" / "services.yaml"
+    dashboard_links.write_text(dashboard_links_template.read_text().replace("__PUBLIC_DOMAIN__", domain))
+
+
+def save_and_reload() -> tuple[bool, str]:
+    """Regenere le Caddyfile (services.yaml + tls.env actuels) et le pousse a Caddy.
+
+    Toujours relire tls.env ici (pas seulement depuis api_tls_update) :
+    sinon un simple ajout/retrait de service depuis ce meme fichier
+    regenererait le Caddyfile en mode "internal" par defaut et
+    ecraserait silencieusement un mode "signed" deja actif pour tous les
+    autres vhosts.
+    """
+    tls = load_tls()
+    mode = tls["TLS_MODE"]
+    args = ["python3", str(RENDER_SCRIPT), str(SERVICES_PATH), mode]
+    if mode == "signed":
+        args.append(tls["TLS_SIGNED_DOMAIN"])
+    result = subprocess.run(args, capture_output=True, text=True, timeout=15)
     if result.returncode != 0:
         return False, result.stderr
 
@@ -189,6 +322,80 @@ def api_services_list():
 @app.route("/api/discover")
 def api_discover():
     return jsonify({"suggestions": discover_containers()})
+
+
+@app.route("/api/tls", methods=["GET"])
+def api_tls_get():
+    tls = load_tls()
+    safe = {k: v for k, v in tls.items() if k not in SECRET_TLS_KEYS}
+    safe["ovh_application_key_set"] = bool(tls["OVH_APPLICATION_KEY"])
+    safe["ovh_application_secret_set"] = bool(tls["OVH_APPLICATION_SECRET"])
+    safe["ovh_consumer_key_set"] = bool(tls["OVH_CONSUMER_KEY"])
+    return jsonify(safe)
+
+
+@app.route("/api/tls", methods=["PUT"])
+def api_tls_update():
+    body = request.get_json(force=True, silent=True) or {}
+    mode = body.get("tls_mode")
+    if mode not in ("internal", "signed"):
+        return jsonify({"error": "Mode TLS invalide"}), 400
+
+    current = load_tls()
+    domain = (body.get("tls_signed_domain") or "").strip()
+    if mode == "signed" and not domain:
+        return jsonify({"error": "Domaine requis en mode signe"}), 400
+
+    new_values = dict(current)
+    new_values["TLS_MODE"] = mode
+    new_values["TLS_SIGNED_DOMAIN"] = domain
+    new_values["OVH_ENDPOINT"] = (body.get("ovh_endpoint") or "ovh-eu").strip()
+
+    # Champ laisse vide dans le formulaire = garde la valeur deja
+    # enregistree (jamais renvoyee au frontend, voir api_tls_get) - seule
+    # une nouvelle saisie la remplace.
+    for field, key in (
+        ("ovh_application_key", "OVH_APPLICATION_KEY"),
+        ("ovh_application_secret", "OVH_APPLICATION_SECRET"),
+        ("ovh_consumer_key", "OVH_CONSUMER_KEY"),
+    ):
+        value = (body.get(field) or "").strip()
+        if value:
+            new_values[key] = value
+
+    if mode == "signed" and not (new_values["OVH_APPLICATION_KEY"] and new_values["OVH_APPLICATION_SECRET"] and new_values["OVH_CONSUMER_KEY"]):
+        return jsonify({"error": "Identifiants OVH incomplets (application_key/secret/consumer_key)"}), 400
+
+    save_tls(new_values)
+    sync_public_domain_dependents(new_values)
+
+    ok, err = save_and_reload()
+    if not ok:
+        return jsonify({"error": f"Configuration enregistree mais rechargement Caddy echoue : {err}"}), 500
+
+    # Un rechargement a chaud (ci-dessus) suffit pour le contenu du
+    # Caddyfile (domaines, extra_routes...) mais jamais pour des variables
+    # d'environnement (OVH_* de Caddy, HOMEPAGE_ALLOWED_HOSTS de dashboard,
+    # SEMAPHORE_WEB_ROOT de semaphore) : chaque conteneur les lit une seule
+    # fois, au demarrage - seule une recreation complete les rafraichit.
+    # Recreer 'caddy' coupe brievement CETTE MEME requete (cette page est
+    # elle-meme servie via Caddy) : une erreur reseau ici, cote
+    # navigateur, est attendue et sans gravite - la sauvegarde a deja eu
+    # lieu avant ce point.
+    errors = []
+    for name, compose_rel in (
+        ("caddy", "stacks/caddy/docker-compose.yml"),
+        ("dashboard", "stacks/dashboard/docker-compose.yml"),
+        ("semaphore", "stacks/semaphore/docker-compose.yml"),
+    ):
+        recreate_ok, recreate_err = dockhand_recreate_stack(name, SERVER_DIR / compose_rel)
+        if not recreate_ok:
+            errors.append(f"{name}: {recreate_err}")
+
+    if errors:
+        return jsonify({"error": "Configuration enregistree mais redeploiement incomplet : " + "; ".join(errors)}), 500
+
+    return jsonify({"ok": True})
 
 
 @app.route("/api/services", methods=["POST"])

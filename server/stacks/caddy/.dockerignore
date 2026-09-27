@@ -1,0 +1,10 @@
+# Etat runtime (certificats TLS, cle privee de la CA interne, config
+# autosauvegardee par Caddy) - vit dans ce meme dossier (bind-mount, voir
+# docker-compose.yml) mais n'a rien a faire dans le contexte de build,
+# jamais reference par le Dockerfile de toute facon (juste xcaddy build).
+data/
+config/
+
+# Genere par deploy-server.sh/caddy-admin, jamais lu au build.
+Caddyfile
+tls.env
