@@ -184,6 +184,23 @@ cat > "$SCRIPT_DIR/stacks/ansible-web/ansible-web.env" <<EOF
 BASTION_URL=http://127.0.0.1:5000
 BASTION_API_TOKEN=$BASTION_API_TOKEN
 ANSIBLE_PRIVATE_KEY_FILE=/keys/automation_ed25519
+# Bastion n'expose pas de nom d'utilisateur SSH dans /api/machines
+# (uniquement id/name/host/os/site/ssh_port/tags) - Ansible se rabat donc
+# sur root par defaut, qui n'existe pas sur les faux Pi (utilisateur
+# "pi", voir fleet/provision-fakepi.sh). Fige ici pour ce lab ou tout le
+# monde est "pi" ; un vrai parc heterogene (users differents par machine)
+# demanderait que Bastion expose ce champ dans son API plutot qu'une
+# valeur globale comme celle-ci.
+ANSIBLE_REMOTE_USER=pi
+# "raspberry" est le mot de passe "pi" par defaut de tout ce lab, deja en
+# clair ailleurs (ex: BASTION_ADMIN_PASSWORD). Un vrai parc utiliserait
+# plutot des vars chiffrees (Ansible Vault) ou du sudo NOPASSWD sur la
+# cle "automatisation" - hors-scope ici. ansible_ssh_pass : la cle
+# ci-dessus (ANSIBLE_PRIVATE_KEY_FILE) n'est jamais injectee dans
+# authorized_keys des faux Pi (fleet/provision-fakepi.sh les configure en
+# mot de passe uniquement) - filet de secours pour CE lab, sans quoi
+# toute connexion echoue avec "Permission denied (publickey,password)".
+ANSIBLE_WEB_EXTRA_ARGS=--extra-vars ansible_become_pass=raspberry --extra-vars ansible_ssh_pass=raspberry
 # Uniquement pour ce lab : les faux Pi sont recrees souvent (nouvelle cle
 # hote a chaque fois), la verification stricte d'ansible.cfg y serait
 # juste une nuisance permanente.
