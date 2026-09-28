@@ -159,64 +159,37 @@ else
     BASTION_API_TOKEN="$(grep '^BASTION_API_TOKEN=' "$SCRIPT_DIR/stacks/bastion/bastion.env" | cut -d= -f2-)"
 fi
 
-# Cle SSH dediee automatisation (Phase 3 de la roadmap Ansible) : a
-# importer a la main dans le Key Store de Semaphore (voir le message de
-# fin de script) - jamais montee dans un conteneur, Semaphore s'execute
-# a partir du depot bastion-ansible clone via git-mirror, pas d'une
-# image publiee par ce depot.
-mkdir -p "$SCRIPT_DIR/stacks/semaphore/automation_key" "$SCRIPT_DIR/stacks/semaphore/data"
-# L'image semaphoreui/semaphore tourne en non-root fixe (UID 1001) - un
-# dossier cree ici (root, via sudo) reste sinon root:root et le conteneur
-# ne peut pas y ouvrir sa base SQLite ("unable to open database file (14)",
-# constate en pratique au premier deploiement).
-chown -R 1001:1001 "$SCRIPT_DIR/stacks/semaphore/data"
-if [ ! -f "$SCRIPT_DIR/stacks/semaphore/automation_key/automation_ed25519" ]; then
+# Cle SSH dediee automatisation (Phase 3 de la roadmap Ansible) - montee
+# directement dans le conteneur ansible-web (voir son docker-compose.yml
+# et ANSIBLE_PRIVATE_KEY_FILE ci-dessous), jamais dans le contenu clone
+# depuis git-mirror.
+mkdir -p "$SCRIPT_DIR/stacks/ansible-web/automation_key" "$SCRIPT_DIR/stacks/ansible-web/repo" "$SCRIPT_DIR/stacks/ansible-web/runs"
+if [ ! -f "$SCRIPT_DIR/stacks/ansible-web/automation_key/automation_ed25519" ]; then
     echo "[+] Generation de la cle SSH dediee automatisation du lab (distincte de toute cle de vraie prod)..."
-    ssh-keygen -t ed25519 -N "" -C "expolab-semaphore" -f "$SCRIPT_DIR/stacks/semaphore/automation_key/automation_ed25519" -q
+    ssh-keygen -t ed25519 -N "" -C "expolab-ansible-web" -f "$SCRIPT_DIR/stacks/ansible-web/automation_key/automation_ed25519" -q
 fi
 
-if [ ! -f "$SCRIPT_DIR/stacks/semaphore/semaphore.env" ]; then
-    echo "[+] Premiere generation des secrets Semaphore (server/stacks/semaphore/semaphore.env, non versionne)..."
-    SEMAPHORE_ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')"
-    # cookie_hash/cookie_encryption/access_key_encryption : generes une
-    # seule fois et persistes ici plutot que laisses a un eventuel defaut
-    # auto-genere par Semaphore - garantit qu'un redeploiement de la
-    # stack (delete+recreate, voir dockhand_upsert_stack) ne deconnecte
-    # pas tout le monde ni ne rende les identifiants du Key Store
-    # illisibles.
-    SEMAPHORE_COOKIE_HASH="$(python3 -c 'import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())')"
-    SEMAPHORE_COOKIE_ENCRYPTION="$(python3 -c 'import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())')"
-    SEMAPHORE_ACCESS_KEY_ENCRYPTION="$(python3 -c 'import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())')"
-    cat > "$SCRIPT_DIR/stacks/semaphore/semaphore.env" <<EOF
-SEMAPHORE_ADMIN=admin
-SEMAPHORE_ADMIN_PASSWORD=$SEMAPHORE_ADMIN_PASSWORD
-SEMAPHORE_ADMIN_NAME=Admin
-SEMAPHORE_ADMIN_EMAIL=admin@expolab.lan
-SEMAPHORE_COOKIE_HASH=$SEMAPHORE_COOKIE_HASH
-SEMAPHORE_COOKIE_ENCRYPTION=$SEMAPHORE_COOKIE_ENCRYPTION
-SEMAPHORE_ACCESS_KEY_ENCRYPTION=$SEMAPHORE_ACCESS_KEY_ENCRYPTION
-EOF
-    chmod 600 "$SCRIPT_DIR/stacks/semaphore/semaphore.env"
+# ansible-web refuse de demarrer si son bind-mount fichier (config.yaml)
+# pointe vers un chemin absent (meme contrainte que dhcp-hostsfile/tls.env
+# ailleurs dans ce script) - cree vide au besoin, jamais ecrase si deja
+# present (edite ensuite depuis ansible-web lui-meme).
+if [ ! -f "$SCRIPT_DIR/stacks/ansible-web/config.yaml" ]; then
+    echo "mirror_name: ansible" > "$SCRIPT_DIR/stacks/ansible-web/config.yaml"
 fi
 
-# BASTION_URL/BASTION_API_TOKEN a coller dans le Variable Group Semaphore
-# (voir le message de fin de script) - fichier de reference uniquement,
-# rien ne le monte dans un conteneur.
-cat > "$SCRIPT_DIR/stacks/semaphore/bastion-ansible-vars.env" <<EOF
+# BASTION_URL/BASTION_API_TOKEN/ANSIBLE_* directement dans l'environnement
+# du conteneur (contrairement a Semaphore, pas de configuration manuelle
+# via une UI tierce a faire ici - ansible-web les lit directement).
+cat > "$SCRIPT_DIR/stacks/ansible-web/ansible-web.env" <<EOF
 BASTION_URL=http://127.0.0.1:5000
 BASTION_API_TOKEN=$BASTION_API_TOKEN
+ANSIBLE_PRIVATE_KEY_FILE=/keys/automation_ed25519
+# Uniquement pour ce lab : les faux Pi sont recrees souvent (nouvelle cle
+# hote a chaque fois), la verification stricte d'ansible.cfg y serait
+# juste une nuisance permanente.
+ANSIBLE_HOST_KEY_CHECKING=false
 EOF
-chmod 600 "$SCRIPT_DIR/stacks/semaphore/bastion-ansible-vars.env"
-
-# SEMAPHORE_WEB_ROOT doit suivre le domaine public actuel (TLS_MODE) - mis
-# a jour a CHAQUE run (pas seulement a la premiere generation des secrets
-# ci-dessus), sinon la verification d'origine a la connexion echoue des
-# que TLS_MODE change (voir doc Semaphore : web_host doit correspondre
-# exactement a l'URL publique utilisee).
-grep -v '^SEMAPHORE_WEB_ROOT=' "$SCRIPT_DIR/stacks/semaphore/semaphore.env" > "$SCRIPT_DIR/stacks/semaphore/semaphore.env.tmp" || true
-echo "SEMAPHORE_WEB_ROOT=https://semaphore.$PUBLIC_DOMAIN" >> "$SCRIPT_DIR/stacks/semaphore/semaphore.env.tmp"
-mv "$SCRIPT_DIR/stacks/semaphore/semaphore.env.tmp" "$SCRIPT_DIR/stacks/semaphore/semaphore.env"
-chmod 600 "$SCRIPT_DIR/stacks/semaphore/semaphore.env"
+chmod 600 "$SCRIPT_DIR/stacks/ansible-web/ansible-web.env"
 
 # HOMEPAGE_ALLOWED_HOSTS meme raison - regenere a chaque run (voir le
 # commentaire du meme nom dans stacks/dashboard/docker-compose.yml).
@@ -256,37 +229,9 @@ fi
 mkdir -p "$SCRIPT_DIR/stacks/git-mirror/data"
 
 echo "[+] Creation/redeploiement des stacks applicatives via l'API Dockhand..."
-for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard git-mirror semaphore; do
+for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard git-mirror ansible-web; do
     dockhand_upsert_stack "$stack" "$SCRIPT_DIR/stacks/$stack/docker-compose.yml"
 done
-
-# Contrairement a ce que suggere son nom, l'image semaphoreui/semaphore ne
-# cree PAS de compte a partir des variables SEMAPHORE_ADMIN* au demarrage
-# du serveur (constate en pratique : premiere connexion refusee, aucun
-# utilisateur en base malgre des migrations reussies) - seul `semaphore
-# users add` cree reellement le compte. dockhand_upsert_stack recree le
-# conteneur a chaque run (le volume data/ survit) donc idempotent requis :
-# `users get` sert uniquement de test d'existence.
-echo "[+] Bootstrap du compte admin Semaphore (si pas deja cree)..."
-for _ in $(seq 1 15); do
-    [ "$(docker inspect -f '{{.State.Running}}' expolab-semaphore 2>/dev/null)" = "true" ] && break
-    sleep 2
-done
-# Laisse le temps a la connexion SQLite du serveur (migrations, etc.) de se
-# stabiliser avant un deuxieme acces concurrent via la CLI juste en
-# dessous - sans ca, `users get` peut echouer transitoirement juste apres
-# une recreation du conteneur meme si le compte existe deja.
-sleep 3
-if ! docker exec expolab-semaphore sh -c 'semaphore users get --login "$SEMAPHORE_ADMIN"' >/dev/null 2>&1; then
-    # `semaphore users add` panique (au lieu d'un message d'erreur propre)
-    # si le compte existe deja - constate en pratique : meme avec le delai
-    # ci-dessus, le `get` peut encore echouer transitoirement, et l'`add`
-    # suivant tombe alors sur un compte en fait deja present. Non fatal
-    # (les deux `|| true`) : sous `set -e`, un panic non attrape ici
-    # interromprait tout le reste du script alors que l'objectif - un
-    # admin existe - est de toute facon deja atteint dans ce cas.
-    docker exec expolab-semaphore sh -c 'semaphore users add --admin --login "$SEMAPHORE_ADMIN" --email "$SEMAPHORE_ADMIN_EMAIL" --name "$SEMAPHORE_ADMIN_NAME" --password "$SEMAPHORE_ADMIN_PASSWORD"' >/dev/null 2>&1 || true
-fi
 
 # La premiere fois (DHCP integre d'Incus encore actif), on bascule et on
 # renouvelle les baux de tout ce qui tourne deja sur expo-lan. Si deja
@@ -347,12 +292,10 @@ Certificat TLS (actuellement $TLS_MODE) : modifiable a tout moment sur
 Verification :
     curl -k https://dashboard.$PUBLIC_DOMAIN
 
-Semaphore (executeur bastion-ansible) - configuration manuelle unique a
-faire dans son UI (https://semaphore.$PUBLIC_DOMAIN, admin/$(grep '^SEMAPHORE_ADMIN_PASSWORD=' "$SCRIPT_DIR/stacks/semaphore/semaphore.env" | cut -d= -f2-)) :
-    1. Repository -> mirroir git-mirror de bastion-ansible
-    2. Key Store  -> importer $SCRIPT_DIR/stacks/semaphore/automation_key/automation_ed25519
-    3. Inventory  -> fichier inventory/bastion_inventory.py, credential = cle ci-dessus
-    4. Variable Group -> valeurs dans $SCRIPT_DIR/stacks/semaphore/bastion-ansible-vars.env
-    5. Task Template -> playbook site.yml
-    Detail complet : README de bastion-ansible, section "Executeur : Semaphore UI".
+Ansible (executeur bastion-ansible) : https://ansible-web.$PUBLIC_DOMAIN
+    Etape manuelle unique si pas deja fait : creer un mirroir nomme
+    '$(grep '^mirror_name:' "$SCRIPT_DIR/stacks/ansible-web/config.yaml" | cut -d' ' -f2-)'
+    dans git-mirror (https://git-mirror.$PUBLIC_DOMAIN), URL =
+    https://github.com/nopalpite/bastion-ansible.git - sans ca, ansible-web
+    ne trouve rien a cloner (message d'erreur explicite dans son UI).
 EOF

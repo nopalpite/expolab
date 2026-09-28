@@ -25,8 +25,8 @@
         href: https://bastion.__PUBLIC_DOMAIN__
         description: Dashboard SSH/VNC de la flotte
         icon: mdi-remote-desktop
-    - Semaphore:
-        href: https://semaphore.__PUBLIC_DOMAIN__
+    - Ansible:
+        href: https://ansible-web.__PUBLIC_DOMAIN__
         description: Declenchement/historique des runs Ansible (bastion-ansible)
         icon: si-ansible
 - Infrastructure:
@@ -44,5 +44,5 @@
         icon: mdi-dns
     - git-mirror:
         href: https://git-mirror.__PUBLIC_DOMAIN__
-        description: Mirroirs git locaux (source des repos pour Semaphore)
+        description: Mirroirs git locaux (source du depot pour ansible-web)
         icon: si-git

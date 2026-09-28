@@ -1,0 +1,26 @@
+# Stack Dockhand "ansible-web" - declenche des runs Ansible (site.yml)
+# contre le parc reference dans Bastion. Aucun contenu Ansible ici : le
+# conteneur clone/pull un mirroir git-mirror en lecture seule au demarrage
+# de chaque action (voir ansible-web/app.py, sync_repo()) - jamais
+# directement GitHub, et jamais de push possible depuis ce conteneur
+# (editer/scaffolder un role reste une operation locale sur le vrai
+# depot, voir son README).
+#
+# network_mode: host - necessaire pour joindre git-mirror (127.0.0.1:5054)
+# et Bastion (127.0.0.1:5000) en direct, et atteindre expo-lan en SSH
+# sans route Docker bridge (meme raison que les autres apps de ce lab).
+services:
+  ansible-web:
+    build: ${REPO_ROOT}/ansible-web
+    container_name: expolab-ansible-web
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ${REPO_ROOT}/server/stacks/ansible-web/ansible-web.env
+    volumes:
+      - ${REPO_ROOT}/server/stacks/ansible-web/repo:/repo
+      - ${REPO_ROOT}/server/stacks/ansible-web/runs:/runs
+      - ${REPO_ROOT}/server/stacks/ansible-web/config.yaml:/data/config.yaml
+      # Cle SSH dediee automatisation (voir deploy-server.sh) - jamais
+      # celle utilisee en vrai vie, une cle propre a ce lab.
+      - ${REPO_ROOT}/server/stacks/ansible-web/automation_key/automation_ed25519:/keys/automation_ed25519:ro

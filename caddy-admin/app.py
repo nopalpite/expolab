@@ -36,7 +36,7 @@ CADDYFILE_PATH = SERVER_DIR / "stacks" / "caddy" / "Caddyfile"
 CADDY_ADMIN_URL = "http://127.0.0.1:2019/load"
 DOCKHAND_URL = "http://127.0.0.1:3000"
 # Necessaire pour resoudre les binds ${REPO_ROOT} des docker-compose.yml
-# d'AUTRES stacks (caddy, dashboard, semaphore) avant de les repousser a
+# d'AUTRES stacks (caddy, dashboard) avant de les repousser a
 # Dockhand - meme raison que server/dockhand-api.sh. Fourni par
 # server/stacks/caddy-admin/docker-compose.yml.
 REPO_ROOT = os.environ.get("REPO_ROOT", "")
@@ -241,12 +241,12 @@ def dockhand_recreate_stack(name: str, compose_path: Path) -> tuple[bool, str]:
 
 
 def sync_public_domain_dependents(tls: dict) -> None:
-    """Met a jour dashboard.env et SEMAPHORE_WEB_ROOT (semaphore.env) pour
-    qu'ils suivent le domaine public actuel - meme logique que
-    deploy-server.sh (dupliquee ici : ce chemin est une sauvegarde depuis
-    l'UI, pas un redeploiement complet via ce script). Sans ca, Homepage
-    et Semaphore refusent les requetes sur le nouveau domaine (validation
-    de Host/origine cote applicatif, independante de Caddy)."""
+    """Met a jour dashboard.env pour qu'il suive le domaine public actuel
+    - meme logique que deploy-server.sh (dupliquee ici : ce chemin est
+    une sauvegarde depuis l'UI, pas un redeploiement complet via ce
+    script). Sans ca, Homepage refuse les requetes sur le nouveau domaine
+    (validation de Host cote applicatif, independante de Caddy) -
+    ansible-web n'a pas cette contrainte, rien a synchroniser pour lui."""
     domain = tls["TLS_SIGNED_DOMAIN"] if tls["TLS_MODE"] == "signed" else "web.expolab.lan"
 
     if tls["TLS_MODE"] == "signed":
@@ -255,13 +255,6 @@ def sync_public_domain_dependents(tls: dict) -> None:
         hosts = "dashboard.web.expolab.lan,localhost:3001"
     dashboard_env = SERVER_DIR / "stacks" / "dashboard" / "dashboard.env"
     dashboard_env.write_text(f"HOMEPAGE_ALLOWED_HOSTS={hosts}\n")
-
-    semaphore_env = SERVER_DIR / "stacks" / "semaphore" / "semaphore.env"
-    if semaphore_env.exists():
-        lines = [l for l in semaphore_env.read_text().splitlines() if not l.startswith("SEMAPHORE_WEB_ROOT=")]
-        lines.append(f"SEMAPHORE_WEB_ROOT=https://semaphore.{domain}")
-        semaphore_env.write_text("\n".join(lines) + "\n")
-        os.chmod(semaphore_env, 0o600)
 
     # Liste de liens Homepage - meme raison, voir l'en-tete de
     # services.yaml.template (source editable a la main, jamais
@@ -375,18 +368,16 @@ def api_tls_update():
 
     # Un rechargement a chaud (ci-dessus) suffit pour le contenu du
     # Caddyfile (domaines, extra_routes...) mais jamais pour des variables
-    # d'environnement (OVH_* de Caddy, HOMEPAGE_ALLOWED_HOSTS de dashboard,
-    # SEMAPHORE_WEB_ROOT de semaphore) : chaque conteneur les lit une seule
-    # fois, au demarrage - seule une recreation complete les rafraichit.
-    # Recreer 'caddy' coupe brievement CETTE MEME requete (cette page est
-    # elle-meme servie via Caddy) : une erreur reseau ici, cote
-    # navigateur, est attendue et sans gravite - la sauvegarde a deja eu
-    # lieu avant ce point.
+    # d'environnement (OVH_* de Caddy, HOMEPAGE_ALLOWED_HOSTS de dashboard) :
+    # chaque conteneur les lit une seule fois, au demarrage - seule une
+    # recreation complete les rafraichit. Recreer 'caddy' coupe brievement
+    # CETTE MEME requete (cette page est elle-meme servie via Caddy) : une
+    # erreur reseau ici, cote navigateur, est attendue et sans gravite -
+    # la sauvegarde a deja eu lieu avant ce point.
     errors = []
     for name, compose_rel in (
         ("caddy", "stacks/caddy/docker-compose.yml"),
         ("dashboard", "stacks/dashboard/docker-compose.yml"),
-        ("semaphore", "stacks/semaphore/docker-compose.yml"),
     ):
         recreate_ok, recreate_err = dockhand_recreate_stack(name, SERVER_DIR / compose_rel)
         if not recreate_ok:

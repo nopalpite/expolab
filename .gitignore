@@ -37,18 +37,18 @@ server/stacks/dnsmasq/admin-config/
 # etat runtime propre a chaque lab, pas de l'infra-as-code.
 server/stacks/git-mirror/data/
 
-# Secrets Semaphore (admin, cookies, chiffrement des access keys) + cle
-# SSH dediee automatisation pour bastion-ansible + fichier de reference
-# BASTION_URL/BASTION_API_TOKEN (generes par deploy-server.sh) - jamais
+# Secrets ansible-web (BASTION_API_TOKEN, config du mirroir git-mirror
+# utilise) + cle SSH dediee automatisation pour bastion-ansible - jamais
 # les memes d'un lab a l'autre, cle distincte de toute cle de vraie
 # production.
-server/stacks/semaphore/semaphore.env
-server/stacks/semaphore/automation_key/
-server/stacks/semaphore/bastion-ansible-vars.env
+server/stacks/ansible-web/ansible-web.env
+server/stacks/ansible-web/automation_key/
+server/stacks/ansible-web/config.yaml
 
-# Base SQLite + config Semaphore - etat runtime propre a chaque lab, pas
-# de l'infra-as-code.
-server/stacks/semaphore/data/
+# Clone de travail (depuis git-mirror) + historique des runs - etat
+# runtime propre a chaque lab, pas de l'infra-as-code.
+server/stacks/ansible-web/repo/
+server/stacks/ansible-web/runs/
 
 # Config WireGuard generee (cles, pairs) - jamais la meme d'un lab a
 # l'autre, ne doit jamais finir dans git (secrets client compris).

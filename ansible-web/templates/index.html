@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>expolab - ansible</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Ansible</h1>
+        <p class="subtitle">Declenche des runs Ansible contre le parc Bastion</p>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>Reglages</h2>
+            <form id="settings-form">
+                <div class="field">
+                    <label for="mirror_name">Nom du mirroir git-mirror</label>
+                    <input type="text" id="mirror_name" placeholder="ansible" required>
+                </div>
+                <button type="submit" id="settings-save-btn">Enregistrer</button>
+            </form>
+            <p class="subtitle" style="margin: 8px 0 0;">Le mirroir doit deja exister dans <a href="https://git-mirror.web.expolab.lan" target="_blank" rel="noopener">git-mirror</a> (URL = le depot Ansible sur GitHub). Changer ce nom force un nouveau clone.</p>
+            <p id="settings-status" class="status" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Lancer un run</h2>
+            <form id="run-form">
+                <div class="field">
+                    <label for="run_limit">Cible</label>
+                    <select id="run_limit">
+                        <option value="">Tout le parc</option>
+                    </select>
+                </div>
+                <button type="submit" id="run-btn">Lancer</button>
+                <button type="button" id="refresh-btn" class="secondary">Actualiser les tags</button>
+            </form>
+            <p id="run-status" class="status" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Tags Bastion</h2>
+            <table id="tags-table">
+                <thead>
+                    <tr>
+                        <th>Tag</th>
+                        <th>Role</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="tags-body">
+                    <tr><td colspan="3" class="empty">Chargement...</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="panel">
+            <h2>Historique des runs</h2>
+            <table id="runs-table">
+                <thead>
+                    <tr>
+                        <th>Demarre</th>
+                        <th>Cible</th>
+                        <th>Statut</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="runs-body">
+                    <tr><td colspan="4" class="empty">Chargement...</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="panel" id="log-panel" hidden>
+            <h2>Log</h2>
+            <pre id="log-content"></pre>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
