@@ -5,7 +5,7 @@ services:
     container_name: expolab-webui
     restart: unless-stopped
     ports:
-      - "5050:5050"
+      - "127.0.0.1:5050:5050"
     volumes:
       # Socket Incus DIRECT sur l'hote - un seul montage (plus le
       # double-hop hote -> conteneur Incus -> conteneur Docker d'avant,

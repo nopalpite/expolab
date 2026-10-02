@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependances de test
+        run: pip install ruff==0.6.9 pytest==8.3.3 pyyaml==6.0.2
+
+      # Erreurs de syntaxe et noms indefinis/inutilises uniquement : on
+      # ne fait pas echouer la CI sur du style dans du code existant.
+      - name: Ruff (syntaxe et noms)
+        run: ruff check --select E9,F .
+
+      - name: Syntaxe bash
+        run: |
+          find . -name '*.sh' -not -path './.git/*' -print0 \
+            | xargs -0 -n1 bash -n
+
+      - name: Validation YAML (compose, services, templates)
+        run: |
+          python - <<'PY'
+          import glob, sys, yaml
+          files = (
+              glob.glob("server/**/docker-compose.yml", recursive=True)
+              + glob.glob("vpn/**/docker-compose.yml", recursive=True)
+              + ["server/services.yaml", "fleet/inventory.yaml"]
+          )
+          bad = 0
+          for f in files:
+              try:
+                  yaml.safe_load(open(f))
+              except yaml.YAMLError as exc:
+                  print(f"{f}: {exc}")
+                  bad += 1
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Tests Python (rendu Caddyfile)
+        run: pytest tests -q
+
+      - name: Test de fumee des modules server/lib
+        run: bash tests/test_deploy_libs.sh

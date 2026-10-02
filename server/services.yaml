@@ -10,24 +10,39 @@
 # - extra_routes  : (optionnel) chemins a faire suivre vers un port
 #                    different AVANT la route principale - voir
 #                    render-caddyfile.py
+# - auth          : (optionnel) true = vhost protege par un basic_auth Caddy
+#                    (identifiants generes par deploy-server.sh dans
+#                    stacks/caddy/auth.env). Laisse hors dashboard (liens
+#                    uniquement) et bastion (a sa propre authentification).
+# - auth_except   : (optionnel) chemins exemptes de basic_auth malgre
+#                    auth: true (ex: protocole git HTTP de git-mirror)
 #
 # https://<name>.web.expolab.lan  ->  Caddy  ->  http://<backend_host>:<backend_port>
 services:
   - name: dashboard
     backend_port: 3001
   - name: dockhand
+    auth: true
     backend_port: 3000
   - name: fleet
+    auth: true
     backend_port: 5050
   - name: dnsmasq
+    auth: true
     backend_port: 5051
   - name: caddy
+    auth: true
     backend_port: 5052
   - name: vpn
+    auth: true
     backend_port: 5053
   - name: git-mirror
+    auth: true
+    auth_except:
+      - /git/*
     backend_port: 5054
   - name: ansible-web
+    auth: true
     backend_port: 5055
   - name: bastion
     backend_port: 5000

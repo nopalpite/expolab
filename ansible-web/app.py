@@ -258,4 +258,4 @@ def api_runs_log(run_id: str):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5055)
+    app.run(host="127.0.0.1", port=5055)

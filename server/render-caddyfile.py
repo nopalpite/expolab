@@ -28,15 +28,59 @@
 # ...` placee avant la regle catch-all, Caddy evaluant les routes d'un
 # meme bloc dans l'ordre ou elles apparaissent.
 #
+# auth (optionnel) : `auth: true` protege le vhost par un basic_auth Caddy
+# (identifiant/hash bcrypt lus dans stacks/caddy/auth.env, ou dans les
+# variables BASIC_AUTH_USER/BASIC_AUTH_HASH - voir load_basic_auth()).
+# `auth_except: [/git/*]` exempte des chemins (ex: git-mirror, dont le
+# protocole git HTTP est utilise par des clients sans navigateur). Echoue
+# franchement (code 1) si un service demande l'auth sans identifiants
+# disponibles : jamais de vhost silencieusement ouvert. Sans effet de
+# securite si les backends restent joignables directement sur le LAN -
+# voir la liaison sur 127.0.0.1 dans les docker-compose.yml.
+#
 # Usage: render-caddyfile.py <chemin_services.yaml> [tls_mode] [domaine]
 #   tls_mode : internal (defaut) ou signed
 #   domaine  : defaut web.expolab.lan (internal) - obligatoire en signed
+import os
 import sys
+from pathlib import Path
 
 import yaml
 
 DEFAULT_PUBLIC_DOMAIN = "web.expolab.lan"
 DEFAULT_BACKEND_HOST = "localhost"
+AUTH_ENV_PATH = Path(__file__).resolve().parent / "stacks" / "caddy" / "auth.env"
+
+
+def load_basic_auth() -> tuple[str, str] | None:
+    """(utilisateur, hash bcrypt) ou None si non configure.
+
+    Lu a la main (pas `source`) : le hash bcrypt contient des `$` que le
+    shell interpreterait.
+    """
+    user = os.environ.get("BASIC_AUTH_USER")
+    pw_hash = os.environ.get("BASIC_AUTH_HASH")
+    if not (user and pw_hash) and AUTH_ENV_PATH.exists():
+        values = {}
+        for line in AUTH_ENV_PATH.read_text().splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                key, _, value = line.partition("=")
+                values[key.strip()] = value.strip()
+        user = user or values.get("BASIC_AUTH_USER")
+        pw_hash = pw_hash or values.get("BASIC_AUTH_HASH")
+    return (user, pw_hash) if user and pw_hash else None
+
+
+def auth_block_lines(svc: dict, credentials: tuple[str, str]) -> list[str]:
+    user, pw_hash = credentials
+    except_paths = svc.get("auth_except") or []
+    lines = []
+    matcher = ""
+    if except_paths:
+        lines += ["    @protected {", f"        not path {' '.join(except_paths)}", "    }"]
+        matcher = " @protected"
+    lines += [f"    basic_auth{matcher} {{", f"        {user} {pw_hash}", "    }"]
+    return lines
 
 
 def tls_block_lines(tls_mode: str) -> list[str]:
@@ -72,6 +116,17 @@ def main() -> None:
         print("# Aucun service configure dans server/services.yaml.")
         return
 
+    credentials = load_basic_auth()
+    protected = [s["name"] for s in services if s.get("auth")]
+    if protected and credentials is None:
+        print(
+            f"auth: true sur {', '.join(protected)} mais aucun identifiant "
+            f"(BASIC_AUTH_USER/BASIC_AUTH_HASH ou {AUTH_ENV_PATH}) - refuse de "
+            "generer un Caddyfile ou ces services seraient ouverts.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     for svc in services:
         name = svc["name"]
         port = svc["backend_port"]
@@ -79,6 +134,9 @@ def main() -> None:
         print(f"{name}.{public_domain} {{")
         for line in tls_block_lines(tls_mode):
             print(line)
+        if svc.get("auth"):
+            for line in auth_block_lines(svc, credentials):
+                print(line)
         for route in svc.get("extra_routes", []):
             route_host = route.get("backend_host", backend_host)
             print(f"    reverse_proxy {route['path']} {route_host}:{route['backend_port']}")

@@ -7,7 +7,7 @@ services:
     container_name: expolab-dnsmasq-admin
     restart: unless-stopped
     ports:
-      - "5051:5051"
+      - "127.0.0.1:5051:5051"
     volumes:
       - ${REPO_ROOT}/server/stacks/dnsmasq/data:/dnsmasq-data:ro
       - ${REPO_ROOT}/server/stacks/dnsmasq/admin-config:/dnsmasq-admin-config

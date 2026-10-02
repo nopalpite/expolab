@@ -8,3 +8,4 @@ config/
 # Genere par deploy-server.sh/caddy-admin, jamais lu au build.
 Caddyfile
 tls.env
+auth.env

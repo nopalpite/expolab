@@ -13,10 +13,12 @@ services:
     # de surprise de routage vers expo-lan).
     network_mode: host
     env_file:
+      # Inclut BASTION_ADMIN_PASSWORD (genere par deploy-server.sh, affiche
+      # a la fin du script) - plus de mot de passe par defaut en dur dans
+      # ce depot public, Bastion donnant acces SSH/VNC a tout le parc.
       - ${REPO_ROOT}/server/stacks/bastion/bastion.env
     environment:
       - BASTION_ADMIN_USER=admin
-      - BASTION_ADMIN_PASSWORD=raspberry
       - BASTION_VNC_WS_PORT=6080
       # TLS termine par Caddy (vhost bastion.web.expolab.lan, voir
       # services.yaml) - chemin a faire suivre pour le pont VNC, "option

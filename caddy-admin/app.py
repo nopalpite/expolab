@@ -421,6 +421,8 @@ def api_services_create():
             return jsonify({"error": f"Port {route['backend_port']} (route {route['path']}) deja utilise par '{used[route['backend_port']]}'"}), 409
 
     entry = {"name": name, "backend_port": port}
+    if body.get("auth"):
+        entry["auth"] = True
     if extra_routes:
         entry["extra_routes"] = extra_routes
     services.append(entry)
@@ -462,6 +464,12 @@ def api_services_update(name: str):
             return jsonify({"error": f"Port {route['backend_port']} (route {route['path']}) deja utilise par '{used[route['backend_port']]}'"}), 409
 
     target["backend_port"] = port
+    if body.get("auth"):
+        target["auth"] = True
+    else:
+        # Garde auth_except (config avancee, edite a la main dans
+        # services.yaml) mais retire le drapeau lui-meme.
+        target.pop("auth", None)
     if extra_routes:
         target["extra_routes"] = extra_routes
     else:
@@ -495,4 +503,4 @@ def api_services_delete(name: str):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5052)
+    app.run(host="127.0.0.1", port=5052)

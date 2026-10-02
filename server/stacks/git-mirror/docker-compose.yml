@@ -10,7 +10,7 @@ services:
     container_name: expolab-git-mirror
     restart: unless-stopped
     ports:
-      - "5054:5054"
+      - "127.0.0.1:5054:5054"
     volumes:
       # Clones bare + mirrors.yaml (etat runtime, pas de l'infra-as-code -
       # voir .gitignore).

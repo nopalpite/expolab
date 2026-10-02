@@ -21,6 +21,10 @@ server/stacks/caddy/Caddyfile
 # l'autre, ne doit jamais finir dans git.
 server/stacks/caddy/tls.env
 
+# Identifiants du basic auth Caddy devant les UIs d'administration (mot de
+# passe en clair + hash bcrypt, generes par deploy-server.sh).
+server/stacks/caddy/auth.env
+
 # Certificats TLS + cle privee de la CA interne (mode internal) - etat
 # runtime propre a chaque lab, jamais commite (secrets).
 server/stacks/caddy/data/

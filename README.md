@@ -71,9 +71,10 @@ chaque service comme **stack Dockhand independante** via son API REST
 - **webui** expolab (creation/suppression de faux Pi), publication de port
 - **Bastion** (https://github.com/nopalpite/bastion, dashboard +
   SSH/VNC web) en `network_mode: host` - image prete a l'emploi publiee
-  sur GHCR (`ghcr.io/nopalpite/bastion`), identifiants par defaut
-  `admin`/`raspberry`. Secrets (cle de session, cle de chiffrement des
-  identifiants memorises) generes une seule fois au premier
+  sur GHCR (`ghcr.io/nopalpite/bastion`), utilisateur `admin` et mot de
+  passe **genere** (affiche a la fin de `deploy-server.sh`, conserve dans
+  `bastion.env`). Secrets (cle de session, cle de chiffrement des
+  identifiants memorises, mot de passe admin) generes une seule fois au premier
   `deploy-server.sh` dans `server/stacks/bastion/bastion.env` (non
   versionne) ; inventaire de machines et donnees persistees dans
   `server/stacks/bastion/{config,maps}/` (egalement non versionne, propre
@@ -344,6 +345,32 @@ relancez-le apres avoir modifie `server/services.yaml` ou le code de
 `webui/` pour regenerer le Caddyfile et redeployer les stacks concernees
 via l'API Dockhand, sans repeter la bascule DHCP.
 
+## Securite des UIs d'administration
+
+- **Basic auth Caddy** devant les vhosts marques `auth: true` dans
+  `server/services.yaml` (dockhand, fleet, dnsmasq, caddy, vpn, git-mirror,
+  ansible-web). Identifiants generes une seule fois par `deploy-server.sh`
+  (`server/stacks/caddy/auth.env`, non versionne, hash bcrypt calcule avec
+  le binaire `caddy`) et affiches a la fin du script. Pas de basic auth sur
+  `dashboard` (liens uniquement) ni `bastion` (a sa propre authentification) ;
+  le chemin `/git/*` de git-mirror est exempte (`auth_except`) car utilise
+  par des clients git. `render-caddyfile.py` refuse de generer un Caddyfile
+  si un service demande l'auth sans identifiants disponibles (jamais de
+  vhost silencieusement ouvert). Reglable par service depuis caddy-admin.
+- **Les backends ne sont joignables que via Caddy** : leurs ports sont
+  publies sur `127.0.0.1` (dashboard, dnsmasq-admin, git-mirror, webui) ou
+  leur serveur Flask ecoute sur `127.0.0.1` (caddy-admin, vpn-admin,
+  ansible-web) - sans ca, le basic auth serait contournable en visant
+  directement `<ip-du-pi>:<port>` depuis le LAN. **Exceptions assumees** :
+  Dockhand (`:3000`, indispensable pour la configuration initiale de
+  l'environnement avant que Caddy existe - activer son authentification
+  integree si le LAN n'est pas de confiance) et Bastion (`:5000`, protege
+  par son propre mot de passe).
+- Les mots de passe par defaut des **faux Pi** (`pi`/`raspberry`,
+  `fleet/provision-fakepi.sh`) restent une constante de lab connue,
+  reutilisee par ansible-web (`LAB_FAKEPI_PASSWORD` dans
+  `server/lib/secrets.sh`) - a changer pour toute vraie machine.
+
 ## Verifier / se connecter
 
 ```bash
@@ -357,9 +384,11 @@ ssh pi@<ip-de-pi-01>             # mot de passe: raspberry (a changer si besoin)
 # Reverse proxy HTTPS (TLS auto-signe, cert "not trusted" attendu sans
 # importer le CA interne de Caddy) :
 curl -k https://dashboard.web.expolab.lan  # point d'entree, liens vers tout le reste
+# Les UIs d'administration ci-dessous demandent le basic auth Caddy
+# (curl -k -u admin:<mot de passe de server/stacks/caddy/auth.env>) :
 curl -k https://fleet.web.expolab.lan      # webui flotte
 curl -k https://dockhand.web.expolab.lan   # Dockhand
-curl -k https://bastion.web.expolab.lan    # Bastion (admin/raspberry)
+curl -k https://bastion.web.expolab.lan    # Bastion (admin + mot de passe genere, voir bastion.env)
 curl -k https://dnsmasq.web.expolab.lan    # baux DHCP actifs
 curl -k https://caddy.web.expolab.lan      # ajouter/retirer un service expose
 curl -k https://vpn.web.expolab.lan        # pairs WireGuard (QR code, trafic)
@@ -411,6 +440,16 @@ connue : un `apt purge` ne garantit jamais un retrait 100% parfait
 (fichiers de config residuels, etc.) — d'ou la recommandation de l'image
 disque si un retour a l'etat initial *exact* est requis.
 
+## Tests et CI
+
+`.github/workflows/ci.yml` (a chaque push/PR) : `ruff` (syntaxe et noms
+indefinis), `bash -n` sur tous les scripts, validation YAML des
+`docker-compose.yml`/`services.yaml`, `pytest tests` (rendu du Caddyfile :
+modes TLS, basic auth, echec ferme) et `tests/test_deploy_libs.sh` (test de
+fumee des modules `server/lib/*.sh` avec de faux `docker`/`ip`, sans Docker
+ni Incus reels). Tout se lance aussi en local :
+`pytest tests && bash tests/test_deploy_libs.sh`.
+
 ## Structure
 
 ```
@@ -427,7 +466,9 @@ fleet/
   teardown-fleet.sh           # supprime les faux Pi de l'inventaire
   provision-fakepi.sh         # script de premier boot execute dans chaque conteneur
 server/
-  deploy-server.sh             # installe Docker, demarre Dockhand, cree/redeploie les stacks via son API
+  deploy-server.sh             # orchestration : installe Docker, demarre Dockhand, cree/redeploie les stacks via son API
+  lib/                           # une fonction par responsabilite, sources par deploy-server.sh :
+                                 #   preflight, tls, secrets (+ basic auth), ansible-web, dashboard, dnsmasq, summary
   teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), reactive le DHCP integre d'Incus, desinstalle Docker
   docker-compose.yml            # bootstrap UNIQUEMENT : Dockhand (ne peut pas se creer via sa propre API)
   dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack via l'API

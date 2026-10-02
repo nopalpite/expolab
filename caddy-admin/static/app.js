@@ -64,7 +64,7 @@ async function loadServices() {
         servicesByName = Object.fromEntries(services.map(s => [s.name, s]));
         usedPorts = computeUsedPorts(services);
         if (!services.length) {
-            body.innerHTML = '<tr><td colspan="5" class="empty">Aucun service</td></tr>';
+            body.innerHTML = '<tr><td colspan="6" class="empty">Aucun service</td></tr>';
             return;
         }
         body.innerHTML = services.map(s => {
@@ -77,6 +77,7 @@ async function loadServices() {
                 <td data-label="Nom">${s.name}</td>
                 <td data-label="URL"><code>${s.name}.${currentDomain}</code></td>
                 <td data-label="Port backend">${s.backend_port}</td>
+                <td data-label="Auth">${s.auth ? "oui" : "-"}</td>
                 <td data-label="Routes additionnelles">${routesText}</td>
                 <td class="actions">
                     <button class="secondary" data-edit-name="${s.name}">Modifier</button>
@@ -92,7 +93,7 @@ async function loadServices() {
             btn.addEventListener("click", () => startEditService(btn.dataset.editName));
         });
     } catch (e) {
-        body.innerHTML = '<tr><td colspan="5" class="status-error">Erreur de chargement</td></tr>';
+        body.innerHTML = '<tr><td colspan="6" class="status-error">Erreur de chargement</td></tr>';
     }
 }
 
@@ -116,6 +117,7 @@ function startEditService(name) {
     nameField.value = name;
     nameField.disabled = true;
     document.getElementById("backend_port").value = svc.backend_port;
+    document.getElementById("auth").checked = !!svc.auth;
     clearRouteRows();
     (svc.extra_routes || []).forEach(r => addRouteRow(r.path, r.backend_port));
     document.getElementById("create-btn").textContent = "Modifier";
@@ -129,6 +131,7 @@ function stopEditService() {
     const nameField = document.getElementById("name");
     nameField.disabled = false;
     document.getElementById("create-form").reset();
+    document.getElementById("auth").checked = true;
     clearRouteRows();
     document.getElementById("create-btn").textContent = "Ajouter";
     document.getElementById("create-cancel").hidden = true;
@@ -148,18 +151,19 @@ document.getElementById("create-form").addEventListener("submit", async (e) => {
     const name = document.getElementById("name").value.trim().toLowerCase();
     const backend_port = parseInt(document.getElementById("backend_port").value, 10);
     const extra_routes = collectExtraRoutes();
+    const auth = document.getElementById("auth").checked;
 
     try {
         const res = editingName
             ? await fetch(`/api/services/${encodeURIComponent(editingName)}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ backend_port, extra_routes }),
+                body: JSON.stringify({ backend_port, extra_routes, auth }),
             })
             : await fetch("/api/services", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, backend_port, extra_routes }),
+                body: JSON.stringify({ name, backend_port, extra_routes, auth }),
             });
         const data = await res.json();
         status.hidden = false;
