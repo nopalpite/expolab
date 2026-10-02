@@ -102,97 +102,25 @@ EOF
 }
 
 # dockhand_upsert_stack <nom> <fichier_docker-compose.yml>
-# Cree la stack si absente, la redeploie sinon (idempotent).
-#
-# Les binds relatifs ("./x") d'une stack creee par l'API Dockhand se
-# resolvent dans SON propre repertoire de donnees gere, pas dans ce depot
-# git - donc chaque docker-compose.yml de stack utilise des chemins
-# ABSOLUS via ${REPO_ROOT} (jamais mis en scene par Dockhand, voir le
-# manuel), substitue ici avant l'envoi. $REPO_ROOT doit etre exporte par
-# l'appelant.
+# Cree la stack si absente, la recree sinon (idempotent) - l'implementation
+# (suppression + recreation, substitution de ${REPO_ROOT}, reconstruction
+# forcee des images, attente de la fin du job) vit dans dockhand_stack.py,
+# partagee avec caddy-admin : un seul endroit a maintenir. $REPO_ROOT doit
+# etre exporte par l'appelant.
 dockhand_upsert_stack() {
-    local name="$1" compose_file="$2" env_id compose_content payload
+    local name="$1" compose_file="$2" rc
 
     : "${REPO_ROOT:?REPO_ROOT doit etre exporte avant un appel a dockhand_upsert_stack}"
-    env_id="$(dockhand_get_env_id)" || { dockhand_require_env; env_id="$(dockhand_get_env_id)"; }
-    compose_content="$(REPO_ROOT="$REPO_ROOT" envsubst '${REPO_ROOT}' < "$compose_file")"
 
-    # Pas de PUT documente pour mettre a jour le contenu compose d'une
-    # stack existante (seuls les git-stacks en ont un) - POST .../deploy
-    # ne fait que rejouer ce que Dockhand a DEJA en memoire, sans jamais
-    # relire nos fichiers locaux. Direct constate en pratique : un
-    # correctif local (ex: retirer un sysctl invalide) redeploye "avec
-    # succes" ne changeait rien, l'ancienne definition cassee restait
-    # active. Seul chemin fiable pour rester synchronise avec nos
-    # fichiers : supprimer puis recreer a chaque fois.
-    if dockhand_curl "$DOCKHAND_URL/api/stacks?env=$env_id" | python3 -c "
-import json, sys
-stacks = json.load(sys.stdin)
-if isinstance(stacks, dict):
-    stacks = stacks.get('stacks') or stacks.get('data') or []
-sys.exit(0 if any(s.get('name') == '$name' for s in stacks) else 1)
-" 2>/dev/null; then
-        echo "[=] Stack '$name' deja presente, suppression avant recreation (pour appliquer nos fichiers locaux a jour)..."
-        dockhand_curl -X DELETE "$DOCKHAND_URL/api/stacks/$name?env=$env_id" >/dev/null || true
-    fi
-
-    # Pour les stacks avec `build:` (dnsmasq, webui, wireguard) : le
-    # `docker compose up -d` que Dockhand lance en interne ne reconstruit
-    # PAS une image deja presente localement, meme si le Dockerfile a
-    # change entre-temps (compose ne suit pas son contenu, juste son
-    # existence). Constate en pratique : le correctif "ajouter iproute2"
-    # au Dockerfile wireguard n'avait aucun effet tant que l'ancienne
-    # image `wireguard-wireguard` restait en cache. Supprimer ici toute
-    # image nommee "<stack>-*" (convention Compose v2 <projet>-<service>)
-    # force une reconstruction complete a chaque upsert.
-    docker images -q --filter "reference=${name}-*" 2>/dev/null | sort -u | while read -r img; do
-        [ -n "$img" ] && docker rmi -f "$img" >/dev/null 2>&1 || true
+    while true; do
+        rc=0
+        python3 "$DOCKHAND_SCRIPT_DIR/dockhand_stack.py" upsert "$name" "$compose_file" || rc=$?
+        if [ "$rc" -eq 3 ]; then
+            # Aucun environnement Dockhand : etape manuelle unique, on
+            # attend qu'elle soit faite puis on reessaie.
+            dockhand_require_env
+            continue
+        fi
+        return "$rc"
     done
-
-    echo "[+] Creation de la stack '$name'..."
-    payload="$(python3 -c '
-import json, sys
-print(json.dumps({
-    "name": sys.argv[1],
-    "compose": sys.argv[2],
-    "envId": int(sys.argv[3]),
-    "deploy": True,
-}))
-' "$name" "$compose_content" "$env_id")"
-    local job_id
-    job_id="$(dockhand_curl -X POST "$DOCKHAND_URL/api/stacks" \
-        -H 'Content-Type: application/json' \
-        -d "$payload" | python3 -c '
-import json, sys
-try:
-    print(json.load(sys.stdin).get("jobId", ""))
-except Exception:
-    print("")
-')"
-    [ -z "$job_id" ] && return 0
-
-    # Le POST ci-dessus retourne immediatement un jobId (build+deploy
-    # asynchrone cote Dockhand, voir GET /api/jobs/{jobId}) - sans
-    # attendre sa fin ici, un appelant qui verifie tout de suite l'etat du
-    # conteneur (ex: vpn/install.sh avant de creer le pair VPN par
-    # defaut) peut tomber en pleine construction d'image et echouer a
-    # tort. Constate en pratique sur un Pi : la toute premiere
-    # construction (jamais en cache) peut largement depasser quelques
-    # secondes, en particulier pour un Dockerfile qui compile quelque
-    # chose (xcaddy pour Caddy).
-    local i status
-    for i in $(seq 1 180); do
-        status="$(dockhand_curl "$DOCKHAND_URL/api/jobs/$job_id" | python3 -c '
-import json, sys
-try:
-    print(json.load(sys.stdin).get("status", ""))
-except Exception:
-    print("")
-')"
-        case "$status" in
-            pending|running|queued|"") sleep 2 ;;
-            *) return 0 ;;
-        esac
-    done
-    echo "[!] '$name' : le deploiement (job $job_id) prend plus de 6 minutes, on continue quand meme." >&2
 }

@@ -34,7 +34,7 @@ REPO_ROOT="$WORK"
 SERVICES="$SCRIPT_DIR/services.yaml"
 export REPO_ROOT SCRIPT_DIR SERVICES
 
-for lib in tls secrets ansible-web dashboard dnsmasq summary; do
+for lib in tls secrets ansible-web dashboard dnsmasq stacks summary; do
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/lib/$lib.sh"
 done
@@ -90,5 +90,15 @@ setup_public_domain_dns
 contains "$SCRIPT_DIR/stacks/caddy/Caddyfile" "dns ovh {"
 contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "dashboard.expolab.example.fr"
 contains "$SCRIPT_DIR/stacks/dnsmasq/admin-config/public-domain.conf" "address=/expolab.example.fr/10.42.0.1"
+
+# deploy_stacks : vpn-admin n'est redeploye que si le VPN est installe.
+DEPLOYED=""
+dockhand_upsert_stack() { DEPLOYED="$DEPLOYED $1"; }
+DEPLOYED="" && deploy_stacks > /dev/null
+case "$DEPLOYED" in *" vpn-admin"*) fail "vpn-admin deploye alors que le VPN n'est pas installe" ;; esac
+case "$DEPLOYED" in *" ansible-web"*) ;; *) fail "ansible-web absent des stacks deployees" ;; esac
+mkdir -p "$WORK/vpn/wireguard/config" && touch "$WORK/vpn/wireguard/config/wg0.conf"
+DEPLOYED="" && deploy_stacks > /dev/null
+case "$DEPLOYED" in *" vpn-admin"*) ;; *) fail "vpn-admin non redeploye alors que le VPN est installe" ;; esac
 
 echo "OK : modules server/lib"

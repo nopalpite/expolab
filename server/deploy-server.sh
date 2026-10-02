@@ -24,7 +24,7 @@ export REPO_ROOT
 
 # shellcheck source=./dockhand-api.sh
 source "$SCRIPT_DIR/dockhand-api.sh"
-for lib in preflight tls secrets ansible-web dashboard dnsmasq summary; do
+for lib in preflight tls secrets ansible-web dashboard dnsmasq stacks summary; do
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/lib/$lib.sh"
 done
@@ -42,10 +42,6 @@ setup_ansible_web
 setup_dashboard
 mkdir -p "$SCRIPT_DIR/stacks/git-mirror/data"
 
-echo "[+] Creation/redeploiement des stacks applicatives via l'API Dockhand..."
-for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard git-mirror ansible-web; do
-    dockhand_upsert_stack "$stack" "$SCRIPT_DIR/stacks/$stack/docker-compose.yml"
-done
-
+deploy_stacks
 switch_dhcp_to_dnsmasq
 print_summary

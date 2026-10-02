@@ -445,7 +445,7 @@ disque si un retour a l'etat initial *exact* est requis.
 `.github/workflows/ci.yml` (a chaque push/PR) : `ruff` (syntaxe et noms
 indefinis), `bash -n` sur tous les scripts, validation YAML des
 `docker-compose.yml`/`services.yaml`, `pytest tests` (rendu du Caddyfile :
-modes TLS, basic auth, echec ferme) et `tests/test_deploy_libs.sh` (test de
+modes TLS, basic auth, echec ferme ; `dockhand_stack.py` contre un faux Dockhand local) et `tests/test_deploy_libs.sh` (test de
 fumee des modules `server/lib/*.sh` avec de faux `docker`/`ip`, sans Docker
 ni Incus reels). Tout se lance aussi en local :
 `pytest tests && bash tests/test_deploy_libs.sh`.
@@ -468,10 +468,11 @@ fleet/
 server/
   deploy-server.sh             # orchestration : installe Docker, demarre Dockhand, cree/redeploie les stacks via son API
   lib/                           # une fonction par responsabilite, sources par deploy-server.sh :
-                                 #   preflight, tls, secrets (+ basic auth), ansible-web, dashboard, dnsmasq, summary
+                                 #   preflight, tls, secrets (+ basic auth), ansible-web, dashboard, dnsmasq, stacks, summary
   teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), reactive le DHCP integre d'Incus, desinstalle Docker
   docker-compose.yml            # bootstrap UNIQUEMENT : Dockhand (ne peut pas se creer via sa propre API)
-  dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack via l'API
+  dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack (appelle dockhand_stack.py)
+  dockhand_stack.py              # implementation unique de "supprimer + recreer une stack Dockhand" (bash ET caddy-admin)
   services.yaml                  # services applicatifs exposes au reverse-proxy (dashboard, dockhand, fleet, bastion, dnsmasq/caddy/vpn-admin, git-mirror)
   render-caddyfile.py             # genere le Caddyfile a partir de server/services.yaml
   stacks/

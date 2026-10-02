@@ -20,12 +20,19 @@ import json
 import os
 import re
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
 from ruamel.yaml import YAML
+
+# Implementation unique de "supprimer + recreer une stack Dockhand",
+# partagee avec server/dockhand-api.sh (voir son en-tete) : /server est
+# monte en entier dans ce conteneur.
+sys.path.insert(0, "/server")
+import dockhand_stack  # noqa: E402
 
 app = Flask(__name__)
 
@@ -34,7 +41,6 @@ SERVICES_PATH = SERVER_DIR / "services.yaml"
 RENDER_SCRIPT = SERVER_DIR / "render-caddyfile.py"
 CADDYFILE_PATH = SERVER_DIR / "stacks" / "caddy" / "Caddyfile"
 CADDY_ADMIN_URL = "http://127.0.0.1:2019/load"
-DOCKHAND_URL = "http://127.0.0.1:3000"
 # Necessaire pour resoudre les binds ${REPO_ROOT} des docker-compose.yml
 # d'AUTRES stacks (caddy, dashboard) avant de les repousser a
 # Dockhand - meme raison que server/dockhand-api.sh. Fourni par
@@ -193,53 +199,6 @@ def save_services(data) -> None:
     os.replace(tmp_path, SERVICES_PATH)
 
 
-def dockhand_env_id() -> int | None:
-    try:
-        with urllib.request.urlopen(f"{DOCKHAND_URL}/api/environments", timeout=10) as resp:
-            envs = json.loads(resp.read())
-        if isinstance(envs, dict):
-            envs = envs.get("environments") or envs.get("data") or []
-        return envs[0]["id"] if envs else None
-    except Exception:
-        return None
-
-
-def dockhand_recreate_stack(name: str, compose_path: Path) -> tuple[bool, str]:
-    """Supprime puis recree une stack Dockhand (meme principe que
-    dockhand_upsert_stack dans server/dockhand-api.sh, reimplemente ici en
-    Python) - seul moyen fiable pour qu'un conteneur relise un env_file
-    modifie : `docker restart` garde l'environnement fige a la creation du
-    conteneur, constate en pratique (identifiants/domaine mis a jour
-    restes ignores apres un simple restart)."""
-    env_id = dockhand_env_id()
-    if env_id is None:
-        return False, "Aucun environnement Dockhand configure"
-    compose_content = compose_path.read_text().replace("${REPO_ROOT}", REPO_ROOT)
-
-    del_req = urllib.request.Request(f"{DOCKHAND_URL}/api/stacks/{name}?env={env_id}", method="DELETE")
-    try:
-        urllib.request.urlopen(del_req, timeout=15)
-    except urllib.error.HTTPError:
-        pass  # stack deja absente ou jamais deployee - sans consequence
-    except urllib.error.URLError as exc:
-        return False, f"Impossible de joindre Dockhand : {exc.reason}"
-
-    payload = json.dumps({"name": name, "compose": compose_content, "envId": env_id, "deploy": True}).encode()
-    create_req = urllib.request.Request(
-        f"{DOCKHAND_URL}/api/stacks",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        urllib.request.urlopen(create_req, timeout=30)
-    except urllib.error.HTTPError as exc:
-        return False, f"Dockhand : {exc.read().decode(errors='replace')}"
-    except urllib.error.URLError as exc:
-        return False, f"Impossible de joindre Dockhand : {exc.reason}"
-    return True, ""
-
-
 def sync_public_domain_dependents(tls: dict) -> None:
     """Met a jour dashboard.env pour qu'il suive le domaine public actuel
     - meme logique que deploy-server.sh (dupliquee ici : ce chemin est
@@ -379,9 +338,15 @@ def api_tls_update():
         ("caddy", "stacks/caddy/docker-compose.yml"),
         ("dashboard", "stacks/dashboard/docker-compose.yml"),
     ):
-        recreate_ok, recreate_err = dockhand_recreate_stack(name, SERVER_DIR / compose_rel)
-        if not recreate_ok:
-            errors.append(f"{name}: {recreate_err}")
+        try:
+            # Sans reconstruction d'image ni attente : seul l'environnement
+            # du conteneur doit etre rafraichi, et recreer 'caddy' coupe de
+            # toute facon cette requete.
+            dockhand_stack.upsert_stack(
+                name, SERVER_DIR / compose_rel, REPO_ROOT, rebuild_images=False, wait=False
+            )
+        except dockhand_stack.DockhandError as exc:
+            errors.append(f"{name}: {exc}")
 
     if errors:
         return jsonify({"error": "Configuration enregistree mais redeploiement incomplet : " + "; ".join(errors)}), 500
