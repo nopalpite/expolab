@@ -5,9 +5,9 @@
 # lui-meme coupe d'internet) le limite a ce qu'il a deja.
 #
 # apt verifie lui-meme les signatures des depots d'origine : ce cache ne peut
-# pas alterer un paquet sans que ca se voie. Il ne gere que le HTTP (les
-# depots Debian et Raspberry Pi OS le sont) : un depot HTTPS n'est pas relaye
-# et echoue sur une machine isolee.
+# pas alterer un paquet sans que ca se voie. Les depots Debian et Raspberry Pi
+# OS sont en HTTP ; un depot tiers en HTTPS se declare dans https-mirrors.conf
+# (voir entrypoint.sh) : le cache le telecharge en HTTPS et le sert en HTTP.
 FROM debian:trixie-slim
 
 RUN apt-get update -qq && \

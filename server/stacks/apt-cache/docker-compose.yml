@@ -17,6 +17,10 @@ services:
       # demarrage du conteneur).
       - ${REPO_ROOT}/server/stacks/apt-cache/apt-cache.env
     volumes:
+      # Miroirs de depots HTTPS (nom -> URL amont), relu au demarrage du
+      # conteneur. Doit exister (bind-mount d'un fichier) : cree par
+      # deploy-server.sh, jamais ecrase. Non versionne.
+      - ${REPO_ROOT}/server/stacks/apt-cache/https-mirrors.conf:/etc/apt-cacher-ng-expolab/https-mirrors.conf:ro
       # Gros et ecrit souvent : a deplacer sur SSD/NVMe plutot que la carte
       # SD si possible (usure). Non versionne, voir .gitignore.
       - ${REPO_ROOT}/server/stacks/apt-cache/data:/var/cache/apt-cacher-ng

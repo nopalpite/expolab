@@ -493,11 +493,32 @@ sudo ./server/apt-cache-mode.sh status|online|offline   # offline = SERVEUR sans
 (`EXPOLAB_LAN_INTERNET=1` pour laisser le NAT) ; `install.sh` deploie le
 serveur AVANT la flotte, pour que les faux Pi se provisionnent par le cache.
 
-Limites assumees : seuls les depots **HTTP** passent par le cache (Debian et
-Raspberry Pi OS : oui) ; un depot en HTTPS, un `pip`, un `curl` ou un
-telechargement GitHub dans un role echoue sur une machine isolee - on le
-decouvre avec la repetition ci-dessous. Pas de gel de version (deux jours
-differents peuvent donner des versions differentes). Le cache est ecrit
+**Depots en HTTPS (Docker, un editeur...).** Les depots Debian et Raspberry Pi OS
+sont en HTTP et passent tels quels. Pour un depot tiers en HTTPS, on le declare
+sur le serveur, comme on declare un depot dans `git-mirror` : une URL `https://`
+par ligne dans `server/stacks/apt-cache/https-mirrors.conf` (cree vide au
+deploiement, jamais ecrase), puis `sudo ./server/apt-cache-mode.sh restart`.
+Le serveur telecharge alors le depot en HTTPS et le garde ; seuls les depots
+listes sont joignables ainsi (les tunnels HTTPS quelconques sont refuses).
+Cote machine (role Ansible), le depot s'ecrit en **http://** avec la meme adresse,
+par le proxy habituel :
+
+```
+deb [signed-by=/etc/apt/keyrings/docker.asc] http://download.docker.com/linux/debian bookworm stable
+```
+
+La cle GPG se recupere par le meme chemin (`http://download.docker.com/linux/debian/gpg`,
+via le proxy) ou, mieux, se versionne dans le role ; `apt` verifie toujours la
+signature lui-meme. Verifie dans le lab sur Docker : cle, `apt update` signe et
+telechargement de `docker-compose-plugin` depuis une machine sans internet.
+
+Limites assumees : cela ne couvre que les depots `apt` - un `pip`, un `curl`
+ou un telechargement GitHub dans un role echoue sur une machine isolee (on le
+decouvre avec la repetition ci-dessous ; `git-mirror` couvre les depots git).
+Le cache relaie aussi de l'HTTP vers des hotes non declares pour les fichiers de
+type paquet (constate : une requete vers un hote quelconque atteint l'amont) :
+l'isolement est celui du NAT, pas celui du cache. Pas de gel de version (deux
+jours differents peuvent donner des versions differentes). Le cache est ecrit
 souvent (a deplacer sur SSD plutot que la carte SD si possible). Le serveur
 reste un point unique de defaillance : **cloner sa carte SD** avant l'expo.
 
@@ -611,7 +632,7 @@ server/
     dashboard/{docker-compose.yml, config/}   # Homepage, liens vers les services web du lab
     vpn-admin/docker-compose.yml                                      # build context = ../../vpn-admin
     git-mirror/{docker-compose.yml, data/}                            # data/ non versionne (clones bare + mirrors.yaml)
-    apt-cache/{docker-compose.yml, Dockerfile, entrypoint.sh, apt-cache.env, data/}  # apt-cacher-ng ; apt-cache.env et data/ non versionnes
+    apt-cache/{docker-compose.yml, Dockerfile, entrypoint.sh, apt-cache.env, https-mirrors.conf, data/}  # apt-cacher-ng ; apt-cache.env, https-mirrors.conf et data/ non versionnes
     ansible-web/{docker-compose.yml, ansible-web.env, automation_key/, config.yaml, repo/, runs/}  # tout sauf docker-compose.yml non versionne ; execute bastion-ansible (depot separe, clone depuis git-mirror)
 webui/
   app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh

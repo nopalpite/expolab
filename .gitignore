@@ -83,3 +83,4 @@ __pycache__/
 # propre a chaque lab, jamais commite.
 server/stacks/apt-cache/data/
 server/stacks/apt-cache/apt-cache.env
+server/stacks/apt-cache/https-mirrors.conf

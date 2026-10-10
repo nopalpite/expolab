@@ -108,9 +108,12 @@ isolate_lan > /dev/null  # idempotent : deja isole
 
 setup_apt_cache
 contains "$SCRIPT_DIR/stacks/apt-cache/apt-cache.env" "APT_CACHE_OFFLINE=0"
+[ -f "$SCRIPT_DIR/stacks/apt-cache/https-mirrors.conf" ] || fail "liste des miroirs HTTPS non creee"
+echo "https://download.docker.com/linux/debian" >> "$SCRIPT_DIR/stacks/apt-cache/https-mirrors.conf"
 echo "APT_CACHE_OFFLINE=1" > "$SCRIPT_DIR/stacks/apt-cache/apt-cache.env"
 setup_apt_cache  # ne doit jamais ecraser un mode deja choisi
 contains "$SCRIPT_DIR/stacks/apt-cache/apt-cache.env" "APT_CACHE_OFFLINE=1"
+contains "$SCRIPT_DIR/stacks/apt-cache/https-mirrors.conf" "https://download.docker.com/linux/debian"  # liste jamais ecrasee
 
 setup_dashboard
 contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "HOMEPAGE_ALLOWED_HOSTS=dashboard.web.expolab.lan,localhost:3001"

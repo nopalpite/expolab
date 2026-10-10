@@ -55,3 +55,6 @@ jobs:
 
       - name: Test du script de preparation de machine (image)
         run: bash tests/test_machine_setup.sh
+
+      - name: Test de la config du cache apt (miroirs HTTPS)
+        run: bash tests/test_apt_cache_entrypoint.sh

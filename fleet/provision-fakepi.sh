@@ -19,9 +19,18 @@ export DEBIAN_FRONTEND=noninteractive
 if [ -x /root/machine-setup.sh ]; then
     /root/machine-setup.sh --stage network
     # Les faux Pi n'ont pas internet : sans le cache du serveur, apt ne peut
-    # rien installer. Message clair plutot qu'une erreur apt obscure.
-    if ! timeout 5 bash -c 'exec 3<>/dev/tcp/10.42.0.1/3142' 2>/dev/null; then
-        echo "Cache apt du serveur (10.42.0.1:3142) injoignable : lancer d'abord server/deploy-server.sh" >&2
+    # rien installer. Message clair plutot qu'une erreur apt obscure. On
+    # attend d'abord le DHCP (le conteneur vient de demarrer).
+    cache_up=0
+    for _ in $(seq 1 30); do
+        if timeout 3 bash -c 'exec 3<>/dev/tcp/10.42.0.1/3142' 2>/dev/null; then
+            cache_up=1
+            break
+        fi
+        sleep 2
+    done
+    if [ "$cache_up" -ne 1 ]; then
+        echo "Cache apt du serveur (10.42.0.1:3142) injoignable apres 60 s : lancer d'abord server/deploy-server.sh" >&2
         exit 1
     fi
 fi
