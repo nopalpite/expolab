@@ -29,16 +29,16 @@ echo "=== 2/5 : Reseau expo-lan ==="
 "$SCRIPT_DIR/incus/network-setup.sh"
 
 echo
-echo "=== 3/5 : Deploiement de la flotte ==="
+echo "=== 3/5 : Serveur d'expo (Dockhand + stacks) ==="
+"$SCRIPT_DIR/server/deploy-server.sh"
+
+echo
+echo "=== 4/5 : Deploiement de la flotte (via le cache apt du serveur) ==="
 # incus/install.sh vient d'ajouter $REAL_USER au groupe incus-admin, pas
 # encore actif dans cette session shell (normalement il faudrait se
 # reconnecter) - `sg` applique le groupe pour cette seule commande, sans
 # avoir besoin de se deconnecter/reconnecter.
 sudo -u "$REAL_USER" sg incus-admin -c "'$SCRIPT_DIR/fleet/deploy-fleet.sh'"
-
-echo
-echo "=== 4/5 : Serveur d'expo (Dockhand + stacks) ==="
-"$SCRIPT_DIR/server/deploy-server.sh"
 
 echo
 echo "=== 5/5 : VPN (WireGuard) ==="

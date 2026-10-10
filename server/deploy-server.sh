@@ -24,7 +24,7 @@ export REPO_ROOT
 
 # shellcheck source=./dockhand-api.sh
 source "$SCRIPT_DIR/dockhand-api.sh"
-for lib in preflight tls secrets automation-key ansible-web apt-cache ntp dashboard dnsmasq stacks summary; do
+for lib in preflight tls secrets automation-key ansible-web apt-cache ntp lan-isolation dashboard dnsmasq stacks summary; do
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/lib/$lib.sh"
 done
@@ -46,4 +46,5 @@ mkdir -p "$SCRIPT_DIR/stacks/git-mirror/data"
 
 deploy_stacks
 switch_dhcp_to_dnsmasq
+isolate_lan
 print_summary

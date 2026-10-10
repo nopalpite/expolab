@@ -12,12 +12,10 @@
 # reseau expo-lan via l'interface bridge elle-meme (10.42.0.1, deja portee
 # par l'hote) - pas besoin d'un conteneur Incus dedie pour ca.
 #
-# En attendant que server/deploy-server.sh prenne le relais, le DHCP
-# integre a Incus sur ce bridge sert a valider que chaque faux Pi recoit
-# bien une IP via sa MAC. ipv4.nat=true est laisse actif pour l'instant
-# uniquement pour permettre aux conteneurs de faire `apt-get install`
-# pendant leur provisioning (trafic SORTANT uniquement, aucun port n'est
-# expose depuis l'exterieur vers les conteneurs).
+# Pas de NAT (ipv4.nat=false) : comme les vraies machines de l'expo, les faux
+# Pi n'ont pas acces a internet. Leurs paquets passent par le cache apt du
+# serveur (stack apt-cache), qui lui sort. Pour rendre temporairement
+# internet aux machines : incus/lan-internet.sh on.
 #
 # Usage: sudo ./network-setup.sh
 set -euo pipefail
@@ -35,7 +33,7 @@ if incus network show expo-lan &>/dev/null; then
 else
     incus network create expo-lan \
         ipv4.address=10.42.0.1/24 \
-        ipv4.nat=true \
+        ipv4.nat=false \
         ipv4.dhcp=true \
         ipv6.address=none
 fi

@@ -18,17 +18,15 @@ echo "ssh-ed25519 AAAATESTKEY expolab-test" > "$WORK/key.pub"
 
 # --- etape reseau ---
 bash "$SETUP" --stage network --server-ip 10.42.0.1 > /dev/null
-contains "$WORK/root/etc/apt/apt.conf.d/01expolab-proxy" 'Proxy-Auto-Detect "/usr/local/bin/expolab-apt-proxy"'
-contains "$WORK/root/usr/local/bin/expolab-apt-proxy" "10.42.0.1/3142"
-contains "$WORK/root/usr/local/bin/expolab-apt-proxy" 'echo "DIRECT"'
-[ -x "$WORK/root/usr/local/bin/expolab-apt-proxy" ] || fail "script de detection non executable"
+contains "$WORK/root/etc/apt/apt.conf.d/01expolab-proxy" 'Acquire::http::Proxy "http://10.42.0.1:3142";'
 contains "$WORK/root/etc/systemd/timesyncd.conf.d/expolab.conf" "NTP=10.42.0.1"
 
-# Le script de detection doit repondre DIRECT quand le cache est injoignable
-# (port 1 : jamais ouvert) - c'est le repli qui rend l'installation initiale
-# possible avant que le serveur existe.
-sed "s#10.42.0.1/3142#127.0.0.1/1#" "$WORK/root/usr/local/bin/expolab-apt-proxy" > "$WORK/detect-closed.sh"
-[ "$(bash "$WORK/detect-closed.sh")" = "DIRECT" ] || fail "repli DIRECT attendu quand le cache ne repond pas"
+# Les machines n'ont pas internet : pas de repli en connexion directe, et
+# l'ancien mecanisme de detection (version precedente) est retire.
+! grep -q "DIRECT\|Auto-Detect" "$WORK/root/etc/apt/apt.conf.d/01expolab-proxy" || fail "repli direct present"
+mkdir -p "$WORK/root/usr/local/bin" && echo old > "$WORK/root/usr/local/bin/expolab-apt-proxy"
+bash "$SETUP" --stage network > /dev/null
+[ ! -e "$WORK/root/usr/local/bin/expolab-apt-proxy" ] || fail "ancien script de detection non retire"
 
 # --- etape acces ---
 bash "$SETUP" --stage access --user pi --pubkey-file "$WORK/key.pub" > /dev/null

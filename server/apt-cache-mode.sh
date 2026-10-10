@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Bascule le cache apt (stack apt-cache) entre :
-#   online  : telecharge en amont ce qu'il n'a pas, et le garde (defaut)
-#   offline : ne sert QUE son cache, ne contacte jamais internet - c'est le
-#             mode de l'exposition, une fois le cache amorce
-#             (voir fleet/offline-rehearsal.sh --prime)
+#   online  : telecharge en amont ce qu'il n'a pas, et le garde (defaut, mode
+#             normal : les machines n'ont pas internet, le serveur si)
+#   offline : ne sert QUE son cache, ne contacte jamais internet - seulement
+#             si le SERVEUR lui-meme est coupe d'internet
 #   status  : affiche le mode courant
 #
 # Une variable d'environnement n'est lue qu'au demarrage d'un conteneur : la

@@ -6,10 +6,11 @@
 # exactement ce que porte l'image de la vraie vie.
 #
 # Deux etapes, idempotentes, a lancer en root :
-#   --stage network : proxy apt vers le cache du serveur (avec repli en
-#                     connexion directe si le cache ne repond pas) et
-#                     serveur de temps du serveur. A faire AVANT le premier
-#                     `apt-get`.
+#   --stage network : proxy apt vers le cache du serveur et serveur de temps
+#                     du serveur. A faire AVANT le premier `apt-get`. Les
+#                     machines n'ont pas acces a internet : TOUT passe par le
+#                     cache, sans repli en connexion directe (si le cache ne
+#                     repond pas, apt echoue franchement).
 #   --stage access  : cle publique d'automatisation dans authorized_keys et
 #                     sudo sans mot de passe pour l'utilisateur donne -
 #                     remplace l'authentification par mot de passe.
@@ -41,23 +42,14 @@ while [ $# -gt 0 ]; do
 done
 
 stage_network() {
-    install -d "$ROOT/usr/local/bin" "$ROOT/etc/apt/apt.conf.d"
+    install -d "$ROOT/etc/apt/apt.conf.d"
 
-    # Script appele par apt avant chaque operation reseau : proxy du
-    # serveur s'il repond, connexion directe sinon (installation initiale
-    # avant que le serveur existe, ou machine branchee ailleurs).
-    cat > "$ROOT/usr/local/bin/expolab-apt-proxy" <<EOF
-#!/usr/bin/env bash
-if timeout 2 bash -c 'exec 3<>/dev/tcp/$SERVER_IP/$APT_PROXY_PORT' 2>/dev/null; then
-    echo "http://$SERVER_IP:$APT_PROXY_PORT"
-else
-    echo "DIRECT"
-fi
-EOF
-    chmod 755 "$ROOT/usr/local/bin/expolab-apt-proxy"
-
+    # Proxy fixe : apt-cacher-ng telecharge ce qui manque (le serveur a
+    # internet, pas la machine) et le garde. Retire l'ancien mecanisme de
+    # detection avec repli direct, s'il a ete pose par une version precedente.
+    rm -f "$ROOT/usr/local/bin/expolab-apt-proxy"
     cat > "$ROOT/etc/apt/apt.conf.d/01expolab-proxy" <<EOF
-Acquire::http::Proxy-Auto-Detect "/usr/local/bin/expolab-apt-proxy";
+Acquire::http::Proxy "http://$SERVER_IP:$APT_PROXY_PORT";
 EOF
 
     # Une carte neuve demarre avec une horloge fausse : apt refuse alors un
@@ -66,7 +58,7 @@ EOF
         install -d "$ROOT/etc/systemd/timesyncd.conf.d"
         printf '[Time]\nNTP=%s\n' "$SERVER_IP" > "$ROOT/etc/systemd/timesyncd.conf.d/expolab.conf"
     fi
-    echo "[+] Reseau : proxy apt (repli direct) et serveur de temps -> $SERVER_IP"
+    echo "[+] Reseau : proxy apt (cache du serveur, sans repli direct) et serveur de temps -> $SERVER_IP"
 }
 
 stage_access() {

@@ -464,8 +464,8 @@ exemple depuis le `firstrun.sh` de l'Imager). Il pose :
 - l'utilisateur d'automatisation, la cle publique
   `server/stacks/ansible-web/automation_key/automation_ed25519.pub` et un
   `sudo` sans mot de passe (`--stage access`) ;
-- le proxy apt automatique (`--stage network`) : `http://10.42.0.1:3142` si
-  le cache du serveur repond, sinon acces direct ;
+- le proxy apt (`--stage network`) : `http://10.42.0.1:3142`, sans repli
+  direct (la machine n'a pas internet) ;
 - le serveur de temps `10.42.0.1` (chrony sur l'hote, aussi annonce par DHCP
   - option 42) : une carte neuve a l'horloge fausse, et apt refuse un
   `Release` « pas encore valide ».
@@ -476,37 +476,43 @@ existantes) : le lab reste fidele a l'image reelle. Le secours par mot de
 passe d'`ansible-web` (`ansible_ssh_pass`) pourra etre retire une fois la
 cle partout.
 
-### Paquets hors ligne : le cache apt
+### Paquets sans internet : le cache apt
 
-Stack `apt-cache` (apt-cacher-ng, ecoute `10.42.0.1:3142` uniquement). Principe
-**amorcer puis rejouer** : tant que le serveur est connecte, tout ce que les
-machines installent est telecharge et garde ; on rejoue ensuite tous les
-roles une fois en ligne (`--prime` ci-dessous) pour que le cache contienne
-exactement ce dont ils ont besoin.
+Les machines de l'expo **n'ont pas acces a internet** (`expo-lan` sans NAT) ;
+seul le serveur sort. Tout `apt update/install/upgrade` passe **obligatoirement**
+par la stack `apt-cache` (apt-cacher-ng, `10.42.0.1:3142`, sans repli en
+connexion directe) : si le paquet est dans le cache il est servi, sinon le
+cache le telecharge sur internet, le garde, puis le sert.
 
 ```bash
-sudo ./server/apt-cache-mode.sh status|online|offline
+incus/lan-internet.sh status|on|off     # NAT des machines (depannage : on, puis off)
+sudo ./server/apt-cache-mode.sh status|online|offline   # offline = SERVEUR sans internet
 ```
 
-Limites assumees : pas de gel de version (deux amorcages a des dates
-differentes peuvent donner des versions differentes) ; les depots en HTTPS
-contournent le cache et echouent hors ligne ; le cache est ecrit souvent
-(a deplacer sur SSD plutot que la carte SD si possible). Le serveur reste un
-point unique de defaillance : **cloner sa carte SD** avant l'expo.
+`deploy-server.sh` isole le reseau en fin d'installation
+(`EXPOLAB_LAN_INTERNET=1` pour laisser le NAT) ; `install.sh` deploie le
+serveur AVANT la flotte, pour que les faux Pi se provisionnent par le cache.
+
+Limites assumees : seuls les depots **HTTP** passent par le cache (Debian et
+Raspberry Pi OS : oui) ; un depot en HTTPS, un `pip`, un `curl` ou un
+telechargement GitHub dans un role echoue sur une machine isolee - on le
+decouvre avec la repetition ci-dessous. Pas de gel de version (deux jours
+differents peuvent donner des versions differentes). Le cache est ecrit
+souvent (a deplacer sur SSD plutot que la carte SD si possible). Le serveur
+reste un point unique de defaillance : **cloner sa carte SD** avant l'expo.
 
 ### Repeter le scenario avant l'expo
 
 ```bash
-sudo ./fleet/offline-rehearsal.sh --prime   # amorce le cache en ligne, puis coupe internet
-sudo ./fleet/offline-rehearsal.sh           # relance sur cache deja amorce
+./fleet/offline-rehearsal.sh
 ```
 
-Le script coupe la sortie d'`expo-lan` (NAT) et passe le cache en hors ligne,
-cree de zero un faux Pi (autre MAC), applique **tous les roles** depuis le
-conteneur ansible-web **par cle SSH et sudo sans mot de passe**, rapporte le
-resultat, puis restaure NAT, mode du cache et supprime les machines de test
-(meme en cas d'echec). Les autres faux Pi perdent internet pendant la
-repetition. Hors CI GitHub (necessite Incus).
+Le script coupe le NAT d'`expo-lan` (s'il etait actif), cree de zero un faux Pi
+(nom et MAC inedits), verifie qu'il n'a aucun acces a internet, applique **tous
+les roles** depuis le conteneur ansible-web **par cle SSH et sudo sans mot de
+passe**, rapporte le resultat, puis restaure le NAT et supprime la machine de
+test (meme en cas d'echec). Aucun amorcage prealable : le cache telecharge a la
+demande. Hors CI GitHub (necessite Incus).
 
 Non couvert par la repetition : le materiel reel (firmware, GPIO, Raspberry
 Pi OS Trixie/cloud-init a verifier sur une vraie carte), et l'heure (les
@@ -571,7 +577,8 @@ install.sh                    # point d'entree unique, enchaine tout ce qui suit
 incus/
   install.sh                # installe Incus sur l'hote
   uninstall.sh               # desinstalle Incus (symetrique de install.sh)
-  network-setup.sh           # cree le reseau expo-lan (bridge isole) + profil fake-pi
+  network-setup.sh           # cree le reseau expo-lan (bridge isole, sans NAT) + profil fake-pi
+  lan-internet.sh            # NAT des machines : on / off / status (normalement off)
   network-teardown.sh        # defait network-setup.sh
   profiles/fake-pi.yaml      # profil Incus flotte (reseau + limites CPU/RAM + pool disque)
 fleet/
@@ -580,7 +587,7 @@ fleet/
   teardown-fleet.sh           # supprime les faux Pi de l'inventaire
   provision-fakepi.sh         # script de premier boot execute dans chaque conteneur
   apply-machine-setup.sh      # remet a niveau des faux Pi existants (cle, sudo, proxy apt, NTP)
-  offline-rehearsal.sh        # repetition du remplacement d'une machine SANS internet (voir plus haut)
+  offline-rehearsal.sh        # repetition du remplacement d'une machine isolee d'internet (voir plus haut)
 image/
   machine-setup.sh            # preparation de l'image type (cle d'automatisation, sudo, proxy apt, NTP)
 server/

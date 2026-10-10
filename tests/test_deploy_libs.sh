@@ -42,7 +42,7 @@ SERVICES="$SCRIPT_DIR/services.yaml"
 export REPO_ROOT SCRIPT_DIR SERVICES
 
 export CHRONY_CONF_DIR="$WORK/chrony"
-for lib in tls secrets automation-key ansible-web apt-cache ntp dashboard dnsmasq stacks summary; do
+for lib in tls secrets automation-key ansible-web apt-cache ntp lan-isolation dashboard dnsmasq stacks summary; do
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/lib/$lib.sh"
 done
@@ -88,6 +88,23 @@ setup_ntp
 contains "$CHRONY_CONF_DIR/expolab.conf" "allow 10.42.0.0/24"
 contains "$CHRONY_CONF_DIR/expolab.conf" "local stratum 10"
 setup_ntp  # idempotent : un second passage ne reecrit rien
+
+# isolate_lan : coupe le NAT d'expo-lan, sauf EXPOLAB_LAN_INTERNET=1
+cat > "$WORK/bin/incus" <<'EOT'
+#!/usr/bin/env bash
+case "$*" in
+    "network get expo-lan ipv4.nat") cat "$NAT_STATE" ;;
+    "network set expo-lan ipv4.nat=false") echo false > "$NAT_STATE" ;;
+esac
+EOT
+chmod +x "$WORK/bin/incus"
+export NAT_STATE="$WORK/nat"
+echo true > "$NAT_STATE"
+EXPOLAB_LAN_INTERNET=1 isolate_lan > /dev/null
+[ "$(cat "$NAT_STATE")" = "true" ] || fail "EXPOLAB_LAN_INTERNET=1 doit laisser le NAT"
+isolate_lan > /dev/null
+[ "$(cat "$NAT_STATE")" = "false" ] || fail "le NAT d'expo-lan aurait du etre coupe"
+isolate_lan > /dev/null  # idempotent : deja isole
 
 setup_apt_cache
 contains "$SCRIPT_DIR/stacks/apt-cache/apt-cache.env" "APT_CACHE_OFFLINE=0"
