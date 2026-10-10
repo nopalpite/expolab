@@ -1,0 +1,22 @@
+# Stack Dockhand "apt-cache" - cache apt (apt-cacher-ng) pour les machines
+# d'expo, voir Dockerfile. Pas de vhost Caddy : c'est un proxy HTTP, pas une
+# interface web.
+#
+# network_mode: host et ecoute sur 10.42.0.1 (hote sur expo-lan) : les
+# machines doivent le joindre, contrairement aux UIs d'administration liees a
+# 127.0.0.1 - exception assumee, mais jamais sur le reseau physique.
+services:
+  apt-cache:
+    build: ${REPO_ROOT}/server/stacks/apt-cache
+    container_name: expolab-apt-cache
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      # APT_CACHE_OFFLINE (0/1) - bascule par server/apt-cache-mode.sh, qui
+      # recree la stack (une variable d'environnement n'est lue qu'au
+      # demarrage du conteneur).
+      - ${REPO_ROOT}/server/stacks/apt-cache/apt-cache.env
+    volumes:
+      # Gros et ecrit souvent : a deplacer sur SSD/NVMe plutot que la carte
+      # SD si possible (usure). Non versionne, voir .gitignore.
+      - ${REPO_ROOT}/server/stacks/apt-cache/data:/var/cache/apt-cacher-ng

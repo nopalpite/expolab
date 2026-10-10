@@ -198,25 +198,55 @@ def api_settings_put():
     return jsonify({"ok": True})
 
 
-@app.route("/api/tags", methods=["GET"])
-def api_tags_get():
+def build_targets(machines: list[dict], group_name, roles: set[str]) -> dict:
+    """Cibles valides pour `ansible-playbook --limit` : un groupe par tag
+    Bastion (nom normalise, comme bastion_inventory.build_inventory) et un
+    hote par machine (son `name` Bastion). Fonction pure : testable sans
+    reseau ni clone."""
+    tag_names = sorted({t for m in machines for t in (m.get("tags") or [])})
+    tags = [
+        {"name": t, "role": group_name(t), "has_role": group_name(t) in roles}
+        for t in tag_names
+    ]
+    hosts = [
+        {
+            "name": m["name"],
+            "host": m.get("host", ""),
+            "tags": sorted({group_name(t) for t in (m.get("tags") or [])}),
+        }
+        for m in sorted(machines, key=lambda m: m["name"])
+    ]
+    return {"tags": tags, "machines": hosts}
+
+
+def load_targets() -> tuple[dict | None, str | None, int]:
+    """Synchronise le clone puis interroge Bastion. (cibles, erreur, code HTTP)."""
     ok, err = sync_repo()
     if not ok:
-        return jsonify({"error": err}), 502
+        return None, err, 502
 
     if not (REPO_DIR / "inventory" / "bastion_inventory.py").exists():
-        return jsonify({"error": "inventory/bastion_inventory.py introuvable dans le depot clone - est-ce bien le bon mirroir ?"}), 502
+        return None, "inventory/bastion_inventory.py introuvable dans le depot clone - est-ce bien le bon mirroir ?", 502
 
     inventory = load_inventory_module()
     try:
         machines = inventory.fetch_machines()
     except SystemExit:
-        return jsonify({"error": "Impossible de joindre Bastion (verifier BASTION_URL/BASTION_API_TOKEN)."}), 502
+        return None, "Impossible de joindre Bastion (verifier BASTION_URL/BASTION_API_TOKEN).", 502
 
-    raw_tags = sorted({t for m in machines for t in (m.get("tags") or [])})
-    roles = local_roles()
-    tags = [{"name": t, "role": inventory.group_name(t), "has_role": inventory.group_name(t) in roles} for t in raw_tags]
-    return jsonify({"tags": tags, "mirror_name": load_settings()["mirror_name"]})
+    return build_targets(machines, inventory.group_name, local_roles()), None, 200
+
+
+def allowed_limits(targets: dict) -> set[str]:
+    return {t["role"] for t in targets["tags"]} | {m["name"] for m in targets["machines"]}
+
+
+@app.route("/api/tags", methods=["GET"])
+def api_tags_get():
+    targets, err, code = load_targets()
+    if targets is None:
+        return jsonify({"error": err}), code
+    return jsonify({**targets, "mirror_name": load_settings()["mirror_name"]})
 
 
 @app.route("/api/runs", methods=["GET"])
@@ -226,13 +256,23 @@ def api_runs_list():
 
 @app.route("/api/runs", methods=["POST"])
 def api_runs_create():
+    body = request.get_json(force=True, silent=True) or {}
+    limit = (body.get("limit") or "").strip() or None
+
+    # Cible validee contre ce que Bastion connait reellement (groupes et
+    # machines) : jamais une chaine libre transmise telle quelle a
+    # `ansible-playbook --limit` (qui accepterait aussi des motifs).
+    if limit is not None:
+        targets, err, code = load_targets()
+        if targets is None:
+            return jsonify({"error": err}), code
+        if limit not in allowed_limits(targets):
+            return jsonify({"error": f"Cible inconnue : '{limit}' (ni tag, ni machine de Bastion)"}), 400
+
     with RUN_LOCK:
         if RUN_STATE["running"]:
             return jsonify({"error": "Un run est deja en cours"}), 409
         RUN_STATE["running"] = True
-
-    body = request.get_json(force=True, silent=True) or {}
-    limit = (body.get("limit") or "").strip() or None
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     runs = load_runs()

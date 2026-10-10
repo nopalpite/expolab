@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
 
       - name: Dependances de test
-        run: pip install ruff==0.6.9 pytest==8.3.3 pyyaml==6.0.2
+        run: pip install ruff==0.6.9 pytest==8.3.3 pyyaml==6.0.2 flask==3.0.3
 
       # Erreurs de syntaxe et noms indefinis/inutilises uniquement : on
       # ne fait pas echouer la CI sur du style dans du code existant.
@@ -52,3 +52,6 @@ jobs:
 
       - name: Test de fumee des modules server/lib
         run: bash tests/test_deploy_libs.sh
+
+      - name: Test du script de preparation de machine (image)
+        run: bash tests/test_machine_setup.sh

@@ -58,8 +58,12 @@ async function loadTags() {
             return;
         }
         const tags = data.tags || [];
+        const machines = data.machines || [];
+        // La valeur d'un tag est son nom de groupe Ansible (normalise) :
+        // c'est ce que `--limit` reconnait, pas necessairement le tag brut.
         select.innerHTML = '<option value="">Tout le parc</option>' +
-            tags.map(t => `<option value="${t.name}">${t.name}</option>`).join("");
+            (tags.length ? `<optgroup label="Tags">${tags.map(t => `<option value="${t.role}">${t.name}</option>`).join("")}</optgroup>` : "") +
+            (machines.length ? `<optgroup label="Machines">${machines.map(m => `<option value="${m.name}">${m.name}${m.host ? ` (${m.host})` : ""}</option>`).join("")}</optgroup>` : "");
         if (!tags.length) {
             body.innerHTML = '<tr><td colspan="3" class="empty">Aucun tag dans Bastion</td></tr>';
             return;

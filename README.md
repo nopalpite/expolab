@@ -399,6 +399,97 @@ curl -k https://vpn.web.expolab.lan        # pairs WireGuard (QR code, trafic)
 # fonctionnent depuis ce poste.
 ```
 
+## Remplacer une machine de l'expo (hors ligne)
+
+Scenario : pendant l'exposition, un Raspberry Pi meurt. On le change, on
+insere une carte SD flashee avec l'image type, on lance le playbook Ansible
+- **sans internet**. La carte neuve reprend le **meme nom et la meme IP**
+que la morte : son entree Bastion (identifiants, tags) reste valable.
+L'installation du *serveur* est un autre sujet (connecte) ; `fleet/` ne
+sert qu'a simuler de vraies machines.
+
+### Ce qui a ete verifie (experience dans le lab)
+
+| Cas | Resultat |
+|---|---|
+| Reservation par MAC (ancien fonctionnement) | la carte neuve (autre MAC) obtient une autre IP ; le nom DNS reste colle au bail de la morte |
+| Reservation **par nom** (`nom,ip`, sans MAC) | la carte neuve, qui annonce le meme hostname, obtient l'IP reservee et le nom DNS bascule sur son bail |
+| Bail de la morte encore actif (12 h) | bloque la reutilisation de l'IP, tant qu'il n'est pas libere |
+
+Decision : reservations **par nom** (MAC optionnelle) dans dnsmasq-admin, et
+bouton **Liberer** sur la ligne de bail de la machine morte (execute
+`dhcp_release`, sans redemarrer dnsmasq ni toucher aux autres baux).
+
+### Procedure de remplacement
+
+1. dnsmasq-admin : verifier que la machine a une reservation **par nom**
+   (nom + IP, MAC vide) ; puis, dans la liste des baux, **Liberer** celui de
+   la machine morte.
+2. Flasher la carte avec l'image type (voir ci-dessous) en saisissant le
+   **hostname de la machine remplacee** dans Raspberry Pi Imager.
+3. Brancher, laisser demarrer (DHCP -> meme IP, meme nom).
+4. ansible-web : lancer le playbook en ciblant la **machine** (le select
+   "Cible" propose les tags et les machines de Bastion).
+
+Dans Bastion, referencer les machines par **IP** (pas `*.expolab.lan` :
+l'hote et le conteneur ansible-web n'utilisent pas dnsmasq comme resolveur).
+
+### L'image type
+
+Raspberry Pi OS standard + `image/machine-setup.sh` (execute une fois, par
+exemple depuis le `firstrun.sh` de l'Imager). Il pose :
+
+- l'utilisateur d'automatisation, la cle publique
+  `server/stacks/ansible-web/automation_key/automation_ed25519.pub` et un
+  `sudo` sans mot de passe (`--stage access`) ;
+- le proxy apt automatique (`--stage network`) : `http://10.42.0.1:3142` si
+  le cache du serveur repond, sinon acces direct ;
+- le serveur de temps `10.42.0.1` (chrony sur l'hote, aussi annonce par DHCP
+  - option 42) : une carte neuve a l'horloge fausse, et apt refuse un
+  `Release` « pas encore valide ».
+
+`fleet/` utilise le **meme script** pour ses faux Pi
+(`fleet/apply-machine-setup.sh` pour mettre a niveau des instances
+existantes) : le lab reste fidele a l'image reelle. Le secours par mot de
+passe d'`ansible-web` (`ansible_ssh_pass`) pourra etre retire une fois la
+cle partout.
+
+### Paquets hors ligne : le cache apt
+
+Stack `apt-cache` (apt-cacher-ng, ecoute `10.42.0.1:3142` uniquement). Principe
+**amorcer puis rejouer** : tant que le serveur est connecte, tout ce que les
+machines installent est telecharge et garde ; on rejoue ensuite tous les
+roles une fois en ligne (`--prime` ci-dessous) pour que le cache contienne
+exactement ce dont ils ont besoin.
+
+```bash
+sudo ./server/apt-cache-mode.sh status|online|offline
+```
+
+Limites assumees : pas de gel de version (deux amorcages a des dates
+differentes peuvent donner des versions differentes) ; les depots en HTTPS
+contournent le cache et echouent hors ligne ; le cache est ecrit souvent
+(a deplacer sur SSD plutot que la carte SD si possible). Le serveur reste un
+point unique de defaillance : **cloner sa carte SD** avant l'expo.
+
+### Repeter le scenario avant l'expo
+
+```bash
+sudo ./fleet/offline-rehearsal.sh --prime   # amorce le cache en ligne, puis coupe internet
+sudo ./fleet/offline-rehearsal.sh           # relance sur cache deja amorce
+```
+
+Le script coupe la sortie d'`expo-lan` (NAT) et passe le cache en hors ligne,
+cree de zero un faux Pi (autre MAC), applique **tous les roles** depuis le
+conteneur ansible-web **par cle SSH et sudo sans mot de passe**, rapporte le
+resultat, puis restaure NAT, mode du cache et supprime les machines de test
+(meme en cas d'echec). Les autres faux Pi perdent internet pendant la
+repetition. Hors CI GitHub (necessite Incus).
+
+Non couvert par la repetition : le materiel reel (firmware, GPIO, Raspberry
+Pi OS Trixie/cloud-init a verifier sur une vraie carte), et l'heure (les
+conteneurs partagent l'horloge de l'hote - NTP est non verifiable dans le lab).
+
 ## Rollback (retour a l'etat initial)
 
 Deux niveaux, a combiner :
@@ -426,7 +517,7 @@ Ce script defait dans l'ordre exactement ce que `install.sh` /
    `vpn-admin`, supprime tous les pairs et la config generee
 2. `server/teardown-server.sh` — arrete Dockhand et les stacks Docker
    (dnsmasq, dnsmasq-admin, caddy, caddy-admin, webui, bastion,
-   dashboard, git-mirror, ansible-web), reactive le DHCP integre
+   dashboard, git-mirror, apt-cache, ansible-web), reactive le DHCP integre
    d'Incus sur `expo-lan` (secours), desinstalle Docker
 3. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
 4. `incus/network-teardown.sh` — supprime le profil `fake-pi` et le
@@ -447,8 +538,9 @@ indefinis), `bash -n` sur tous les scripts, validation YAML des
 `docker-compose.yml`/`services.yaml`, `pytest tests` (rendu du Caddyfile :
 modes TLS, basic auth, echec ferme ; `dockhand_stack.py` contre un faux Dockhand local) et `tests/test_deploy_libs.sh` (test de
 fumee des modules `server/lib/*.sh` avec de faux `docker`/`ip`, sans Docker
-ni Incus reels). Tout se lance aussi en local :
-`pytest tests && bash tests/test_deploy_libs.sh`.
+ni Incus reels) et `tests/test_machine_setup.sh` (script d'image
+`image/machine-setup.sh` sur un faux systeme de fichiers). Tout se lance aussi
+en local : `pytest tests && bash tests/test_deploy_libs.sh && bash tests/test_machine_setup.sh`.
 
 ## Structure
 
@@ -465,10 +557,15 @@ fleet/
   deploy-fleet.sh             # cree/provisionne les faux Pi manquants
   teardown-fleet.sh           # supprime les faux Pi de l'inventaire
   provision-fakepi.sh         # script de premier boot execute dans chaque conteneur
+  apply-machine-setup.sh      # remet a niveau des faux Pi existants (cle, sudo, proxy apt, NTP)
+  offline-rehearsal.sh        # repetition du remplacement d'une machine SANS internet (voir plus haut)
+image/
+  machine-setup.sh            # preparation de l'image type (cle d'automatisation, sudo, proxy apt, NTP)
 server/
   deploy-server.sh             # orchestration : installe Docker, demarre Dockhand, cree/redeploie les stacks via son API
   lib/                           # une fonction par responsabilite, sources par deploy-server.sh :
-                                 #   preflight, tls, secrets (+ basic auth), ansible-web, dashboard, dnsmasq, stacks, summary
+                                 #   preflight, tls, secrets (+ basic auth), automation-key, ansible-web, apt-cache, ntp, dashboard, dnsmasq, stacks, summary
+  apt-cache-mode.sh             # bascule le cache apt en ligne / hors ligne
   teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), reactive le DHCP integre d'Incus, desinstalle Docker
   docker-compose.yml            # bootstrap UNIQUEMENT : Dockhand (ne peut pas se creer via sa propre API)
   dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack (appelle dockhand_stack.py)
@@ -485,6 +582,7 @@ server/
     dashboard/{docker-compose.yml, config/}   # Homepage, liens vers les services web du lab
     vpn-admin/docker-compose.yml                                      # build context = ../../vpn-admin
     git-mirror/{docker-compose.yml, data/}                            # data/ non versionne (clones bare + mirrors.yaml)
+    apt-cache/{docker-compose.yml, Dockerfile, entrypoint.sh, apt-cache.env, data/}  # apt-cacher-ng ; apt-cache.env et data/ non versionnes
     ansible-web/{docker-compose.yml, ansible-web.env, automation_key/, config.yaml, repo/, runs/}  # tout sauf docker-compose.yml non versionne ; execute bastion-ansible (depot separe, clone depuis git-mirror)
 webui/
   app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh

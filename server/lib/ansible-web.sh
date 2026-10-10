@@ -1,6 +1,6 @@
 # Fichiers de la stack ansible-web (cle SSH, config, env) - source par
 # deploy-server.sh. Necessite BASTION_API_TOKEN et LAB_FAKEPI_PASSWORD
-# (secrets.sh).
+# (secrets.sh) et ensure_automation_key (automation-key.sh).
 
 setup_ansible_web() {
     local dir="$SCRIPT_DIR/stacks/ansible-web"
@@ -8,11 +8,10 @@ setup_ansible_web() {
 
     # Cle SSH dediee automatisation - montee directement dans le conteneur
     # (voir son docker-compose.yml et ANSIBLE_PRIVATE_KEY_FILE ci-dessous),
-    # jamais dans le contenu clone depuis git-mirror.
-    if [ ! -f "$dir/automation_key/automation_ed25519" ]; then
-        echo "[+] Generation de la cle SSH dediee automatisation du lab (distincte de toute cle de vraie prod)..."
-        ssh-keygen -t ed25519 -N "" -C "expolab-ansible-web" -f "$dir/automation_key/automation_ed25519" -q
-    fi
+    # jamais dans le contenu clone depuis git-mirror. Generee en general
+    # AVANT, par fleet/deploy-fleet.sh (qui en injecte la partie publique
+    # dans les faux Pi) - ici seulement si la flotte n'a pas ete deployee.
+    ensure_automation_key "$REPO_ROOT"
 
     # Bind-mount d'un FICHIER (config.yaml) : doit exister avant le
     # demarrage du conteneur, sinon Docker cree un dossier a la place.

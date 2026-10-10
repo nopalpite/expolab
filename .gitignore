@@ -78,3 +78,8 @@ server/stacks/dashboard/config/services.yaml
 # Bytecode Python (genere localement par un simple `python -m py_compile`
 # de verification syntaxique, jamais volontairement).
 __pycache__/
+
+# Cache apt (paquets telecharges) + mode en ligne/hors ligne - etat runtime
+# propre a chaque lab, jamais commite.
+server/stacks/apt-cache/data/
+server/stacks/apt-cache/apt-cache.env

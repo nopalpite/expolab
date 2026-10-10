@@ -15,18 +15,18 @@
     <main>
         <section class="panel">
             <h2>Reservation DHCP</h2>
-            <p class="subtitle">Fixe l'IP attribuee a une adresse MAC (survit aux renouvellements de bail).</p>
+            <p class="subtitle">Fixe l'IP attribuee a une adresse MAC <strong>ou a un nom</strong>. Sans MAC, la reservation suit le hostname : une carte de remplacement qui s'annonce sous ce nom reprend l'IP (pensez a "Liberer" le bail de la machine morte).</p>
             <form id="reservation-form">
                 <div class="field">
-                    <label for="r-mac">Adresse MAC</label>
-                    <input type="text" id="r-mac" name="mac" placeholder="dc:a6:32:00:00:10" required>
+                    <label for="r-mac">Adresse MAC (optionnelle si hostname)</label>
+                    <input type="text" id="r-mac" name="mac" placeholder="dc:a6:32:00:00:10">
                 </div>
                 <div class="field">
                     <label for="r-ip">IP</label>
                     <input type="text" id="r-ip" name="ip" placeholder="10.42.0.50" required>
                 </div>
                 <div class="field">
-                    <label for="r-hostname">Hostname (optionnel)</label>
+                    <label for="r-hostname">Hostname (obligatoire sans MAC)</label>
                     <input type="text" id="r-hostname" name="hostname" placeholder="mon-appareil">
                 </div>
                 <button type="submit" id="reservation-btn">Reserver</button>

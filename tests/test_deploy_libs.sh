@@ -26,6 +26,13 @@ printf '#!/usr/bin/env bash\necho "1.1.1.1 via 192.168.1.1 dev eth0 src 192.168.
 if ! python3 -c 'pass' 2>/dev/null; then
     printf '#!/usr/bin/env bash\nexec python "$@"\n' > "$WORK/bin/python3"
 fi
+# chronyd/systemctl factices : setup_ntp ne doit rien installer ni redemarrer ici
+printf '#!/usr/bin/env bash
+exit 0
+' > "$WORK/bin/chronyd"
+printf '#!/usr/bin/env bash
+exit 0
+' > "$WORK/bin/systemctl"
 chmod +x "$WORK/bin/"*
 export PATH="$WORK/bin:$PATH"
 
@@ -34,7 +41,8 @@ REPO_ROOT="$WORK"
 SERVICES="$SCRIPT_DIR/services.yaml"
 export REPO_ROOT SCRIPT_DIR SERVICES
 
-for lib in tls secrets ansible-web dashboard dnsmasq stacks summary; do
+export CHRONY_CONF_DIR="$WORK/chrony"
+for lib in tls secrets automation-key ansible-web apt-cache ntp dashboard dnsmasq stacks summary; do
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/lib/$lib.sh"
 done
@@ -76,6 +84,17 @@ contains "$SCRIPT_DIR/stacks/ansible-web/ansible-web.env" "ANSIBLE_REMOTE_USER=p
 contains "$SCRIPT_DIR/stacks/ansible-web/ansible-web.env" "ansible_ssh_pass=raspberry"
 [ -f "$SCRIPT_DIR/stacks/ansible-web/automation_key/automation_ed25519" ] || fail "cle SSH non generee"
 
+setup_ntp
+contains "$CHRONY_CONF_DIR/expolab.conf" "allow 10.42.0.0/24"
+contains "$CHRONY_CONF_DIR/expolab.conf" "local stratum 10"
+setup_ntp  # idempotent : un second passage ne reecrit rien
+
+setup_apt_cache
+contains "$SCRIPT_DIR/stacks/apt-cache/apt-cache.env" "APT_CACHE_OFFLINE=0"
+echo "APT_CACHE_OFFLINE=1" > "$SCRIPT_DIR/stacks/apt-cache/apt-cache.env"
+setup_apt_cache  # ne doit jamais ecraser un mode deja choisi
+contains "$SCRIPT_DIR/stacks/apt-cache/apt-cache.env" "APT_CACHE_OFFLINE=1"
+
 setup_dashboard
 contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "HOMEPAGE_ALLOWED_HOSTS=dashboard.web.expolab.lan,localhost:3001"
 contains "$SCRIPT_DIR/stacks/dashboard/config/services.yaml" "https://ansible-web.web.expolab.lan"
@@ -97,6 +116,7 @@ dockhand_upsert_stack() { DEPLOYED="$DEPLOYED $1"; }
 DEPLOYED="" && deploy_stacks > /dev/null
 case "$DEPLOYED" in *" vpn-admin"*) fail "vpn-admin deploye alors que le VPN n'est pas installe" ;; esac
 case "$DEPLOYED" in *" ansible-web"*) ;; *) fail "ansible-web absent des stacks deployees" ;; esac
+case "$DEPLOYED" in *" apt-cache"*) ;; *) fail "apt-cache absent des stacks deployees" ;; esac
 mkdir -p "$WORK/vpn/wireguard/config" && touch "$WORK/vpn/wireguard/config/wg0.conf"
 DEPLOYED="" && deploy_stacks > /dev/null
 case "$DEPLOYED" in *" vpn-admin"*) ;; *) fail "vpn-admin non redeploye alors que le VPN est installe" ;; esac

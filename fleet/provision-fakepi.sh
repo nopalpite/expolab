@@ -11,6 +11,15 @@ FAKEPI_USER="${3:-pi}"
 FAKEPI_PASSWORD="${4:-raspberry}"
 
 export DEBIAN_FRONTEND=noninteractive
+
+# Proxy apt vers le cache du serveur (repli en connexion directe s'il ne
+# repond pas encore) et serveur de temps - AVANT le premier apt-get, pour
+# que ce provisioning lui-meme passe par le cache et l'amorce. Voir
+# image/machine-setup.sh, pousse par deploy-fleet.sh.
+if [ -x /root/machine-setup.sh ]; then
+    /root/machine-setup.sh --stage network
+fi
+
 apt-get update -qq
 apt-get install -y -qq openssh-server sudo avahi-daemon python3 >/dev/null
 # python3 : deja present sur un vrai Raspberry Pi OS (realisme du lab),
@@ -36,6 +45,12 @@ echo "$FAKEPI_USER:$FAKEPI_PASSWORD" | chpasswd
 # historique des vrais Raspberry Pi (realisme du lab) - configurables par
 # entree dans fleet/inventory.yaml (ou via la webui). A changer avant toute
 # exposition au-dela du reseau isole du lab.
+
+# Cle d'automatisation + sudo sans mot de passe (comme l'image de la vraie
+# vie). Le mot de passe reste actif : Bastion s'en sert pour l'acces humain.
+if [ -x /root/machine-setup.sh ] && [ -f /root/automation.pub ]; then
+    /root/machine-setup.sh --stage access --user "$FAKEPI_USER" --pubkey-file /root/automation.pub
+fi
 
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
