@@ -1,6 +1,14 @@
 # Message de fin de deploiement - source par deploy-server.sh. Necessite
 # PUBLIC_DOMAIN/TLS_MODE (tls.sh) et les secrets de secrets.sh.
 
+# Un bastion.env anterieur a l'identifiant unique garde son ancien mot de passe
+# genere : on le rappelle plutot que de le laisser introuvable.
+legacy_bastion_note() {
+    if [ "$BASTION_ADMIN_USER" != "$ADMIN_USER" ] || [ "$BASTION_ADMIN_PASSWORD" != "$ADMIN_PASSWORD" ]; then
+        printf '    Bastion (identifiants anterieurs, inchanges) : %s / %s\n' "$BASTION_ADMIN_USER" "$BASTION_ADMIN_PASSWORD"
+    fi
+}
+
 print_summary() {
     local lan_ip mirror
     lan_ip="$(ip route get 1.1.1.1 2>/dev/null | awk '/src/{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}')"
@@ -16,14 +24,11 @@ print_summary() {
     Reverse proxy : https://<service>.$PUBLIC_DOMAIN (TLS_MODE=$TLS_MODE)
                     services definis dans server/services.yaml
 
-Identifiants (generes une seule fois, conserves dans des fichiers non
-versionnes - a noter) :
-    UIs d'administration (dockhand, fleet, dnsmasq, caddy, vpn, git-mirror,
-    ansible-web) : $BASIC_AUTH_USER / $BASIC_AUTH_PASSWORD
-        (basic auth Caddy - server/stacks/caddy/auth.env)
-    Bastion : admin / $BASTION_ADMIN_PASSWORD
-        (server/stacks/bastion/bastion.env)
-
+Identifiants d'administration (ceux que tu as choisis a l'installation, les
+memes partout, conserves dans server/stacks/caddy/auth.env) : $ADMIN_USER
+    Dockhand, UIs d'administration (flotte, dnsmasq, caddy, vpn, git-mirror,
+    ansible-web) derriere le basic auth Caddy, Bastion.
+$(legacy_bastion_note)
 Certificat TLS (actuellement $TLS_MODE) : modifiable a tout moment sur
     https://caddy.$PUBLIC_DOMAIN, section "Certificat TLS".
 

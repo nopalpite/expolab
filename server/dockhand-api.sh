@@ -50,9 +50,7 @@ dockhand_wait_healthy() {
     return 1
 }
 
-# Echoue (silencieusement) si aucun environnement n'est configure -
-# l'appelant doit alors guider l'utilisateur vers l'etape manuelle
-# (aucun endpoint API ne permet de creer un environnement, voir le plan).
+# Echoue (silencieusement) si aucun environnement n'est configure.
 dockhand_get_env_id() {
     dockhand_curl "$DOCKHAND_URL/api/environments" | python3 -c '
 import json, sys
@@ -65,13 +63,14 @@ print(envs[0]["id"])
 '
 }
 
-# Bloque jusqu'a ce qu'un environnement Dockhand soit configure, plutot
-# que d'echouer immediatement - aucun endpoint API ne permet de creer un
-# environnement a la place de l'utilisateur (etape UI unique), mais rien
-# n'empeche d'attendre que ce soit fait au lieu de le forcer a relancer
-# le script lui-meme une fois le clic effectue dans le navigateur.
+# Garantit un environnement Dockhand : le cree lui-meme (socket Docker local)
+# par l'API - dockhand_setup.py ensure-env. Si la creation echoue (version de
+# Dockhand differente...), retombe sur l'etape manuelle dans l'UI et attend.
 dockhand_require_env() {
     if dockhand_get_env_id >/dev/null 2>&1; then
+        return 0
+    fi
+    if python3 "$DOCKHAND_SCRIPT_DIR/dockhand_setup.py" ensure-env; then
         return 0
     fi
     # $DOCKHAND_URL vise 127.0.0.1 (correct pour nos propres appels curl,
@@ -84,8 +83,8 @@ dockhand_require_env() {
     display_url="http://${lan_ip:-<ip-du-pi>}:3000"
     cat >&2 <<EOF
 
-[!] Aucun environnement Dockhand configure - etape manuelle unique requise
-    (aucun endpoint API ne permet de la faire a notre place) :
+[!] Creation automatique de l'environnement Dockhand impossible - etape
+    manuelle :
 
     1. Ouvrir $display_url dans un navigateur
     2. Settings > Environments > confirmer/ajouter l'environnement local
@@ -99,6 +98,14 @@ EOF
     done
     echo >&2
     echo "[+] Environnement Dockhand detecte, on poursuit." >&2
+}
+
+# Active l'authentification de Dockhand avec les identifiants d'administration
+# (ADMIN_USER / ADMIN_PASSWORD, voir lib/credentials.sh) et depose un jeton
+# d'API dans server/dockhand.env pour les scripts. Idempotent.
+dockhand_ensure_auth() {
+    : "${ADMIN_USER:?ADMIN_USER doit etre defini (setup_admin_credentials)}"
+    DOCKHAND_SETUP_PASSWORD="$ADMIN_PASSWORD" python3 "$DOCKHAND_SCRIPT_DIR/dockhand_setup.py" ensure-auth --user "$ADMIN_USER"
 }
 
 # dockhand_upsert_stack <nom> <fichier_docker-compose.yml>

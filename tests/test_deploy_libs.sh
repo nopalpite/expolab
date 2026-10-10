@@ -42,7 +42,7 @@ SERVICES="$SCRIPT_DIR/services.yaml"
 export REPO_ROOT SCRIPT_DIR SERVICES
 
 export CHRONY_CONF_DIR="$WORK/chrony"
-for lib in tls secrets automation-key ansible-web apt-cache ntp lan-isolation dashboard dnsmasq stacks summary; do
+for lib in tls secrets credentials automation-key ansible-web apt-cache ntp lan-isolation dashboard dnsmasq stacks summary; do
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/lib/$lib.sh"
 done
@@ -55,13 +55,34 @@ setup_tls < /dev/null
 [ "$TLS_MODE" = "internal" ] || fail "TLS_MODE attendu internal, obtenu $TLS_MODE"
 [ "$PUBLIC_DOMAIN" = "web.expolab.lan" ] || fail "PUBLIC_DOMAIN inattendu : $PUBLIC_DOMAIN"
 
+# --- identifiants d'administration : un seul couple, choisi par l'utilisateur ---
+# Sans terminal ni variables : refus net (pas de mot de passe que personne n'a choisi).
+( setup_admin_credentials < /dev/null ) > /dev/null 2>&1 && fail "identifiants absents : le script aurait du s'arreter"
+# Variables invalides : refusees.
+( EXPOLAB_ADMIN_USER=ab EXPOLAB_ADMIN_PASSWORD=Mot-de-passe-1 setup_admin_credentials ) > /dev/null 2>&1 && fail "identifiant trop court accepte"
+( EXPOLAB_ADMIN_USER=admin EXPOLAB_ADMIN_PASSWORD=court setup_admin_credentials ) > /dev/null 2>&1 && fail "mot de passe trop court accepte"
+( EXPOLAB_ADMIN_USER=admin EXPOLAB_ADMIN_PASSWORD="avec'apostrophe" setup_admin_credentials ) > /dev/null 2>&1 && fail "apostrophe acceptee"
+# Valides, avec des caracteres que Docker Compose interpreterait dans un env_file.
+export EXPOLAB_ADMIN_USER=gestion.expo
+export EXPOLAB_ADMIN_PASSWORD='Mdp $HOME #1 "ok" \x'
+setup_admin_credentials > /dev/null
+[ "$ADMIN_USER" = "gestion.expo" ] || fail "ADMIN_USER inattendu : $ADMIN_USER"
+[ "$ADMIN_PASSWORD" = "$EXPOLAB_ADMIN_PASSWORD" ] || fail "ADMIN_PASSWORD altere"
+
 setup_bastion_secrets
 setup_caddy_basic_auth
 contains "$SCRIPT_DIR/stacks/bastion/bastion.env" "BASTION_API_TOKEN="
-contains "$SCRIPT_DIR/stacks/bastion/bastion.env" "BASTION_ADMIN_PASSWORD="
+contains "$SCRIPT_DIR/stacks/bastion/bastion.env" "BASTION_ADMIN_USER=gestion.expo"
+# Mot de passe a caracteres speciaux : entre apostrophes dans le fichier, intact une fois relu.
+contains "$SCRIPT_DIR/stacks/bastion/bastion.env" "BASTION_ADMIN_PASSWORD='Mdp"
+[ "$BASTION_ADMIN_USER" = "gestion.expo" ] || fail "identifiant Bastion inattendu : $BASTION_ADMIN_USER"
+[ "$BASTION_ADMIN_PASSWORD" = "$ADMIN_PASSWORD" ] || fail "mot de passe Bastion different du mot de passe choisi"
 contains "$SCRIPT_DIR/stacks/caddy/auth.env" 'BASIC_AUTH_HASH=$2a$14$FAKEHASH'
-[ -n "$BASTION_ADMIN_PASSWORD" ] || fail "mot de passe Bastion vide"
-[ "$BASTION_ADMIN_PASSWORD" != "raspberry" ] || fail "mot de passe Bastion non genere"
+contains "$SCRIPT_DIR/stacks/caddy/auth.env" "BASIC_AUTH_USER=gestion.expo"
+[ "$BASIC_AUTH_USER" = "$ADMIN_USER" ] && [ "$BASIC_AUTH_PASSWORD" = "$ADMIN_PASSWORD" ] || fail "basic auth different des identifiants choisis"
+
+# Une installation existante garde ses identifiants : variables ignorees, rien de redemande.
+( unset ADMIN_USER ADMIN_PASSWORD; EXPOLAB_ADMIN_USER=autre EXPOLAB_ADMIN_PASSWORD=Autre-mdp-123 setup_admin_credentials < /dev/null > /dev/null && [ "$ADMIN_USER" = "gestion.expo" ] ) || fail "les identifiants existants n'ont pas ete repris"
 
 # Idempotence : un second passage ne regenere rien.
 before="$(cat "$SCRIPT_DIR/stacks/caddy/auth.env" "$SCRIPT_DIR/stacks/bastion/bastion.env")"
@@ -119,7 +140,9 @@ setup_dashboard
 contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "HOMEPAGE_ALLOWED_HOSTS=dashboard.web.expolab.lan,localhost:3001"
 contains "$SCRIPT_DIR/stacks/dashboard/config/services.yaml" "https://ansible-web.web.expolab.lan"
 
-print_summary | grep -qF "$BASIC_AUTH_PASSWORD" || fail "le resume n'affiche pas le mot de passe basic auth"
+summary="$(print_summary)"
+echo "$summary" | grep -qF "gestion.expo" || fail "le resume n'affiche pas l'identifiant"
+! echo "$summary" | grep -qF "$ADMIN_PASSWORD" || fail "le resume affiche le mot de passe choisi"
 
 # Mode signed : domaine public propage partout.
 TLS_MODE=signed TLS_SIGNED_DOMAIN=expolab.example.fr PUBLIC_DOMAIN=expolab.example.fr

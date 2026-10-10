@@ -71,10 +71,11 @@ chaque service comme **stack Dockhand independante** via son API REST
 - **webui** expolab (creation/suppression de faux Pi), publication de port
 - **Bastion** (https://github.com/nopalpite/bastion, dashboard +
   SSH/VNC web) en `network_mode: host` - image prete a l'emploi publiee
-  sur GHCR (`ghcr.io/nopalpite/bastion`), utilisateur `admin` et mot de
-  passe **genere** (affiche a la fin de `deploy-server.sh`, conserve dans
-  `bastion.env`). Secrets (cle de session, cle de chiffrement des
-  identifiants memorises, mot de passe admin) generes une seule fois au premier
+  sur GHCR (`ghcr.io/nopalpite/bastion`), avec les **identifiants
+  d'administration choisis a l'installation** (les memes que partout, voir
+  "Identifiants d'administration" plus bas, conserves dans `bastion.env`).
+  Secrets (cle de session, cle de chiffrement des
+  identifiants memorises) generes une seule fois au premier
   `deploy-server.sh` dans `server/stacks/bastion/bastion.env` (non
   versionne) ; inventaire de machines et donnees persistees dans
   `server/stacks/bastion/{config,maps}/` (egalement non versionne, propre
@@ -198,13 +199,15 @@ depot git - chaque `docker-compose.yml` de stack utilise donc des chemins
 avant l'envoi, pour que nos fichiers de config restent les notres
 (versionnes/regenerables) plutot qu'une copie geree par Dockhand.
 
-**Etape manuelle unique** au tout premier `deploy-server.sh` : Dockhand ne
-propose aucun endpoint API pour creer un environnement (connexion au
-Docker local) - si aucun environnement n'est configure, le script
-affiche des instructions et **patiente** (verifie toutes les 5s) plutot
-que d'echouer ; ouvrir `http://<ip>:3000`, confirmer l'environnement
-local (Unix socket) dans *Settings > Environments*, et le script reprend
-tout seul, rien a relancer.
+**Configuration de Dockhand entierement automatique** (`server/dockhand_setup.py`,
+via son API REST - plus rien a faire dans son interface) : au premier
+`deploy-server.sh`, le script cree l'environnement local (socket Docker),
+cree le premier utilisateur avec les identifiants d'administration, active
+l'authentification de Dockhand et depose un jeton d'API dans
+`server/dockhand.env` (non versionne) pour les scripts et caddy-admin.
+Idempotent : un jeton valide => rien n'est refait. Si la creation de
+l'environnement echouait (version de Dockhand differente), le script
+retombe sur l'ancienne etape manuelle et patiente.
 
 Le reverse-proxy n'expose PAS les faux Pi (ils n'ont pas vocation a etre
 joignables en HTTPS individuellement) : il sert a exposer les services
@@ -306,10 +309,10 @@ Point d'entree unique - installe tout dans l'ordre :
 
 ```bash
 sudo ./install.sh
-# S'arrete (attend, en fait) la 1ere fois a l'etape Dockhand avec des
-# instructions : ouvrir Dockhand (http://<ip>:3000), confirmer
-# l'environnement local dans Settings > Environments - le script patiente
-# et reprend tout seul des que c'est fait, rien a relancer.
+# Demande, a la premiere installation, l'identifiant et le mot de passe
+# d'administration (UN couple pour toutes les interfaces, voir plus bas) ;
+# Dockhand est ensuite configure tout seul. Sans terminal : definir
+# EXPOLAB_ADMIN_USER et EXPOLAB_ADMIN_PASSWORD (8 caracteres minimum).
 ```
 
 Pas de `chmod +x` a faire a la main : les scripts sont versionnes
@@ -329,9 +332,8 @@ sudo ./incus/network-setup.sh
 ./fleet/deploy-fleet.sh
 
 sudo ./server/deploy-server.sh
-# Patiente la 1ere fois avec des instructions : ouvrir Dockhand
-# (http://<ip>:3000), confirmer l'environnement local dans Settings >
-# Environments - reprend tout seul des que c'est fait.
+# 1ere fois : demande les identifiants d'administration, puis configure
+# Dockhand (environnement, utilisateur, authentification) par son API.
 
 sudo ./vpn/install.sh
 # Cree aussi un pair "default" pret a distribuer (vpn/wireguard/config/peers/default.conf)
@@ -347,11 +349,24 @@ via l'API Dockhand, sans repeter la bascule DHCP.
 
 ## Securite des UIs d'administration
 
+- **Identifiants d'administration : un seul couple, choisi par toi.** A la
+  premiere installation, `deploy-server.sh` demande un identifiant et un
+  mot de passe (saisie masquee, confirmation, 8 caracteres minimum), puis
+  les applique **partout** : Dockhand (utilisateur admin + authentification
+  activee), Bastion (`BASTION_ADMIN_USER`/`BASTION_ADMIN_PASSWORD` dans
+  `bastion.env`) et le basic auth Caddy des UIs d'administration. Ils sont
+  conserves dans `server/stacks/caddy/auth.env` (non versionne) et jamais
+  redemandes ni affiches : une installation existante garde les siens.
+  Installation sans terminal : `EXPOLAB_ADMIN_USER` / `EXPOLAB_ADMIN_PASSWORD`
+  (sinon le script s'arrete plutot que de laisser un mot de passe que personne
+  n'a choisi). Un `bastion.env` anterieur garde son ancien mot de passe genere
+  (rappele a la fin du script) : pour tout unifier sur une installation
+  existante, supprimer `auth.env` et `bastion.env`, ou reinstaller.
 - **Basic auth Caddy** devant les vhosts marques `auth: true` dans
   `server/services.yaml` (dockhand, fleet, dnsmasq, caddy, vpn, git-mirror,
-  ansible-web). Identifiants generes une seule fois par `deploy-server.sh`
+  ansible-web). Identifiants = ceux choisis a l'installation
   (`server/stacks/caddy/auth.env`, non versionne, hash bcrypt calcule avec
-  le binaire `caddy`) et affiches a la fin du script. Pas de basic auth sur
+  le binaire `caddy`). Pas de basic auth sur
   `dashboard` (liens uniquement) ni `bastion` (a sa propre authentification) ;
   le chemin `/git/*` de git-mirror est exempte (`auth_except`) car utilise
   par des clients git. `render-caddyfile.py` refuse de generer un Caddyfile
@@ -362,10 +377,9 @@ via l'API Dockhand, sans repeter la bascule DHCP.
   leur serveur Flask ecoute sur `127.0.0.1` (caddy-admin, vpn-admin,
   ansible-web) - sans ca, le basic auth serait contournable en visant
   directement `<ip-du-pi>:<port>` depuis le LAN. **Exceptions assumees** :
-  Dockhand (`:3000`, indispensable pour la configuration initiale de
-  l'environnement avant que Caddy existe - activer son authentification
-  integree si le LAN n'est pas de confiance) et Bastion (`:5000`, protege
-  par son propre mot de passe).
+  Dockhand (`:3000`, joignable avant que Caddy existe) et Bastion (`:5000`),
+  tous deux proteges par leur propre authentification, avec les memes
+  identifiants d'administration.
 - Les mots de passe par defaut des **faux Pi** (`pi`/`raspberry`,
   `fleet/provision-fakepi.sh`) restent une constante de lab connue,
   reutilisee par ansible-web (`LAB_FAKEPI_PASSWORD` dans
@@ -385,10 +399,10 @@ ssh pi@<ip-de-pi-01>             # mot de passe: raspberry (a changer si besoin)
 # importer le CA interne de Caddy) :
 curl -k https://dashboard.web.expolab.lan  # point d'entree, liens vers tout le reste
 # Les UIs d'administration ci-dessous demandent le basic auth Caddy
-# (curl -k -u admin:<mot de passe de server/stacks/caddy/auth.env>) :
+# (curl -k -u <identifiant>:<mot de passe choisi a l'installation>) :
 curl -k https://fleet.web.expolab.lan      # webui flotte
 curl -k https://dockhand.web.expolab.lan   # Dockhand
-curl -k https://bastion.web.expolab.lan    # Bastion (admin + mot de passe genere, voir bastion.env)
+curl -k https://bastion.web.expolab.lan    # Bastion (memes identifiants)
 curl -k https://dnsmasq.web.expolab.lan    # baux DHCP actifs
 curl -k https://caddy.web.expolab.lan      # ajouter/retirer un service expose
 curl -k https://vpn.web.expolab.lan        # pairs WireGuard (QR code, trafic)
@@ -614,12 +628,13 @@ image/
 server/
   deploy-server.sh             # orchestration : installe Docker, demarre Dockhand, cree/redeploie les stacks via son API
   lib/                           # une fonction par responsabilite, sources par deploy-server.sh :
-                                 #   preflight, tls, secrets (+ basic auth), automation-key, ansible-web, apt-cache, ntp, dashboard, dnsmasq, stacks, summary
+                                 #   preflight, tls, secrets (+ basic auth), credentials, automation-key, ansible-web, apt-cache, ntp, dashboard, dnsmasq, stacks, summary
   apt-cache-mode.sh             # bascule le cache apt en ligne / hors ligne
   teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), reactive le DHCP integre d'Incus, desinstalle Docker
   docker-compose.yml            # bootstrap UNIQUEMENT : Dockhand (ne peut pas se creer via sa propre API)
   dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack (appelle dockhand_stack.py)
   dockhand_stack.py              # implementation unique de "supprimer + recreer une stack Dockhand" (bash ET caddy-admin)
+  dockhand_setup.py              # configuration initiale de Dockhand par son API : environnement local, utilisateur admin, authentification, jeton
   services.yaml                  # services applicatifs exposes au reverse-proxy (dashboard, dockhand, fleet, bastion, dnsmasq/caddy/vpn-admin, git-mirror)
   render-caddyfile.py             # genere le Caddyfile a partir de server/services.yaml
   stacks/

@@ -39,4 +39,5 @@ bootstrap_dockhand() {
 
     dockhand_wait_healthy
     dockhand_require_env
+    dockhand_ensure_auth
 }

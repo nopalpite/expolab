@@ -1,7 +1,9 @@
 # Secrets generes une seule fois (jamais commites, voir .gitignore) -
 # source par deploy-server.sh. Positionne BASTION_API_TOKEN,
-# BASTION_ADMIN_PASSWORD, BASIC_AUTH_USER et BASIC_AUTH_PASSWORD (lus plus
-# loin par ansible-web.sh/summary.sh).
+# BASTION_ADMIN_USER, BASTION_ADMIN_PASSWORD, BASIC_AUTH_USER et
+# BASIC_AUTH_PASSWORD (lus plus loin par ansible-web.sh/summary.sh).
+# Les identifiants d'administration (Bastion, basic auth) sont ceux choisis
+# par l'utilisateur : voir credentials.sh (setup_admin_credentials d'abord).
 
 # Mot de passe "pi" par defaut des faux Pi (fleet/provision-fakepi.sh) :
 # valeur de lab connue, pas un secret - utilisee comme filet de secours
@@ -12,6 +14,27 @@ LAB_FAKEPI_PASSWORD="${LAB_FAKEPI_PASSWORD:-raspberry}"
 # les hash bcrypt contiennent des "$" que le shell interpreterait).
 _env_value() {
     grep "^$2=" "$1" 2>/dev/null | head -1 | cut -d= -f2-
+}
+
+# _env_quote <valeur> : valeur telle quelle si elle est "sure", entre
+# apostrophes sinon (Docker Compose interpole $ et traite # dans un env_file
+# non quote ; entre apostrophes le contenu est litteral).
+_env_quote() {
+    if [[ "$1" =~ ^[A-Za-z0-9_@%+=:,./-]*$ ]]; then
+        printf '%s' "$1"
+    else
+        printf "'%s'" "$1"
+    fi
+}
+
+# _env_unquote <valeur lue dans un env_file> : retire les apostrophes englobantes.
+_env_unquote() {
+    local v="$1" q="'"
+    if [[ "$v" == "$q"*"$q" ]]; then
+        v="${v#"$q"}"
+        v="${v%"$q"}"
+    fi
+    printf '%s' "$v"
 }
 
 setup_bastion_secrets() {
@@ -39,14 +62,20 @@ EOT
     fi
     BASTION_API_TOKEN="$(_env_value "$env_file" BASTION_API_TOKEN)"
 
-    # Mot de passe admin de Bastion (acces SSH/VNC a tout le parc) : genere
-    # plutot que "raspberry" en dur dans le depot public. Meme logique que
-    # ci-dessus pour un bastion.env anterieur a ce changement.
+    # Identifiants admin de Bastion (acces SSH/VNC a tout le parc) : ceux
+    # choisis par l'utilisateur (credentials.sh), jamais un mot de passe en dur
+    # dans le depot public. Un bastion.env anterieur garde son mot de passe
+    # genere ; son identifiant, auparavant fixe dans le compose, y est ajoute.
     if ! grep -q '^BASTION_ADMIN_PASSWORD=' "$env_file"; then
-        echo "[+] Generation du mot de passe admin Bastion (affiche a la fin du script)..."
-        echo "BASTION_ADMIN_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')" >> "$env_file"
+        echo "[+] Identifiants admin de Bastion (ceux choisis a l'installation)..."
+        printf 'BASTION_ADMIN_USER=%s
+BASTION_ADMIN_PASSWORD=%s
+'             "$(_env_quote "$ADMIN_USER")" "$(_env_quote "$ADMIN_PASSWORD")" >> "$env_file"
+    elif ! grep -q '^BASTION_ADMIN_USER=' "$env_file"; then
+        echo "BASTION_ADMIN_USER=admin" >> "$env_file"
     fi
-    BASTION_ADMIN_PASSWORD="$(_env_value "$env_file" BASTION_ADMIN_PASSWORD)"
+    BASTION_ADMIN_USER="$(_env_unquote "$(_env_value "$env_file" BASTION_ADMIN_USER)")"
+    BASTION_ADMIN_PASSWORD="$(_env_unquote "$(_env_value "$env_file" BASTION_ADMIN_PASSWORD)")"
 }
 
 # Identifiants du basic_auth Caddy devant les UIs d'administration
@@ -59,13 +88,12 @@ setup_caddy_basic_auth() {
     mkdir -p "$SCRIPT_DIR/stacks/caddy"
 
     if [ ! -f "$auth_env" ]; then
-        echo "[+] Generation des identifiants basic auth des UIs d'administration (server/stacks/caddy/auth.env)..."
-        local password hash
-        password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')"
-        hash="$(docker run --rm caddy:2 caddy hash-password --plaintext "$password")"
+        echo "[+] Enregistrement des identifiants basic auth des UIs d'administration (server/stacks/caddy/auth.env)..."
+        local hash
+        hash="$(docker run --rm caddy:2 caddy hash-password --plaintext "$ADMIN_PASSWORD")"
         cat > "$auth_env" <<EOT
-BASIC_AUTH_USER=admin
-BASIC_AUTH_PASSWORD=$password
+BASIC_AUTH_USER=$ADMIN_USER
+BASIC_AUTH_PASSWORD=$ADMIN_PASSWORD
 BASIC_AUTH_HASH=$hash
 EOT
         chmod 600 "$auth_env"
