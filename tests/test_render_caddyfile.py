@@ -1,47 +1,48 @@
-"""Tests de server/render-caddyfile.py (modes TLS, basic_auth, echec ferme)."""
-import os
+"""Tests de server/render-caddyfile.py (modes TLS, forward_auth vers le portail,
+cadres autorises uniquement depuis le portail, echec ferme)."""
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "server" / "render-caddyfile.py"
-HASH = "$2a$14$FAKEHASHFORTESTSONLY"
+PORTAL = {"name": "dashboard", "backend_port": 3001}
 
 
-def render(tmp_path, services, *args, auth=True):
+def render(tmp_path, services, *args):
     services_file = tmp_path / "services.yaml"
-    services_file.write_text(yaml.safe_dump({"services": services}))
-    env = {k: v for k, v in os.environ.items() if not k.startswith("BASIC_AUTH")}
-    if auth:
-        env.update(BASIC_AUTH_USER="admin", BASIC_AUTH_HASH=HASH)
+    services_file.write_text(yaml.safe_dump({"services": services}, allow_unicode=True), encoding="utf-8")
     return subprocess.run(
         [sys.executable, str(SCRIPT), str(services_file), *args],
         capture_output=True,
         text=True,
-        env=env,
+        encoding="utf-8",
     )
 
 
+def vhost(output: str, name: str, domain: str = "web.expolab.lan") -> str:
+    start = output.index(f"{name}.{domain} {{")
+    return output[start : output.index("\n}\n", start)]
+
+
 def test_internal_mode_uses_tls_internal(tmp_path):
-    result = render(tmp_path, [{"name": "dashboard", "backend_port": 3001}])
+    result = render(tmp_path, [PORTAL])
     assert result.returncode == 0
     assert "dashboard.web.expolab.lan {" in result.stdout
     assert "tls internal" in result.stdout
-    assert "basic_auth" not in result.stdout
+    assert "forward_auth" not in result.stdout
 
 
 def test_signed_mode_requires_domain(tmp_path):
-    result = render(tmp_path, [{"name": "dashboard", "backend_port": 3001}], "signed")
+    result = render(tmp_path, [PORTAL], "signed")
     assert result.returncode == 1
     assert "signed" in result.stderr
 
 
 def test_signed_mode_references_ovh_env_and_domain(tmp_path):
-    result = render(tmp_path, [{"name": "dashboard", "backend_port": 3001}], "signed", "expolab.example.fr")
+    result = render(tmp_path, [PORTAL], "signed", "expolab.example.fr")
     assert result.returncode == 0
     assert "dashboard.expolab.example.fr {" in result.stdout
     assert "dns ovh {" in result.stdout
@@ -49,30 +50,64 @@ def test_signed_mode_references_ovh_env_and_domain(tmp_path):
     assert "{env.OVH_APPLICATION_SECRET}" in result.stdout
 
 
-def test_auth_true_emits_basic_auth(tmp_path):
-    result = render(tmp_path, [{"name": "caddy", "auth": True, "backend_port": 5052}])
+def test_auth_true_delegates_to_the_portal(tmp_path):
+    result = render(tmp_path, [PORTAL, {"name": "caddy", "auth": True, "backend_port": 5052}])
     assert result.returncode == 0
-    assert f"admin {HASH}" in result.stdout
+    block = vhost(result.stdout, "caddy")
+    assert "forward_auth localhost:3001 {" in block
+    assert "uri /auth/verify" in block
+    assert "basic_auth" not in result.stdout
+    # la verification passe AVANT le proxy
+    assert block.index("forward_auth") < block.index("reverse_proxy")
+
+
+def test_auth_uses_the_declared_portal_address(tmp_path):
+    portal = {"name": "dashboard", "backend_host": "10.0.0.5", "backend_port": 4000}
+    result = render(tmp_path, [portal, {"name": "caddy", "auth": True, "backend_port": 5052}])
+    assert "forward_auth 10.0.0.5:4000 {" in result.stdout
 
 
 def test_auth_except_excludes_paths(tmp_path):
     result = render(
         tmp_path,
-        [{"name": "git-mirror", "auth": True, "auth_except": ["/git/*"], "backend_port": 5054}],
+        [PORTAL, {"name": "git-mirror", "auth": True, "auth_except": ["/git/*"], "backend_port": 5054}],
     )
     assert result.returncode == 0
     assert "not path /git/*" in result.stdout
-    assert "basic_auth @protected" in result.stdout
+    assert "forward_auth @protected localhost:3001 {" in result.stdout
 
 
-def test_auth_without_credentials_fails_closed(tmp_path):
-    # Sans identifiants, un service `auth: true` ne doit JAMAIS finir ouvert.
-    # Le vrai auth.env (present sur un poste deja deploye) fausserait le test.
-    if (REPO / "server" / "stacks" / "caddy" / "auth.env").exists():
-        pytest.skip("auth.env local present")
-    result = render(tmp_path, [{"name": "caddy", "auth": True, "backend_port": 5052}], auth=False)
+def test_auth_without_portal_fails_closed(tmp_path):
+    # Sans portail pour verifier la session, un service `auth: true` ne doit JAMAIS finir ouvert.
+    result = render(tmp_path, [{"name": "caddy", "auth": True, "backend_port": 5052}])
     assert result.returncode == 1
     assert "refuse de generer" in result.stderr
+
+
+def test_framed_services_only_allow_the_portal_as_parent(tmp_path):
+    result = render(tmp_path, [PORTAL, {"name": "fleet", "auth": True, "backend_port": 5050}])
+    block = vhost(result.stdout, "fleet")
+    assert 'header +Content-Security-Policy "frame-ancestors https://dashboard.web.expolab.lan"' in block
+    # le service ne peut pas imposer son propre refus de cadre
+    assert "header_down -X-Frame-Options" in block
+    assert "frame-ancestors[^;]*" in block
+
+
+def test_frame_parent_follows_the_public_domain(tmp_path):
+    result = render(tmp_path, [PORTAL, {"name": "fleet", "backend_port": 5050}], "signed", "expolab.example.fr")
+    assert 'frame-ancestors https://dashboard.expolab.example.fr"' in result.stdout
+
+
+def test_portal_itself_is_never_framed_by_caddy_headers(tmp_path):
+    result = render(tmp_path, [PORTAL])
+    assert "header_down" not in result.stdout
+    assert "frame-ancestors" not in result.stdout  # le portail pose lui-meme frame-ancestors 'none'
+
+
+def test_framed_false_service_is_left_untouched(tmp_path):
+    result = render(tmp_path, [PORTAL, {"name": "git-mirror", "framed": False, "backend_port": 5054}])
+    block = vhost(result.stdout, "git-mirror")
+    assert "header_down" not in block and "frame-ancestors" not in block
 
 
 def test_extra_routes_come_before_catch_all(tmp_path):
@@ -86,10 +121,14 @@ def test_extra_routes_come_before_catch_all(tmp_path):
 
 def test_repo_services_yaml_renders_in_both_modes(tmp_path):
     services = REPO / "server" / "services.yaml"
-    env = {**os.environ, "BASIC_AUTH_USER": "admin", "BASIC_AUTH_HASH": HASH}
     for args in ([], ["signed", "expolab.example.fr"]):
         result = subprocess.run(
-            [sys.executable, str(SCRIPT), str(services), *args], capture_output=True, text=True, env=env
+            [sys.executable, str(SCRIPT), str(services), *args], capture_output=True, text=True, encoding="utf-8"
         )
         assert result.returncode == 0, result.stderr
         assert "ansible-web." in result.stdout
+        assert "basic_auth" not in result.stdout
+        data = yaml.safe_load(services.read_text(encoding="utf-8"))
+        protected = [s["name"] for s in data["services"] if s.get("auth")]
+        assert protected, "aucun service protege dans services.yaml ?"
+        assert result.stdout.count("forward_auth") == len(protected)

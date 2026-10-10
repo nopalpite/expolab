@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>expolab</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-has-ca="{{ 'true' if has_ca else 'false' }}" data-domain="{{ domain }}">
+<div class="app" id="app">
+  <header class="topbar">
+    <button id="drawer-toggle" class="icon-btn" type="button" aria-label="Afficher ou masquer le tiroir" aria-expanded="true"></button>
+    <strong class="brand">expolab</strong>
+    <nav id="tabs" class="tabs" role="tablist" aria-label="Services ouverts"></nav>
+    <button id="open-external" class="icon-btn" type="button" aria-label="Ouvrir le service dans une nouvelle fenêtre" title="Ouvrir à part" hidden></button>
+    <span class="user" title="Connecté">{{ user }}</span>
+    <form method="post" action="/logout" class="logout">
+      <button class="icon-btn" type="submit" aria-label="Se déconnecter" title="Se déconnecter" id="logout-btn"></button>
+    </form>
+  </header>
+  <div class="body">
+    <aside id="drawer" class="drawer" aria-label="Services"></aside>
+    <div class="scrim" id="scrim"></div>
+    <main id="stage" class="stage">
+      <section id="home" class="home" role="tabpanel"></section>
+    </main>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -63,7 +63,7 @@ chaque service comme **stack Dockhand independante** via son API REST
     `deploy-server.sh` (voir ci-dessus) ou plus tard dans caddy-admin, qui
     redeploie alors les stacks `caddy`/`dashboard` via l'API
     Dockhand apres sauvegarde (necessaire pour qu'elles relisent leurs
-    variables d'environnement - OVH_\* pour Caddy, HOMEPAGE_ALLOWED_HOSTS
+    variables d'environnement - OVH_\* pour Caddy, PORTAL_DOMAIN
     pour dashboard - un simple rechargement a chaud ne suffit jamais pour
     ca). `deploy-server.sh`
     relit ce meme fichier a chaque deploiement, donc un choix fait depuis
@@ -108,12 +108,26 @@ chaque service comme **stack Dockhand independante** via son API REST
   `git-mirror` (URL = le depot GitHub) s'il n'existe pas deja - aucun
   endpoint ne le fait de facon fiable a notre place, message d'erreur
   explicite dans l'UI ansible-web si absent.
-- **dashboard** (https://dashboard.web.expolab.lan, point d'entree du lab)
-  - [Homepage](https://gethomepage.dev), page de liens vers tous les
-  services ayant une interface web propre. Config statique versionnee
-  (`server/stacks/dashboard/config/services.yaml`), pas d'auto-decouverte
-  via le socket Docker : la liste est petite et connue a l'avance, pas
-  besoin d'un acces supplementaire au socket pour si peu
+- **dashboard** = le **portail** (https://dashboard.web.expolab.lan, `portal/`) :
+  le point d'entree unique du lab. Une page de connexion (le couple
+  identifiant / mot de passe choisi a l'installation), puis une interface a
+  **tiroir et onglets** qui affiche chaque service dans un cadre, sans ouvrir de
+  nouvelle fenetre (onglets conserves en arriere-plan, liens directs
+  `#fleet`, point vert / rouge selon l'etat du service, bouton "ouvrir a part").
+  Il remplace Homepage et le basic auth Caddy par le **cookie de session
+  partage** `*.<domaine>` : Caddy demande au portail (`forward_auth`,
+  `/auth/verify`) si la requete est autorisee, et le portail accepte aussi un
+  basic auth pour `curl -u` et les clients git. Ferme par defaut : portail
+  arrete => acces refuse. Liste, titres, groupes et icones des services :
+  `server/services.yaml` (champs `title`, `group`, `icon`, `description`,
+  `framed`, `portal`). Dockhand et Bastion gardent leur propre connexion (memes
+  identifiants), saisie une fois dans leur cadre.
+  **Prerequis navigateur** : un cadre ne peut pas afficher l'avertissement
+  "certificat non fiable". En TLS auto-signe, installer **une fois** le
+  certificat racine de Caddy (telechargeable sur la page de connexion, dans le
+  tiroir "Aide" ou `/ca.crt`) ; en certificat signe (Let's Encrypt), rien a faire.
+  Caddy n'autorise l'affichage en cadre que depuis le portail
+  (`frame-ancestors https://dashboard.<domaine>`).
 - **dnsmasq-admin**, **caddy-admin**, **vpn-admin** - pages minimales
   (Flask, meme style que la webui) pour piloter dnsmasq/Caddy/WireGuard
   sans repasser par la ligne de commande, sur le meme principe que la
@@ -644,7 +658,7 @@ server/
     caddy-admin/docker-compose.yml                                    # build context = ../../caddy-admin
     webui/docker-compose.yml                                          # build context = ../../webui
     bastion/{docker-compose.yml, bastion.env, config/, maps/}        # ces 3 derniers non versionnes
-    dashboard/{docker-compose.yml, config/}   # Homepage, liens vers les services web du lab
+    dashboard/{docker-compose.yml, dashboard.env, portal.env, services.yaml}   # le portail (code : portal/) ; les 3 fichiers .env/.yaml sont generes et non versionnes
     vpn-admin/docker-compose.yml                                      # build context = ../../vpn-admin
     git-mirror/{docker-compose.yml, data/}                            # data/ non versionne (clones bare + mirrors.yaml)
     apt-cache/{docker-compose.yml, Dockerfile, entrypoint.sh, apt-cache.env, https-mirrors.conf, data/}  # apt-cacher-ng ; apt-cache.env, https-mirrors.conf et data/ non versionnes
@@ -654,6 +668,7 @@ webui/
   Dockerfile                     # image (Flask + client Incus)
   templates/, static/            # page unique HTML/JS/CSS
 dnsmasq-admin/                  # meme forme que webui/ : app.py, Dockerfile, templates/, static/
+portal/                         # le portail (stack dashboard) : connexion unique, tiroir et onglets, verification de session pour Caddy
 caddy-admin/                     # idem - edite server/services.yaml, recharge Caddy via son admin API
 vpn-admin/                       # idem - appelle vpn/add-peer.sh et vpn/remove-peer.sh
 git-mirror/                      # idem, mais fait lui-meme le travail git (clone/fetch), rien a piloter

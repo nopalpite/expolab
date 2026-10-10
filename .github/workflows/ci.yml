@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
 
       - name: Dependances de test
-        run: pip install ruff==0.6.9 pytest==8.3.3 pyyaml==6.0.2 flask==3.0.3
+        run: pip install ruff==0.6.9 pytest==8.3.3 pyyaml==6.0.2 flask==3.0.3 bcrypt==4.2.0
 
       # Erreurs de syntaxe et noms indefinis/inutilises uniquement : on
       # ne fait pas echouer la CI sur du style dans du code existant.
@@ -58,3 +58,11 @@ jobs:
 
       - name: Test de la config du cache apt (miroirs HTTPS)
         run: bash tests/test_apt_cache_entrypoint.sh
+
+      # Le Caddyfile genere (forward_auth, en-tetes de cadre...) est valide par
+      # Caddy lui-meme : une erreur de syntaxe ici couperait tous les services.
+      - name: Validation du Caddyfile genere (Caddy)
+        run: |
+          python server/render-caddyfile.py server/services.yaml internal > "$RUNNER_TEMP/Caddyfile"
+          docker run --rm -v "$RUNNER_TEMP/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2 \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

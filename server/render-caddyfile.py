@@ -28,59 +28,57 @@
 # ...` placee avant la regle catch-all, Caddy evaluant les routes d'un
 # meme bloc dans l'ordre ou elles apparaissent.
 #
-# auth (optionnel) : `auth: true` protege le vhost par un basic_auth Caddy
-# (identifiant/hash bcrypt lus dans stacks/caddy/auth.env, ou dans les
-# variables BASIC_AUTH_USER/BASIC_AUTH_HASH - voir load_basic_auth()).
-# `auth_except: [/git/*]` exempte des chemins (ex: git-mirror, dont le
-# protocole git HTTP est utilise par des clients sans navigateur). Echoue
-# franchement (code 1) si un service demande l'auth sans identifiants
-# disponibles : jamais de vhost silencieusement ouvert. Sans effet de
-# securite si les backends restent joignables directement sur le LAN -
-# voir la liaison sur 127.0.0.1 dans les docker-compose.yml.
+# auth (optionnel) : `auth: true` protege le vhost par le PORTAIL (service
+# `dashboard`, voir portal/app.py) via `forward_auth` : Caddy lui demande a
+# chaque requete (/auth/verify) si le cookie de session partage - ou un basic
+# auth, pour curl et les clients git - est valide. Une seule connexion pour
+# tous les services. Ferme par defaut : portail arrete ou en erreur => acces
+# refuse (jamais de vhost ouvert). `auth_except: [/git/*]` exempte des chemins
+# (ex: git-mirror, dont le protocole git HTTP est utilise par des clients sans
+# navigateur). Echoue (code 1) si un service demande l'auth alors que le
+# portail n'est pas declare. Sans effet de securite si les backends restent
+# joignables directement sur le LAN - voir la liaison sur 127.0.0.1 dans les
+# docker-compose.yml.
+#
+# Affichage dans le portail : les services sont ouverts dans des cadres
+# (iframe) de https://dashboard.<domaine>. Sauf `framed: false`, Caddy retire
+# X-Frame-Options et le `frame-ancestors` du service, puis impose
+# `frame-ancestors https://dashboard.<domaine>` : le cadre n'est autorise que
+# depuis le portail, jamais depuis un site tiers.
 #
 # Usage: render-caddyfile.py <chemin_services.yaml> [tls_mode] [domaine]
 #   tls_mode : internal (defaut) ou signed
 #   domaine  : defaut web.expolab.lan (internal) - obligatoire en signed
-import os
 import sys
-from pathlib import Path
 
 import yaml
 
 DEFAULT_PUBLIC_DOMAIN = "web.expolab.lan"
 DEFAULT_BACKEND_HOST = "localhost"
-AUTH_ENV_PATH = Path(__file__).resolve().parent / "stacks" / "caddy" / "auth.env"
+PORTAL_NAME = "dashboard"
 
 
-def load_basic_auth() -> tuple[str, str] | None:
-    """(utilisateur, hash bcrypt) ou None si non configure.
-
-    Lu a la main (pas `source`) : le hash bcrypt contient des `$` que le
-    shell interpreterait.
-    """
-    user = os.environ.get("BASIC_AUTH_USER")
-    pw_hash = os.environ.get("BASIC_AUTH_HASH")
-    if not (user and pw_hash) and AUTH_ENV_PATH.exists():
-        values = {}
-        for line in AUTH_ENV_PATH.read_text().splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                key, _, value = line.partition("=")
-                values[key.strip()] = value.strip()
-        user = user or values.get("BASIC_AUTH_USER")
-        pw_hash = pw_hash or values.get("BASIC_AUTH_HASH")
-    return (user, pw_hash) if user and pw_hash else None
+def portal_backend(services: list[dict]) -> str | None:
+    """host:port du portail (service `dashboard`), ou None s'il n'est pas declare."""
+    for svc in services:
+        if svc.get("name") == PORTAL_NAME:
+            return f"{svc.get('backend_host', DEFAULT_BACKEND_HOST)}:{svc['backend_port']}"
+    return None
 
 
-def auth_block_lines(svc: dict, credentials: tuple[str, str]) -> list[str]:
-    user, pw_hash = credentials
+def auth_block_lines(svc: dict, portal: str) -> list[str]:
     except_paths = svc.get("auth_except") or []
     lines = []
     matcher = ""
     if except_paths:
         lines += ["    @protected {", f"        not path {' '.join(except_paths)}", "    }"]
         matcher = " @protected"
-    lines += [f"    basic_auth{matcher} {{", f"        {user} {pw_hash}", "    }"]
+    lines += [f"    forward_auth{matcher} {portal} {{", "        uri /auth/verify", "    }"]
     return lines
+
+
+def is_framed(svc: dict) -> bool:
+    return svc.get("name") != PORTAL_NAME and svc.get("framed") is not False
 
 
 def tls_block_lines(tls_mode: str) -> list[str]:
@@ -107,7 +105,7 @@ def main() -> None:
         print("Usage: render-caddyfile.py <services.yaml> signed <domaine>", file=sys.stderr)
         sys.exit(1)
 
-    with open(services_path) as f:
+    with open(services_path, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
 
     services = data.get("services") or []
@@ -116,13 +114,13 @@ def main() -> None:
         print("# Aucun service configure dans server/services.yaml.")
         return
 
-    credentials = load_basic_auth()
+    portal = portal_backend(services)
     protected = [s["name"] for s in services if s.get("auth")]
-    if protected and credentials is None:
+    if protected and portal is None:
         print(
-            f"auth: true sur {', '.join(protected)} mais aucun identifiant "
-            f"(BASIC_AUTH_USER/BASIC_AUTH_HASH ou {AUTH_ENV_PATH}) - refuse de "
-            "generer un Caddyfile ou ces services seraient ouverts.",
+            f"auth: true sur {', '.join(protected)} mais le portail (service "
+            f"'{PORTAL_NAME}') n'est pas declare - refuse de generer un Caddyfile "
+            "ou ces services seraient ouverts.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -135,12 +133,21 @@ def main() -> None:
         for line in tls_block_lines(tls_mode):
             print(line)
         if svc.get("auth"):
-            for line in auth_block_lines(svc, credentials):
+            for line in auth_block_lines(svc, portal):
                 print(line)
+        framed = is_framed(svc)
+        if framed:
+            print(f'    header +Content-Security-Policy "frame-ancestors https://{PORTAL_NAME}.{public_domain}"')
         for route in svc.get("extra_routes", []):
             route_host = route.get("backend_host", backend_host)
             print(f"    reverse_proxy {route['path']} {route_host}:{route['backend_port']}")
-        print(f"    reverse_proxy {backend_host}:{port}")
+        if framed:
+            print(f"    reverse_proxy {backend_host}:{port} {{")
+            print("        header_down -X-Frame-Options")
+            print('        header_down Content-Security-Policy "(?i)frame-ancestors[^;]*;?" ""')
+            print("    }")
+        else:
+            print(f"    reverse_proxy {backend_host}:{port}")
         print("}")
         print()
 

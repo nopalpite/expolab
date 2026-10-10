@@ -6,7 +6,7 @@
 # la main OU depuis caddy-admin (section "Certificat TLS") - ce dernier
 # l'ecrit puis recree les stacks dependantes via l'API Dockhand (un
 # rechargement a chaud du Caddyfile ne suffit pas pour OVH_* et
-# HOMEPAGE_ALLOWED_HOSTS, lus une seule fois au demarrage de leur
+# PORTAL_DOMAIN, lus une seule fois au demarrage de leur
 # conteneur), donc un changement fait depuis l'UI est deja actif sans
 # repasser par deploy-server.sh.
 #   TLS_MODE=internal (defaut) : certificat auto-signe (CA interne Caddy),

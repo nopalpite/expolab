@@ -58,22 +58,12 @@ server/stacks/ansible-web/runs/
 # l'autre, ne doit jamais finir dans git (secrets client compris).
 vpn/wireguard/config/
 
-# Fichiers auto-generes par Homepage au demarrage dans son dossier de
-# config (monte directement sur server/stacks/dashboard/config/, qui
-# contient par ailleurs nos fichiers versionnes services.yaml/settings.yaml) -
-# etat runtime, pas de l'infra-as-code.
-server/stacks/dashboard/config/logs/
-server/stacks/dashboard/config/kubernetes.yaml
-
-# HOMEPAGE_ALLOWED_HOSTS - regenere a chaque deploiement/changement TLS
-# (deploy-server.sh ou caddy-admin) a partir du domaine public actuel,
-# jamais en dur - voir server/stacks/dashboard/docker-compose.yml.
+# Portail (stack dashboard) : domaine public regenere a chaque deploiement /
+# changement TLS, cle de session generee une fois (secret), copie de
+# services.yaml tenue a jour sur place - voir server/lib/dashboard.sh.
 server/stacks/dashboard/dashboard.env
-
-# Liste de liens Homepage generee depuis services.yaml.template (celui-ci
-# reste versionne, a editer a la main) - meme raison que le point
-# precedent, voir son en-tete.
-server/stacks/dashboard/config/services.yaml
+server/stacks/dashboard/portal.env
+server/stacks/dashboard/services.yaml
 
 # Bytecode Python (genere localement par un simple `python -m py_compile`
 # de verification syntaxique, jamais volontairement).

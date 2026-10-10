@@ -103,7 +103,7 @@ def parse_extra_routes(raw) -> tuple[list[dict] | None, str | None]:
 
 
 def load_services() -> dict:
-    with open(SERVICES_PATH) as f:
+    with open(SERVICES_PATH, encoding="utf-8") as f:
         return _yaml.load(f) or {"services": []}
 
 
@@ -194,33 +194,28 @@ def save_services(data) -> None:
     # ecrit, et garantit qu'un crash en cours d'ecriture ne laisse jamais
     # un services.yaml tronque a la place.
     tmp_path = SERVICES_PATH.with_suffix(".tmp")
-    with open(tmp_path, "w") as f:
+    with open(tmp_path, "w", encoding="utf-8") as f:
         _yaml.dump(data, f)
     os.replace(tmp_path, SERVICES_PATH)
 
 
 def sync_public_domain_dependents(tls: dict) -> None:
-    """Met a jour dashboard.env pour qu'il suive le domaine public actuel
-    - meme logique que deploy-server.sh (dupliquee ici : ce chemin est
-    une sauvegarde depuis l'UI, pas un redeploiement complet via ce
-    script). Sans ca, Homepage refuse les requetes sur le nouveau domaine
-    (validation de Host cote applicatif, independante de Caddy) -
-    ansible-web n'a pas cette contrainte, rien a synchroniser pour lui."""
+    """Met a jour dashboard.env pour que le portail suive le domaine public
+    actuel (cookie de session, adresses des cadres) - meme logique que
+    server/lib/dashboard.sh (dupliquee ici : ce chemin est une sauvegarde depuis
+    l'UI, pas un redeploiement complet). ansible-web n'a pas cette contrainte,
+    rien a synchroniser pour lui."""
     domain = tls["TLS_SIGNED_DOMAIN"] if tls["TLS_MODE"] == "signed" else "web.expolab.lan"
-
-    if tls["TLS_MODE"] == "signed":
-        hosts = f"dashboard.web.expolab.lan,dashboard.{domain},localhost:3001"
-    else:
-        hosts = "dashboard.web.expolab.lan,localhost:3001"
     dashboard_env = SERVER_DIR / "stacks" / "dashboard" / "dashboard.env"
-    dashboard_env.write_text(f"HOMEPAGE_ALLOWED_HOSTS={hosts}\n")
+    dashboard_env.write_text(f"PORTAL_DOMAIN={domain}\nPORTAL_TLS_MODE={tls['TLS_MODE']}\n")
 
-    # Liste de liens Homepage - meme raison, voir l'en-tete de
-    # services.yaml.template (source editable a la main, jamais
-    # services.yaml lui-meme, regenere ici a chaque sauvegarde TLS).
-    dashboard_links_template = SERVER_DIR / "stacks" / "dashboard" / "config" / "services.yaml.template"
-    dashboard_links = SERVER_DIR / "stacks" / "dashboard" / "config" / "services.yaml"
-    dashboard_links.write_text(dashboard_links_template.read_text().replace("__PUBLIC_DOMAIN__", domain))
+
+def sync_portal_services() -> None:
+    """Copie services.yaml pour le portail, SUR PLACE (meme inode) : le portail
+    le monte comme un fichier, un remplacement par renommage resterait perime."""
+    target = SERVER_DIR / "stacks" / "dashboard" / "services.yaml"
+    if target.exists():
+        target.write_text(SERVICES_PATH.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def save_and_reload() -> tuple[bool, str]:
@@ -243,6 +238,7 @@ def save_and_reload() -> tuple[bool, str]:
 
     caddyfile_content = result.stdout
     CADDYFILE_PATH.write_text(caddyfile_content)
+    sync_portal_services()
 
     req = urllib.request.Request(
         CADDY_ADMIN_URL,
@@ -327,7 +323,7 @@ def api_tls_update():
 
     # Un rechargement a chaud (ci-dessus) suffit pour le contenu du
     # Caddyfile (domaines, extra_routes...) mais jamais pour des variables
-    # d'environnement (OVH_* de Caddy, HOMEPAGE_ALLOWED_HOSTS de dashboard) :
+    # d'environnement (OVH_* de Caddy, PORTAL_DOMAIN du portail) :
     # chaque conteneur les lit une seule fois, au demarrage - seule une
     # recreation complete les rafraichit. Recreer 'caddy' coupe brievement
     # CETTE MEME requete (cette page est elle-meme servie via Caddy) : une

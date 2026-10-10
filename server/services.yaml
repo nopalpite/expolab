@@ -10,12 +10,20 @@
 # - extra_routes  : (optionnel) chemins a faire suivre vers un port
 #                    different AVANT la route principale - voir
 #                    render-caddyfile.py
-# - auth          : (optionnel) true = vhost protege par un basic_auth Caddy
-#                    (identifiants generes par deploy-server.sh dans
-#                    stacks/caddy/auth.env). Laisse hors dashboard (liens
-#                    uniquement) et bastion (a sa propre authentification).
-# - auth_except   : (optionnel) chemins exemptes de basic_auth malgre
+# - auth          : (optionnel) true = vhost protege par le portail (service
+#                    `dashboard`) : session partagee, ou basic auth pour curl
+#                    et les clients git. Laisse hors dashboard (le portail
+#                    gere sa propre connexion) et bastion (a sa propre
+#                    authentification).
+# - auth_except   : (optionnel) chemins exemptes d'authentification malgre
 #                    auth: true (ex: protocole git HTTP de git-mirror)
+# - title, group, icon, description : (optionnels) affichage dans le portail
+#                    (tiroir et accueil). icon : box, server, network, globe,
+#                    shield, terminal, git, play. Sans titre, le nom sert.
+# - framed        : (optionnel, defaut true) false = le portail ouvre ce
+#                    service dans un nouvel onglet du navigateur au lieu de
+#                    l'afficher dans un cadre.
+# - portal        : (optionnel) false = service absent du portail.
 #
 # https://<name>.web.expolab.lan  ->  Caddy  ->  http://<backend_host>:<backend_port>
 services:
@@ -24,30 +32,62 @@ services:
   - name: dockhand
     auth: true
     backend_port: 3000
+    title: Dockhand
+    group: Infrastructure
+    icon: box
+    description: Conteneurs et stacks
   - name: fleet
     auth: true
     backend_port: 5050
+    title: Flotte
+    group: Infrastructure
+    icon: server
+    description: Faux Raspberry Pi
   - name: dnsmasq
     auth: true
     backend_port: 5051
+    title: DHCP et DNS
+    group: Réseau
+    icon: network
+    description: Baux et réservations
   - name: caddy
     auth: true
     backend_port: 5052
+    title: Caddy
+    group: Réseau
+    icon: globe
+    description: Reverse proxy et TLS
   - name: vpn
     auth: true
     backend_port: 5053
-  - name: git-mirror
-    auth: true
-    auth_except:
-      - /git/*
-    backend_port: 5054
-  - name: ansible-web
-    auth: true
-    backend_port: 5055
+    title: VPN
+    group: Réseau
+    icon: shield
+    description: Pairs WireGuard
   - name: bastion
     backend_port: 5000
+    title: Bastion
+    group: Automatisation
+    icon: terminal
+    description: Accès SSH et VNC
     extra_routes:
       # Pont VNC (websockify) de Bastion - a part de son app principale,
       # voir son README section "Derriere un reverse proxy (TLS)".
       - path: /vnc-ws/*
         backend_port: 6080
+  - name: git-mirror
+    auth: true
+    auth_except:
+      - /git/*
+    backend_port: 5054
+    title: git-mirror
+    group: Automatisation
+    icon: git
+    description: Miroirs de dépôts
+  - name: ansible-web
+    auth: true
+    backend_port: 5055
+    title: ansible-web
+    group: Automatisation
+    icon: play
+    description: Lancer les playbooks

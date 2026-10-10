@@ -93,7 +93,8 @@ after="$(cat "$SCRIPT_DIR/stacks/caddy/auth.env" "$SCRIPT_DIR/stacks/bastion/bas
 
 render_caddyfile
 contains "$SCRIPT_DIR/stacks/caddy/Caddyfile" "ansible-web.web.expolab.lan {"
-contains "$SCRIPT_DIR/stacks/caddy/Caddyfile" "basic_auth"
+contains "$SCRIPT_DIR/stacks/caddy/Caddyfile" "forward_auth @protected localhost:3001"
+! grep -q "basic_auth" "$SCRIPT_DIR/stacks/caddy/Caddyfile" || fail "basic_auth encore genere : la session est geree par le portail"
 contains "$SCRIPT_DIR/stacks/caddy/Caddyfile" "not path /git/*"
 
 setup_dnsmasq_files
@@ -137,8 +138,13 @@ contains "$SCRIPT_DIR/stacks/apt-cache/apt-cache.env" "APT_CACHE_OFFLINE=1"
 contains "$SCRIPT_DIR/stacks/apt-cache/https-mirrors.conf" "https://download.docker.com/linux/debian"  # liste jamais ecrasee
 
 setup_dashboard
-contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "HOMEPAGE_ALLOWED_HOSTS=dashboard.web.expolab.lan,localhost:3001"
-contains "$SCRIPT_DIR/stacks/dashboard/config/services.yaml" "https://ansible-web.web.expolab.lan"
+contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "PORTAL_DOMAIN=web.expolab.lan"
+contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "PORTAL_TLS_MODE=internal"
+contains "$SCRIPT_DIR/stacks/dashboard/portal.env" "PORTAL_SECRET="
+contains "$SCRIPT_DIR/stacks/dashboard/services.yaml" "name: ansible-web"  # copie de services.yaml pour le portail
+secret_before="$(cat "$SCRIPT_DIR/stacks/dashboard/portal.env")"
+setup_dashboard  # la cle de session ne change jamais (sinon toutes les sessions sauteraient)
+[ "$secret_before" = "$(cat "$SCRIPT_DIR/stacks/dashboard/portal.env")" ] || fail "PORTAL_SECRET regenere"
 
 summary="$(print_summary)"
 echo "$summary" | grep -qF "gestion.expo" || fail "le resume n'affiche pas l'identifiant"
@@ -150,7 +156,9 @@ render_caddyfile
 setup_dashboard
 setup_public_domain_dns
 contains "$SCRIPT_DIR/stacks/caddy/Caddyfile" "dns ovh {"
-contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "dashboard.expolab.example.fr"
+contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "PORTAL_DOMAIN=expolab.example.fr"
+contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "PORTAL_TLS_MODE=signed"
+contains "$SCRIPT_DIR/stacks/caddy/Caddyfile" "frame-ancestors https://dashboard.expolab.example.fr"
 contains "$SCRIPT_DIR/stacks/dnsmasq/admin-config/public-domain.conf" "address=/expolab.example.fr/10.42.0.1"
 
 # deploy_stacks : vpn-admin n'est redeploye que si le VPN est installe.

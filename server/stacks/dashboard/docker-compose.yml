@@ -1,28 +1,29 @@
-# Stack Dockhand "dashboard" - page de liens vers les services
-# applicatifs du serveur d'expo (Homepage, https://gethomepage.dev).
+# Stack Dockhand "dashboard" - le portail expolab (voir ../../../portal) :
+# point d'entree unique, connexion unique, tiroir de services affiches dans
+# des onglets. Il remplace Homepage ; l'adresse reste dashboard.<domaine>.
 #
-# Config statique et versionnee (config/services.yaml) plutot
-# qu'auto-decouverte via le socket Docker : la liste des services de ce
-# lab est petite et connue a l'avance (Dockhand, fleet, Bastion - dnsmasq/
-# caddy/wireguard n'ont pas d'interface web propre, deja gerables depuis
-# la tuile Dockhand), pas besoin de donner a ce conteneur un acces
-# supplementaire au socket Docker pour ca.
+# network_mode: host : Caddy (lui aussi sur l'hote) le joint sur
+# 127.0.0.1:3001 (forward_auth + reverse-proxy), et le portail sonde les
+# ports des autres services sur 127.0.0.1 pour afficher leur etat. Il n'ecoute
+# QUE sur 127.0.0.1 : inaccessible hors de l'hote sans passer par Caddy.
 services:
   dashboard:
-    image: ghcr.io/gethomepage/homepage:latest
+    build: ${REPO_ROOT}/portal
     container_name: expolab-dashboard
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:3001:3000"
+    network_mode: host
     env_file:
-      # HOMEPAGE_ALLOWED_HOSTS - Next.js (moteur de Homepage) rejette par
-      # defaut toute requete dont le Host: ne correspond pas a l'origine
-      # attendue, necessaire ici puisqu'on y accede via le vhost Caddy,
-      # pas directement sur son port. Genere par deploy-server.sh (pas en
-      # dur ici) : la liste depend du domaine public actuel
-      # (server/stacks/caddy/tls.env, TLS_MODE=internal/signed) - constate
-      # en pratique, un domaine signe pas encore dans cette liste renvoie
-      # une 400 "Host validation failed".
+      # PORTAL_DOMAIN / PORTAL_TLS_MODE : regenere par deploy-server.sh et
+      # caddy-admin selon le domaine public actuel (relus a la recreation).
       - ${REPO_ROOT}/server/stacks/dashboard/dashboard.env
+      # PORTAL_SECRET : cle de signature des sessions, generee une seule fois.
+      - ${REPO_ROOT}/server/stacks/dashboard/portal.env
     volumes:
-      - ${REPO_ROOT}/server/stacks/dashboard/config:/app/config
+      # Identifiants d'administration (utilisateur + hash bcrypt), en lecture seule.
+      - ${REPO_ROOT}/server/stacks/caddy/auth.env:/config/auth.env:ro
+      # Copie de server/services.yaml tenue a jour sur place par deploy-server.sh
+      # et caddy-admin (un fichier remplace par renommage resterait perime
+      # dans un bind-mount de fichier).
+      - ${REPO_ROOT}/server/stacks/dashboard/services.yaml:/config/services.yaml:ro
+      # Certificat racine de Caddy (mode internal), propose en telechargement.
+      - ${REPO_ROOT}/server/stacks/caddy/data:/caddy-data:ro
