@@ -417,19 +417,41 @@ sert qu'a simuler de vraies machines.
 | Bail de la morte encore actif (12 h) | bloque la reutilisation de l'IP, tant qu'il n'est pas libere |
 
 Decision : reservations **par nom** (MAC optionnelle) dans dnsmasq-admin, et
-bouton **Liberer** sur la ligne de bail de la machine morte (execute
-`dhcp_release`, sans redemarrer dnsmasq ni toucher aux autres baux).
+liberation du bail de la machine morte (`dhcp_release`, sans redemarrer dnsmasq
+ni toucher aux autres baux), automatique ou par le bouton **Liberer**.
+
+Attention : une reservation par **MAC** obsolete (ancienne carte) l'emporte sur
+la reservation par nom si la meme MAC revient, sans avertissement - supprimer
+les anciennes lignes MAC d'une machine qu'on gere par nom.
 
 ### Procedure de remplacement
 
 1. dnsmasq-admin : verifier que la machine a une reservation **par nom**
-   (nom + IP, MAC vide) ; puis, dans la liste des baux, **Liberer** celui de
-   la machine morte.
-2. Flasher la carte avec l'image type (voir ci-dessous) en saisissant le
+   (nom + IP, MAC vide). C'est tout : **le bail de la morte est libere
+   automatiquement** (voir ci-dessous).
+2. Flasher la carte avec l'image type (voir plus bas) en saisissant le
    **hostname de la machine remplacee** dans Raspberry Pi Imager.
-3. Brancher, laisser demarrer (DHCP -> meme IP, meme nom).
+3. Brancher, laisser demarrer : meme IP, meme nom.
 4. ansible-web : lancer le playbook en ciblant la **machine** (le select
    "Cible" propose les tags et les machines de Bastion).
+
+**Liberation automatique des baux.** dnsmasq-admin verifie toutes les 20 s,
+pour chaque reservation par nom, que la machine qui tient l'IP repond encore
+en ARP ; apres 3 verifications sans reponse (~1 min) son bail est libere. La
+carte neuve, qui demarre ensuite, prend directement l'IP. Une machine
+simplement eteinte retrouve elle aussi sa place a son retour. Un detenteur
+qui repond encore n'est **jamais** libere : deux machines vivantes pour un
+meme nom donnent un conflit, signale dans `docker logs expolab-dnsmasq-admin`
+et sur `/api/events`.
+
+Si la carte neuve est branchee **avant** (moins d'une minute apres la mort),
+elle recoit d'abord une IP de repli ; dnsmasq-admin libere alors les deux
+baux et dnsmasq refuse (NAK) tout renouvellement de l'IP de repli. Le
+**redemarrage de la carte** la remet sur l'IP reservee (verifie dans le lab ;
+le client `systemd-networkd` du lab ne repart pas seul apres le NAK, le
+comportement de NetworkManager sur Raspberry Pi OS reste a verifier sur
+materiel). Le bouton **Liberer** reste disponible pour forcer a la main, et
+`DNSMASQ_AUTO_RELEASE=0` coupe l'automatisme.
 
 Dans Bastion, referencer les machines par **IP** (pas `*.expolab.lan` :
 l'hote et le conteneur ansible-web n'utilisent pas dnsmasq comme resolveur).

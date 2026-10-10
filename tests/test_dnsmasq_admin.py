@@ -130,3 +130,117 @@ def test_release_without_client_id_and_errors(client, monkeypatch):
 
     assert client.post("/api/leases/dc:a6:32:00:99:09/release").status_code == 404
     assert client.post("/api/leases/pas-une-mac/release").status_code == 400
+
+
+# --- liberation automatique des baux orphelins (reconcile_once) -------------
+
+MAC_OLD = "dc:a6:32:00:99:0a"
+MAC_NEW = "dc:a6:32:00:99:0b"
+
+
+def lease(mac, ip, hostname):
+    return {"mac": mac, "ip": ip, "hostname": hostname, "client_id": "", "expires_in_min": 600}
+
+
+class Lab:
+    """Etat simule : reservations, baux, machines qui repondent en ARP."""
+
+    def __init__(self, monkeypatch, reservations, leases, alive):
+        self.leases = leases
+        self.alive = alive  # ip -> True/False/None
+        self.released = []
+        monkeypatch.setattr(da, "load_reservations", lambda: reservations)
+        monkeypatch.setattr(da, "load_leases", lambda: self.leases)
+        monkeypatch.setattr(da, "host_alive", lambda ip: self.alive.get(ip))
+        monkeypatch.setattr(da, "release_lease", self.release)
+        da._events.clear()
+
+    def release(self, lease):
+        self.released.append(lease["mac"])
+        self.leases = [l for l in self.leases if l["mac"] != lease["mac"]]
+        return True, ""
+
+
+NAME_RESERVATION = [{"mac": "", "ip": "10.42.0.60", "hostname": "pi-03"}]
+
+
+def test_dead_holder_released_after_three_failed_checks(monkeypatch):
+    lab = Lab(monkeypatch, NAME_RESERVATION, [lease(MAC_OLD, "10.42.0.60", "pi-03")], {"10.42.0.60": False})
+    misses = {}
+    da.reconcile_once(misses)
+    da.reconcile_once(misses)
+    assert lab.released == []
+    da.reconcile_once(misses)
+    assert lab.released == [MAC_OLD]
+
+
+def test_alive_holder_is_never_released_and_counter_resets(monkeypatch):
+    lab = Lab(monkeypatch, NAME_RESERVATION, [lease(MAC_OLD, "10.42.0.60", "pi-03")], {"10.42.0.60": False})
+    misses = {}
+    da.reconcile_once(misses)
+    da.reconcile_once(misses)
+    lab.alive["10.42.0.60"] = True  # la machine repond a nouveau
+    for _ in range(5):
+        da.reconcile_once(misses)
+    assert lab.released == []
+    assert "10.42.0.60" not in misses
+
+
+def test_unknown_liveness_never_releases(monkeypatch):
+    lab = Lab(monkeypatch, NAME_RESERVATION, [lease(MAC_OLD, "10.42.0.60", "pi-03")], {"10.42.0.60": None})
+    misses = {}
+    for _ in range(6):
+        da.reconcile_once(misses)
+    assert lab.released == []
+
+
+def test_new_board_on_fallback_ip_releases_dead_and_new_leases(monkeypatch):
+    # carte neuve branchee avant la liberation : nom reserve, mais IP de repli
+    leases = [lease(MAC_OLD, "10.42.0.60", ""), lease(MAC_NEW, "10.42.0.130", "pi-03")]
+    lab = Lab(monkeypatch, NAME_RESERVATION, leases, {"10.42.0.60": False})
+    da.reconcile_once({})
+    assert sorted(lab.released) == sorted([MAC_OLD, MAC_NEW])
+    assert [e["kind"] for e in da._events] == ["liberation", "liberation"]
+
+
+def test_new_board_with_live_holder_is_a_conflict_and_nothing_is_released(monkeypatch):
+    leases = [lease(MAC_OLD, "10.42.0.60", ""), lease(MAC_NEW, "10.42.0.130", "pi-03")]
+    lab = Lab(monkeypatch, NAME_RESERVATION, leases, {"10.42.0.60": True})
+    misses = {}
+    da.reconcile_once(misses)
+    da.reconcile_once(misses)
+    assert lab.released == []
+    assert [e["kind"] for e in da._events] == ["conflit"]  # signale une seule fois
+
+
+def test_new_board_on_fallback_ip_with_free_reserved_ip_releases_only_its_own(monkeypatch):
+    lab = Lab(monkeypatch, NAME_RESERVATION, [lease(MAC_NEW, "10.42.0.130", "pi-03")], {})
+    da.reconcile_once({})
+    assert lab.released == [MAC_NEW]
+
+
+def test_machine_on_its_reserved_ip_is_left_alone(monkeypatch):
+    lab = Lab(monkeypatch, NAME_RESERVATION, [lease(MAC_NEW, "10.42.0.60", "pi-03")], {"10.42.0.60": True})
+    da.reconcile_once({})
+    assert lab.released == []
+
+
+def test_mac_reservations_are_not_touched(monkeypatch):
+    reservations = [{"mac": MAC_OLD, "ip": "10.42.0.60", "hostname": "pi-03"}]
+    lab = Lab(monkeypatch, reservations, [lease(MAC_OLD, "10.42.0.60", "pi-03")], {"10.42.0.60": False})
+    misses = {}
+    for _ in range(5):
+        da.reconcile_once(misses)
+    assert lab.released == []
+
+
+def test_host_alive_distinguishes_dead_host_from_missing_tool(monkeypatch):
+    def fake_run(returncode, stderr=""):
+        return lambda *a, **kw: subprocess.CompletedProcess(a, returncode, "", stderr)
+
+    monkeypatch.setattr(da.subprocess, "run", fake_run(0))
+    assert da.host_alive("10.42.0.60") is True
+    monkeypatch.setattr(da.subprocess, "run", fake_run(1))
+    assert da.host_alive("10.42.0.60") is False
+    monkeypatch.setattr(da.subprocess, "run", fake_run(127, "executable file not found"))
+    assert da.host_alive("10.42.0.60") is None

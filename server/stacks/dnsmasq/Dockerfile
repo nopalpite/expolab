@@ -6,8 +6,10 @@ FROM debian:trixie-slim
 
 # dnsmasq-utils : dhcp_release, utilise par dnsmasq-admin pour liberer le
 # bail d'une machine morte sans redemarrer dnsmasq (voir son app.py).
+# iputils-arping : savoir si une machine repond encore (ARP sur expo-lan)
+# avant de liberer son bail automatiquement.
 RUN apt-get update -qq && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq dnsmasq dnsmasq-utils && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq dnsmasq dnsmasq-utils iputils-arping && \
     rm -rf /var/lib/apt/lists/*
 
 ENTRYPOINT ["dnsmasq", "-k", "--conf-file=/etc/dnsmasq.conf"]

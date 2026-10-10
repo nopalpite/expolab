@@ -86,9 +86,22 @@ def incus_status_by_name() -> dict:
     return statuses
 
 
-def start_job(job_id: str, cmd: list[str]) -> None:
+def creation_in_progress(name: str) -> bool:
+    """Vrai si une creation de `name` tourne encore (deploy-fleet.sh)."""
     with _jobs_lock:
-        _jobs[job_id] = {"status": "running", "log": ""}
+        return any(
+            job.get("kind") == "create" and job.get("name") == name and job["status"] == "running"
+            for job in _jobs.values()
+        )
+
+
+def busy_response(name: str):
+    return jsonify({"error": f"'{name}' est en cours de creation : attends la fin du provisionnement (quelques minutes)"}), 409
+
+
+def start_job(job_id: str, cmd: list[str], kind: str = "", name: str = "") -> None:
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running", "log": "", "kind": kind, "name": name}
 
     def run() -> None:
         try:
@@ -106,7 +119,7 @@ def start_job(job_id: str, cmd: list[str]) -> None:
             log = str(exc)
             status = "error"
         with _jobs_lock:
-            _jobs[job_id] = {"status": status, "log": log}
+            _jobs[job_id] = {"status": status, "log": log, "kind": kind, "name": name}
 
     threading.Thread(target=run, daemon=True).start()
 
@@ -159,7 +172,7 @@ def api_fleet_create():
     save_inventory(data)
 
     job_id = f"create-{name}-{int(time.time())}"
-    start_job(job_id, ["bash", str(DEPLOY_SCRIPT)])
+    start_job(job_id, ["bash", str(DEPLOY_SCRIPT)], kind="create", name=name)
     return jsonify({"job_id": job_id, "mac": mac}), 202
 
 
@@ -168,6 +181,9 @@ def api_fleet_start(name: str):
     data = load_inventory()
     if not any(pi["name"] == name for pi in data.get("fleet", [])):
         return jsonify({"error": f"'{name}' introuvable dans l'inventaire"}), 404
+
+    if creation_in_progress(name):
+        return busy_response(name)
 
     job_id = f"start-{name}-{int(time.time())}"
     start_job(job_id, ["incus", "start", name])
@@ -180,6 +196,9 @@ def api_fleet_stop(name: str):
     if not any(pi["name"] == name for pi in data.get("fleet", [])):
         return jsonify({"error": f"'{name}' introuvable dans l'inventaire"}), 404
 
+    if creation_in_progress(name):
+        return busy_response(name)
+
     job_id = f"stop-{name}-{int(time.time())}"
     start_job(job_id, ["incus", "stop", name])
     return jsonify({"job_id": job_id}), 202
@@ -187,6 +206,10 @@ def api_fleet_stop(name: str):
 
 @app.route("/api/fleet/<name>", methods=["DELETE"])
 def api_fleet_delete(name: str):
+    # Supprimer le conteneur en plein provisionnement le tue au milieu d'un
+    # apt-get et fait echouer la creation avec une erreur trompeuse.
+    if creation_in_progress(name):
+        return busy_response(name)
     data = load_inventory()
     fleet = data.get("fleet", [])
     new_fleet = [pi for pi in fleet if pi["name"] != name]

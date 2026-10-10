@@ -14,10 +14,13 @@ wildcard dans dnsmasq.conf (le tri par service se fait ensuite cote
 Caddy via le Host: HTTP, pas via DNS) - une liste d'enregistrements
 individuels par nom aurait ete purement redondante.
 """
+import collections
+import datetime
 import ipaddress
 import os
 import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -33,6 +36,12 @@ EXPO_LAN_INTERFACE = "expo-lan"  # interface= de dnsmasq.conf, requise par dhcp_
 EXPO_LAN = ipaddress.ip_network("10.42.0.0/24")
 MAC_RE = re.compile(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$")
 HOSTNAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
+
+# Liberation automatique des baux orphelins (voir reconcile_once).
+AUTO_RELEASE = os.environ.get("DNSMASQ_AUTO_RELEASE", "1") != "0"
+RECONCILE_INTERVAL = int(os.environ.get("DNSMASQ_RECONCILE_INTERVAL", "20"))
+STALE_AFTER_CHECKS = 3  # verifications consecutives sans reponse avant liberation
+_events: collections.deque = collections.deque(maxlen=50)
 
 
 def reload_dnsmasq() -> tuple[bool, str]:
@@ -244,21 +253,10 @@ def api_reservations_delete(ident: str):
     return jsonify({"ok": True})
 
 
-@app.route("/api/leases/<mac>/release", methods=["POST"])
-def api_leases_release(mac: str):
-    """Libere le bail d'une machine (typiquement une carte morte, que sa
-    remplacante - meme nom, autre MAC - doit pouvoir remplacer). Sans ca, le
-    bail de la morte (12 h) retient son IP et la remplacante en recoit une
-    autre, meme avec une reservation par nom. dhcp_release (paquet
-    dnsmasq-utils, dans l'image dnsmasq) parle au dnsmasq en cours : aucun
-    redemarrage, les autres machines ne sont pas touchees."""
-    mac = mac.lower()
-    if not MAC_RE.match(mac):
-        return jsonify({"error": "Adresse MAC invalide"}), 400
-    lease = next((l for l in load_leases() if l["mac"].lower() == mac), None)
-    if lease is None:
-        return jsonify({"error": "Aucun bail actif pour cette MAC"}), 404
-
+def release_lease(lease: dict) -> tuple[bool, str]:
+    """Libere un bail aupres du dnsmasq en cours (aucun redemarrage, les
+    autres machines ne sont pas touchees). dhcp_release est dans l'image
+    dnsmasq (paquet dnsmasq-utils)."""
     cmd = ["docker", "exec", DNSMASQ_CONTAINER, "dhcp_release", EXPO_LAN_INTERFACE, lease["ip"], lease["mac"]]
     if lease["client_id"]:
         # Un bail cree avec un identifiant client ne se libere que si on le
@@ -266,9 +264,139 @@ def api_leases_release(mac: str):
         cmd.append(lease["client_id"])
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
     if result.returncode != 0:
-        return jsonify({"error": result.stderr.strip() or "dhcp_release a echoue"}), 502
+        return False, result.stderr.strip() or "dhcp_release a echoue"
+    return True, ""
+
+
+@app.route("/api/leases/<mac>/release", methods=["POST"])
+def api_leases_release(mac: str):
+    """Libere a la main le bail d'une machine (bouton "Liberer"). Normalement
+    inutile : reconcile_once le fait seul pour une carte remplacee."""
+    mac = mac.lower()
+    if not MAC_RE.match(mac):
+        return jsonify({"error": "Adresse MAC invalide"}), 400
+    lease = next((l for l in load_leases() if l["mac"].lower() == mac), None)
+    if lease is None:
+        return jsonify({"error": "Aucun bail actif pour cette MAC"}), 404
+    ok, err = release_lease(lease)
+    if not ok:
+        return jsonify({"error": err}), 502
     return jsonify({"ok": True, "ip": lease["ip"]})
 
 
+def host_alive(ip: str) -> bool | None:
+    """True/False selon qu'une machine repond en ARP sur expo-lan, None si on
+    ne peut pas le savoir (arping absent...) - dans le doute on ne libere rien.
+    ARP est repondu par le noyau meme derriere un pare-feu : une carte allumee
+    repond toujours."""
+    try:
+        result = subprocess.run(
+            ["docker", "exec", DNSMASQ_CONTAINER, "arping", "-I", EXPO_LAN_INTERFACE, "-c", "2", "-w", "2", ip],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode == 0:
+        return True
+    if result.returncode in (125, 126, 127) or "not found" in result.stderr:
+        return None
+    return False
+
+
+def log_event(kind: str, message: str) -> None:
+    now = datetime.datetime.now().isoformat(timespec="seconds")
+    _events.appendleft({"time": now, "kind": kind, "message": message})
+    print(f"[{now}] {kind}: {message}", flush=True)
+
+
+def reconcile_once(misses: dict) -> None:
+    """Remplacement de carte sans intervention : pour chaque reservation PAR
+    NOM (sans MAC), l'IP appartient au nom, pas a une carte. Deux situations
+    bloquent sinon la carte neuve (meme nom, autre MAC) :
+
+    - le bail de la morte tient encore l'IP : il est libere des qu'il ne
+      repond plus en ARP pendant STALE_AFTER_CHECKS verifications de suite.
+      Sans danger si la machine n'etait qu'eteinte : a son retour elle
+      retrouve la meme IP (la reservation la lui redonne). Quand la carte
+      neuve demarre, l'IP est deja libre et elle la prend d'emblee.
+    - la carte neuve a demarre AVANT et a recu une IP de repli : on libere le
+      bail de la morte (si elle ne repond pas) ET celui de la neuve. A son
+      prochain echange DHCP (renouvellement, redemarrage) dnsmasq - qui fait
+      autorite - la renvoie sur l'IP reservee. Un renouvellement simple ne
+      suffisait pas : dnsmasq prolongeait le bail de repli.
+
+    Un detenteur qui repond en ARP n'est JAMAIS libere (deux machines vivantes
+    pour un meme nom : conflit signale, a trancher par un humain)."""
+    reservations = [r for r in load_reservations() if not r["mac"]]
+    leases = load_leases()
+    by_ip = {l["ip"]: l for l in leases}
+    by_name = {l["hostname"]: l for l in leases}
+
+    for r in reservations:
+        ip, name = r["ip"], r["hostname"]
+        holder = by_ip.get(ip)
+        claimant = by_name.get(name)
+
+        if claimant and claimant["ip"] != ip:
+            # La machine qui s'annonce sous ce nom n'est pas sur son IP reservee.
+            if holder and holder["mac"] != claimant["mac"]:
+                if host_alive(ip) is not False:
+                    if ("conflit", ip) not in misses:
+                        log_event("conflit", f"{name} : l'IP {ip} est tenue par {holder['mac']} qui repond encore ; rien n'est libere")
+                        misses[("conflit", ip)] = 1
+                    continue
+                ok, err = release_lease(holder)
+                log_event(
+                    "liberation" if ok else "erreur",
+                    f"bail de {holder['mac']} ({ip}) libere, la carte '{name}' le remplace" if ok else f"echec liberation {ip} : {err}",
+                )
+            ok, err = release_lease(claimant)
+            log_event(
+                "liberation" if ok else "erreur",
+                f"bail de repli de {name} ({claimant['mac']}, {claimant['ip']}) libere : la carte retrouvera {ip} a son prochain echange DHCP"
+                if ok
+                else f"echec liberation {claimant['ip']} : {err}",
+            )
+            misses.pop(ip, None)
+            misses.pop(("conflit", ip), None)
+            continue
+
+        misses.pop(("conflit", ip), None)
+        if holder is None:
+            misses.pop(ip, None)
+            continue
+        alive = host_alive(ip)
+        if alive is None or alive:
+            misses.pop(ip, None)
+            continue
+        misses[ip] = misses.get(ip, 0) + 1
+        if misses[ip] >= STALE_AFTER_CHECKS:
+            ok, err = release_lease(holder)
+            log_event(
+                "liberation" if ok else "erreur",
+                f"{name} : {holder['mac']} ne repond plus, bail {ip} libere pour une carte de remplacement" if ok else f"echec liberation {ip} : {err}",
+            )
+            misses.pop(ip, None)
+
+
+def reconcile_loop() -> None:
+    misses: dict = {}
+    while True:
+        time.sleep(RECONCILE_INTERVAL)
+        try:
+            reconcile_once(misses)
+        except Exception as exc:  # noqa: BLE001 - ne jamais tuer la boucle
+            log_event("erreur", f"reconciliation : {exc}")
+
+
+@app.route("/api/events")
+def api_events():
+    return jsonify({"events": list(_events), "auto_release": AUTO_RELEASE})
+
+
 if __name__ == "__main__":
+    if AUTO_RELEASE:
+        threading.Thread(target=reconcile_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=5051)
