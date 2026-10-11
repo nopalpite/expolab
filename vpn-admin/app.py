@@ -13,6 +13,7 @@ propres scripts plutot que d'adopter un gros projet externe non fiable
 sur ce materiel).
 """
 import io
+import ipaddress
 import re
 import subprocess
 import time
@@ -86,6 +87,95 @@ def list_peers() -> list[dict]:
             }
         )
     return peers
+
+
+# --- Adresse publique du VPN (Endpoint des configs clientes) -------------------------
+# Derriere un routeur qui redirige le port UDP, un client a l'EXTERIEUR doit viser
+# l'adresse PUBLIQUE (IP ou nom DNS/DDNS). Enregistree dans
+# wireguard/config/public-endpoint ; add-peer.sh l'utilise pour les nouveaux pairs
+# (voir vpn/lib/endpoint.sh).
+ENDPOINT_FILE = WG_DIR / "public-endpoint"
+DEFAULT_WG_PORT = 51820
+HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
+LOCAL_SUFFIXES = (".lan", ".local", ".home", ".internal", ".localdomain")
+ENDPOINT_LINE_RE = re.compile(r"^Endpoint = .*$", re.MULTILINE)
+
+
+def parse_endpoint(value: str) -> tuple[str | None, str | None]:
+    """"hote" ou "hote:port" (IPv4 ou nom DNS) -> ("hote:port", None), ou (None, erreur)."""
+    value = (value or "").strip()
+    host, sep, port_text = value.rpartition(":") if ":" in value else (value, "", "")
+    if sep and not port_text.isdigit():
+        return None, "Port invalide : un nombre entre 1 et 65535 est attendu."
+    port = int(port_text) if sep else DEFAULT_WG_PORT
+    if not 1 <= port <= 65535:
+        return None, "Port invalide : un nombre entre 1 et 65535 est attendu."
+    try:
+        ipaddress.IPv4Address(host)
+    except ValueError:
+        if not HOSTNAME_RE.match(host) or re.fullmatch(r"[\d.]+", host):
+            return None, "Adresse invalide : une IPv4 (82.1.2.3) ou un nom DNS (vpn.exemple.fr) est attendu."
+    return f"{host}:{port}", None
+
+
+def endpoint_warning(endpoint: str) -> str | None:
+    """Une adresse joignable seulement depuis le reseau local est valide, mais inutile a distance."""
+    host = endpoint.rpartition(":")[0]
+    try:
+        ip = ipaddress.IPv4Address(host)
+    except ValueError:
+        if "." not in host or host.lower().endswith(LOCAL_SUFFIXES):
+            return "Ce nom n'est probablement joignable que depuis le reseau local."
+        return None
+    if ip.is_private or ip.is_loopback or ip.is_link_local:
+        return "Adresse locale : les pairs ne pourront se connecter que depuis le reseau local (pas depuis internet)."
+    return None
+
+
+def read_endpoint() -> str:
+    try:
+        return ENDPOINT_FILE.read_text().strip()
+    except OSError:
+        return ""
+
+
+def rewrite_peer_endpoints(endpoint: str) -> list[str]:
+    """Met a jour la ligne Endpoint des configs clientes deja generees (celles que
+    la page propose en .conf / QR). Les postes qui les ont deja importees gardent
+    l'ancienne adresse : il faut leur redonner la nouvelle config."""
+    updated = []
+    for conf in sorted(PEERS_DIR.glob("*.conf")):
+        text = conf.read_text()
+        new_text = ENDPOINT_LINE_RE.sub(f"Endpoint = {endpoint}", text)
+        if new_text != text:
+            conf.write_text(new_text)
+        updated.append(conf.stem)
+    return updated
+
+
+@app.route("/api/endpoint", methods=["GET"])
+def api_endpoint_get():
+    endpoint = read_endpoint()
+    return jsonify({"endpoint": endpoint, "warning": endpoint_warning(endpoint) if endpoint else None})
+
+
+@app.route("/api/endpoint", methods=["PUT"])
+def api_endpoint_put():
+    body = request.get_json(force=True, silent=True) or {}
+    raw = (body.get("endpoint") or "").strip()
+    if not raw:  # champ vide : retour au comportement par defaut (IP locale)
+        try:
+            ENDPOINT_FILE.unlink()
+        except FileNotFoundError:
+            pass
+        return jsonify({"endpoint": "", "warning": None, "updated": []})
+    endpoint, error = parse_endpoint(raw)
+    if error:
+        return jsonify({"error": error}), 400
+    ENDPOINT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ENDPOINT_FILE.write_text(endpoint + "\n")
+    updated = rewrite_peer_endpoints(endpoint) if body.get("update_existing") else []
+    return jsonify({"endpoint": endpoint, "warning": endpoint_warning(endpoint), "updated": updated})
 
 
 @app.route("/")

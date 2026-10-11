@@ -139,7 +139,10 @@ Pour ajouter un autre pair, depuis https://vpn.web.expolab.lan ou en ligne
 de commande (ex: le laptop d'un admin) :
     sudo ./add-peer.sh mon-laptop
 
-IMPORTANT : pour un acces depuis l'exterieur de votre reseau local, il faut
-rediriger le port UDP $WG_PORT vers ce Pi depuis votre routeur (hors
-perimetre de ce script, specifique a votre box/routeur).
+IMPORTANT : pour un acces depuis l'exterieur de votre reseau local :
+  1. rediriger le port UDP $WG_PORT vers ce Pi depuis votre routeur (hors
+     perimetre de ce script, specifique a votre box/routeur) ;
+  2. enregistrer l'adresse PUBLIQUE du VPN (IP ou nom DNS/DDNS) dans la page VPN
+     du portail, section "Adresse publique" : les nouveaux pairs l'utilisent
+     (sinon ils visent l'IP locale du Pi).
 EOF

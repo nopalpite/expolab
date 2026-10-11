@@ -275,15 +275,35 @@ DNS = 10.42.0.1            # pousse dnsmasq comme resolveur -> *.web.expolab.lan
 [Peer]
 PublicKey = ...             # clef publique du serveur WireGuard
 PresharedKey = ...           # couche de chiffrement symetrique additionnelle
-Endpoint = <ip-lan-du-pi>:51820   # detecte automatiquement (IP LAN de l'hote) -
-                                    # a remplacer par une IP publique + redirection
-                                    # de port sur la box pour un acces exterieur
+Endpoint = <adresse>:51820   # adresse publique du VPN si elle est configuree (voir
+                               # "Acces depuis l'exterieur"), sinon IP LAN de l'hote
 AllowedIPs = 10.42.0.0/24, 10.66.66.0/24   # split tunnel : seul le trafic vers
                                              # expo-lan et le VPN lui-meme passe
                                              # par le tunnel, le reste (internet)
                                              # suit la route habituelle du client
 PersistentKeepalive = 25   # garde la connexion ouverte a travers un NAT/firewall
 ```
+
+### Acces depuis l'exterieur (VPN derriere un routeur)
+
+Derriere un routeur qui fait de la redirection de port :
+1. **Routeur** : rediriger le port **UDP 51820** vers le Pi (et lui reserver une
+   adresse fixe). C'est la seule redirection necessaire : jamais le 443, le 3000
+   ni le 5000, tout le reste passe par le tunnel.
+2. **Adresse publique** : une IP publique, ou mieux un **nom DNS** (DDNS) qui
+   pointe dessus (ex. `vpn.nopalpite.fr`), car l'IP d'une box change parfois.
+   La renseigner **une fois** dans la page VPN du portail, section "Adresse
+   publique du VPN" (ou `echo vpn.exemple.fr:51820 >
+   vpn/wireguard/config/public-endpoint`) : `add-peer.sh` l'utilise ensuite pour
+   tous les nouveaux pairs. La case "Mettre aussi a jour les pairs existants"
+   reecrit la ligne `Endpoint` de leurs configs ; un poste qui les avait deja
+   importees garde l'ancienne adresse, il faut lui redonner le `.conf` / QR.
+   Sans adresse publique, un pair vise l'IP locale du Pi (utilisable seulement
+   depuis le reseau local) ; une adresse locale est acceptee mais signalee.
+3. **Limites** : derriere un CGNAT (pas d'IP publique propre) la redirection ne
+   peut pas fonctionner ; chez soi, certaines box ne savent pas viser leur propre
+   IP publique ("hairpin NAT") - garder un pair avec l'adresse locale pour la
+   maison.
 
 Deux domaines DNS distincts, resolus par `dnsmasq` :
 - `<nom>.expolab.lan` — enregistrement DHCP automatique, pointe vers la

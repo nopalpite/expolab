@@ -4,8 +4,10 @@
 #
 # Usage: sudo ./add-peer.sh <nom> [endpoint_public:port]
 #   endpoint_public:port : adresse a laquelle le CLIENT doit joindre ce
-#   serveur (IP publique + redirection de port, ou IP locale si le client
-#   reste sur le meme reseau). Defaut : IP actuelle de l'hote sur le LAN.
+#   serveur (IP publique ou nom DNS + redirection de port du routeur, ou IP
+#   locale si le client reste sur le meme reseau). Defaut : celle enregistree
+#   dans wireguard/config/public-endpoint (page VPN du portail), sinon l'IP
+#   actuelle de l'hote sur le LAN - inutilisable depuis l'exterieur.
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -35,8 +37,14 @@ if grep -q "^# peer: $NAME\$" "$WG_DIR/wg0.conf" 2>/dev/null; then
     exit 1
 fi
 
+# shellcheck source=./lib/endpoint.sh
+source "$SCRIPT_DIR/lib/endpoint.sh"
 DEFAULT_ENDPOINT_IP="$(ip route get 1.1.1.1 2>/dev/null | awk '/src/{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}')"
-ENDPOINT="${2:-${DEFAULT_ENDPOINT_IP}:${WG_PORT}}"
+resolve_public_endpoint "${2:-}" "$WG_DIR" "$DEFAULT_ENDPOINT_IP" "$WG_PORT"
+if [ "$ENDPOINT_SOURCE" = "locale" ]; then
+    echo "[!] Aucune adresse publique configuree : ce pair visera l'IP locale ($ENDPOINT), inutilisable depuis l'exterieur." >&2
+    echo "    La regler une fois dans la page VPN du portail (\"Adresse publique\"), ou : echo vpn.exemple.fr:$WG_PORT > $WG_DIR/public-endpoint" >&2
+fi
 
 # Prochaine IP libre dans le sous-reseau VPN (.1 = serveur, on part de .2).
 LAST_OCTET=1

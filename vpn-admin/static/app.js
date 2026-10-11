@@ -105,3 +105,63 @@ document.getElementById("create-form").addEventListener("submit", async (e) => {
 
 loadPeers();
 setInterval(loadPeers, 15000);
+
+// --- Adresse publique du VPN ----------------------------------------------------------
+
+function renderEndpoint(data) {
+    document.getElementById("endpoint").value = data.endpoint || "";
+    const warning = document.getElementById("endpoint-warning");
+    warning.hidden = !data.warning;
+    warning.textContent = data.warning || "";
+}
+
+async function loadEndpoint() {
+    try {
+        renderEndpoint(await (await fetch("/api/endpoint")).json());
+    } catch (e) {
+        /* champ laisse vide */
+    }
+}
+
+document.getElementById("endpoint-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const status = document.getElementById("endpoint-status");
+    const btn = document.getElementById("endpoint-btn");
+    btn.disabled = true;
+    status.hidden = false;
+    status.className = "status";
+    status.textContent = "Enregistrement...";
+    try {
+        const res = await fetch("/api/endpoint", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                endpoint: document.getElementById("endpoint").value,
+                update_existing: document.getElementById("endpoint-update").checked,
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            status.className = "status status-error";
+            status.textContent = data.error || "Erreur";
+            return;
+        }
+        renderEndpoint(data);
+        status.className = "status status-ok";
+        if (!data.endpoint) {
+            status.textContent = "Adresse retirée : les nouveaux pairs viseront l'IP locale du Pi.";
+        } else if (data.updated.length) {
+            status.textContent = `Enregistrée (${data.endpoint}). Configs mises à jour : ${data.updated.join(", ")} - à redonner aux postes concernés.`;
+        } else {
+            status.textContent = `Enregistrée (${data.endpoint}) pour les nouveaux pairs.`;
+        }
+    } catch (err) {
+        status.className = "status status-error";
+        status.textContent = "Erreur réseau";
+    } finally {
+        btn.disabled = false;
+    }
+});
+
+loadEndpoint();
+

@@ -291,3 +291,11 @@ td code {
     background: #fff;
     padding: 10px;
 }
+
+.check {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    color: var(--muted);
+    font-size: 0.9rem;
+}

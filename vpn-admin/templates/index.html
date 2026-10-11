@@ -14,6 +14,22 @@
 
     <main>
         <section class="panel">
+            <h2>Adresse publique du VPN</h2>
+            <p class="subtitle">Adresse à laquelle un poste situé <strong>hors de ton réseau</strong> joint ce serveur : l'IP publique ou, mieux, un nom DNS (DDNS) qui pointe dessus, avec le port que ton routeur redirige vers ce Pi (UDP 51820 par défaut). Les <strong>nouveaux</strong> pairs l'utilisent ; sans elle, ils visent l'IP locale du Pi, inutilisable à distance.</p>
+            <form id="endpoint-form">
+                <div class="field">
+                    <label for="endpoint">Adresse publique</label>
+                    <input type="text" id="endpoint" name="endpoint" placeholder="vpn.exemple.fr:51820" autocomplete="off">
+                </div>
+                <label class="check"><input type="checkbox" id="endpoint-update" checked> Mettre aussi à jour les pairs existants</label>
+                <button type="submit" id="endpoint-btn">Enregistrer</button>
+            </form>
+            <p id="endpoint-warning" class="status status-error" hidden></p>
+            <p id="endpoint-status" class="status" hidden></p>
+            <p class="subtitle">Une config déjà importée sur un poste garde son ancienne adresse : redonne-lui la config mise à jour (.conf ou QR). Il faut aussi rediriger le port UDP du routeur vers ce Pi.</p>
+        </section>
+
+        <section class="panel">
             <h2>Ajouter un pair</h2>
             <form id="create-form">
                 <div class="field">

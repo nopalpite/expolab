@@ -62,6 +62,9 @@ jobs:
       - name: Test du changement d'identifiants d'administration
         run: bash tests/test_set_credentials.sh
 
+      - name: Test de l'adresse publique du VPN (Endpoint)
+        run: bash tests/test_vpn_endpoint.sh
+
       # Le Caddyfile genere (forward_auth, en-tetes de cadre...) est valide par
       # Caddy lui-meme : une erreur de syntaxe ici couperait tous les services.
       - name: Validation du Caddyfile genere (Caddy)
