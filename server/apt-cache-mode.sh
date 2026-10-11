@@ -4,40 +4,39 @@
 #             normal : les machines n'ont pas internet, le serveur si)
 #   offline : ne sert QUE son cache, ne contacte jamais internet - seulement
 #             si le SERVEUR lui-meme est coupe d'internet
-#   restart : recree le cache dans son mode courant (a faire apres avoir modifie
-#             stacks/apt-cache/https-mirrors.conf)
+#   restart : redemarre le cache dans son mode courant (a faire apres avoir
+#             modifie stacks/apt-cache/config/https-mirrors.conf a la main)
 #   status  : affiche le mode courant
 #
-# Une variable d'environnement n'est lue qu'au demarrage d'un conteneur : la
-# bascule recree donc la stack (sans reconstruire l'image).
+# Le mode est le fichier stacks/apt-cache/config/mode, relu au demarrage du
+# conteneur : un simple `docker restart` suffit (pas de recreation de stack).
+# L'interface "Cache apt" du portail fait la meme chose.
 #
 # Usage: sudo ./apt-cache-mode.sh online|offline|restart|status
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-export REPO_ROOT
-ENV_FILE="$SCRIPT_DIR/stacks/apt-cache/apt-cache.env"
+MODE_FILE="$SCRIPT_DIR/stacks/apt-cache/config/mode"
+CONTAINER=expolab-apt-cache
 
-current() { grep '^APT_CACHE_OFFLINE=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo 0; }
+current() { tr -d ' \t\r\n' < "$MODE_FILE" 2>/dev/null || echo online; }
 
 case "${1:-status}" in
-    online) value=0 ;;
-    restart) value="$(current)"; FORCE=1 ;;
-    offline) value=1 ;;
+    online|offline)
+        if [ "$(current)" = "$1" ]; then
+            echo "[=] Deja en mode $1."
+            exit 0
+        fi
+        mkdir -p "$(dirname "$MODE_FILE")"
+        echo "$1" > "$MODE_FILE"
+        ;;
+    restart) ;;
     status)
-        [ "$(current)" = "1" ] && echo "hors ligne (sert uniquement son cache)" || echo "en ligne"
+        [ "$(current)" = "offline" ] && echo "hors ligne (sert uniquement son cache)" || echo "en ligne"
         exit 0
         ;;
     *) echo "Usage: $0 online|offline|restart|status" >&2; exit 2 ;;
 esac
 
-if [ "${FORCE:-0}" != "1" ] && [ "$(current)" = "$value" ]; then
-    echo "[=] Deja en mode $1."
-    exit 0
-fi
-
-mkdir -p "$(dirname "$ENV_FILE")"
-echo "APT_CACHE_OFFLINE=$value" > "$ENV_FILE"
-echo "[+] Cache apt ($1) : recreation de la stack..."
-python3 "$SCRIPT_DIR/dockhand_stack.py" upsert apt-cache "$SCRIPT_DIR/stacks/apt-cache/docker-compose.yml" --no-rebuild
+echo "[+] Cache apt ($(current)) : redemarrage..."
+docker restart "$CONTAINER" > /dev/null

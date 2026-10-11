@@ -129,13 +129,31 @@ isolate_lan > /dev/null
 isolate_lan > /dev/null  # idempotent : deja isole
 
 setup_apt_cache
-contains "$SCRIPT_DIR/stacks/apt-cache/apt-cache.env" "APT_CACHE_OFFLINE=0"
-[ -f "$SCRIPT_DIR/stacks/apt-cache/https-mirrors.conf" ] || fail "liste des miroirs HTTPS non creee"
-echo "https://download.docker.com/linux/debian" >> "$SCRIPT_DIR/stacks/apt-cache/https-mirrors.conf"
-echo "APT_CACHE_OFFLINE=1" > "$SCRIPT_DIR/stacks/apt-cache/apt-cache.env"
-setup_apt_cache  # ne doit jamais ecraser un mode deja choisi
-contains "$SCRIPT_DIR/stacks/apt-cache/apt-cache.env" "APT_CACHE_OFFLINE=1"
-contains "$SCRIPT_DIR/stacks/apt-cache/https-mirrors.conf" "https://download.docker.com/linux/debian"  # liste jamais ecrasee
+APT="$SCRIPT_DIR/stacks/apt-cache"
+[ "$(cat "$APT/config/mode")" = "online" ] || fail "mode par defaut du cache apt : online attendu"
+[ -f "$APT/config/https-mirrors.conf" ] || fail "liste des miroirs HTTPS non creee"
+[ -d "$APT/logs" ] && [ -d "$APT/data" ] || fail "dossiers data/ et logs/ du cache apt non crees"
+contains "$APT/apt-cache.env" "APT_CACHE_ADMIN_SECRET="
+secret="$(cat "$APT/apt-cache.env")"
+echo "https://download.docker.com/linux/debian" >> "$APT/config/https-mirrors.conf"
+echo "offline" > "$APT/config/mode"
+setup_apt_cache  # ne doit jamais ecraser un mode, une liste ni un secret deja choisis
+[ "$(cat "$APT/config/mode")" = "offline" ] || fail "mode ecrase par un redeploiement"
+contains "$APT/config/https-mirrors.conf" "https://download.docker.com/linux/debian"  # liste jamais ecrasee
+[ "$secret" = "$(cat "$APT/apt-cache.env")" ] || fail "secret du cache apt regenere"
+
+# Migration depuis l'ancien format (APT_CACHE_OFFLINE dans apt-cache.env, miroirs a la racine).
+rm -rf "$APT/config" "$APT/apt-cache.env"
+printf 'APT_CACHE_OFFLINE=1
+' > "$APT/apt-cache.env"
+printf 'https://packages.example.org/apt
+' > "$APT/https-mirrors.conf"
+setup_apt_cache
+[ "$(cat "$APT/config/mode")" = "offline" ] || fail "ancien mode offline non migre"
+contains "$APT/config/https-mirrors.conf" "https://packages.example.org/apt"
+[ ! -e "$APT/https-mirrors.conf" ] || fail "ancienne liste de miroirs non deplacee"
+! grep -q "APT_CACHE_OFFLINE" "$APT/apt-cache.env" || fail "ancien format d'apt-cache.env conserve"
+contains "$APT/apt-cache.env" "APT_CACHE_ADMIN_SECRET="
 
 setup_dashboard
 contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "PORTAL_DOMAIN=web.expolab.lan"
@@ -168,6 +186,7 @@ DEPLOYED="" && deploy_stacks > /dev/null
 case "$DEPLOYED" in *" vpn-admin"*) fail "vpn-admin deploye alors que le VPN n'est pas installe" ;; esac
 case "$DEPLOYED" in *" ansible-web"*) ;; *) fail "ansible-web absent des stacks deployees" ;; esac
 case "$DEPLOYED" in *" apt-cache"*) ;; *) fail "apt-cache absent des stacks deployees" ;; esac
+case "$DEPLOYED" in *" apt-cache-admin"*) ;; *) fail "apt-cache-admin absent des stacks deployees" ;; esac
 mkdir -p "$WORK/vpn/wireguard/config" && touch "$WORK/vpn/wireguard/config/wg0.conf"
 DEPLOYED="" && deploy_stacks > /dev/null
 case "$DEPLOYED" in *" vpn-admin"*) ;; *) fail "vpn-admin non redeploye alors que le VPN est installe" ;; esac

@@ -19,7 +19,7 @@
 #                    auth: true (ex: protocole git HTTP de git-mirror)
 # - title, group, icon, description : (optionnels) affichage dans le portail
 #                    (tiroir et accueil). icon : box, server, network, globe,
-#                    shield, terminal, git, play. Sans titre, le nom sert.
+#                    shield, terminal, git, play, download. Sans titre, le nom sert.
 # - framed        : (optionnel, defaut true) false = le portail ouvre ce
 #                    service dans un nouvel onglet du navigateur au lieu de
 #                    l'afficher dans un cadre.
@@ -64,6 +64,13 @@ services:
     group: Réseau
     icon: shield
     description: Pairs WireGuard
+  - name: apt-cache
+    auth: true
+    backend_port: 5056
+    title: Cache apt
+    group: Réseau
+    icon: download
+    description: Paquets, journal, miroirs HTTPS
   - name: bastion
     backend_port: 5000
     title: Bastion

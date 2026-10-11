@@ -72,5 +72,6 @@ __pycache__/
 # Cache apt (paquets telecharges) + mode en ligne/hors ligne - etat runtime
 # propre a chaque lab, jamais commite.
 server/stacks/apt-cache/data/
+server/stacks/apt-cache/logs/
+server/stacks/apt-cache/config/
 server/stacks/apt-cache/apt-cache.env
-server/stacks/apt-cache/https-mirrors.conf

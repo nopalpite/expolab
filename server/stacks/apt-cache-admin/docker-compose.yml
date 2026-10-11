@@ -1,0 +1,23 @@
+# Stack Dockhand "apt-cache-admin" - etat, efficacite, journal, mode et miroirs
+# HTTPS du cache apt (stack apt-cache). Publie sur 127.0.0.1 : joignable
+# uniquement via Caddy (https://apt-cache.<domaine>, derriere le portail).
+services:
+  apt-cache-admin:
+    build: ${REPO_ROOT}/apt-cache-admin
+    container_name: expolab-apt-cache-admin
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5056:5056"
+    volumes:
+      # Mode et miroirs HTTPS : le cache les relit a son demarrage. Un dossier
+      # (pas un fichier) : meme dossier que celui monte en lecture seule dans
+      # le conteneur du cache.
+      - ${REPO_ROOT}/server/stacks/apt-cache/config:/config
+      # Journal des requetes et cache : lecture seule, pour les statistiques.
+      - ${REPO_ROOT}/server/stacks/apt-cache/logs:/logs:ro
+      - ${REPO_ROOT}/server/stacks/apt-cache/data:/cache:ro
+      # Baux dnsmasq (lecture seule) : afficher le NOM des machines.
+      - ${REPO_ROOT}/server/stacks/dnsmasq/data:/leases:ro
+      # Uniquement pour `docker restart expolab-apt-cache` - meme precedent
+      # accepte pour dnsmasq-admin et vpn-admin.
+      - /var/run/docker.sock:/var/run/docker.sock

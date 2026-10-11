@@ -516,6 +516,17 @@ cle partout.
 
 ### Paquets sans internet : le cache apt
 
+**Interface "Cache apt"** (portail > Reseau > Cache apt, `apt-cache-admin/`) :
+etat (mode, service, disque, nombre de paquets), efficacite (part des paquets
+servis par le cache, volume de transfert evite), activite par machine (avec leur
+nom, d'apres les baux dnsmasq), journal des requetes filtrable, bascule en
+ligne / hors ligne, edition des miroirs HTTPS. Le mode et les miroirs sont des
+fichiers de `server/stacks/apt-cache/config/` relus au demarrage du cache : il
+suffit de le redemarrer (`docker restart`), l'interface le fait. Le journal est
+conserve dans `server/stacks/apt-cache/logs/` ; la page d'administration
+integree d'apt-cacher-ng, ouverte a toutes les machines par defaut, est verrouillee
+par un secret genere (`apt-cache.env`).
+
 Les machines de l'expo **n'ont pas acces a internet** (`expo-lan` sans NAT) ;
 seul le serveur sort. Tout `apt update/install/upgrade` passe **obligatoirement**
 par la stack `apt-cache` (apt-cacher-ng, `10.42.0.1:3142`, sans repli en
@@ -534,8 +545,10 @@ serveur AVANT la flotte, pour que les faux Pi se provisionnent par le cache.
 **Depots en HTTPS (Docker, un editeur...).** Les depots Debian et Raspberry Pi OS
 sont en HTTP et passent tels quels. Pour un depot tiers en HTTPS, on le declare
 sur le serveur, comme on declare un depot dans `git-mirror` : une URL `https://`
-par ligne dans `server/stacks/apt-cache/https-mirrors.conf` (cree vide au
-deploiement, jamais ecrase), puis `sudo ./server/apt-cache-mode.sh restart`.
+par ligne - depuis l'interface **Cache apt** du portail (section "Miroirs
+HTTPS", bouton "Enregistrer et appliquer"), ou a la main dans
+`server/stacks/apt-cache/config/https-mirrors.conf` (cree au deploiement, jamais
+ecrase) puis `sudo ./server/apt-cache-mode.sh restart`.
 Le serveur telecharge alors le depot en HTTPS et le garde ; seuls les depots
 listes sont joignables ainsi (les tunnels HTTPS quelconques sont refuses).
 Cote machine (role Ansible), le depot s'ecrit en **http://** avec la meme adresse,
@@ -653,7 +666,7 @@ server/
   deploy-server.sh             # orchestration : installe Docker, demarre Dockhand, cree/redeploie les stacks via son API
   lib/                           # une fonction par responsabilite, sources par deploy-server.sh :
                                  #   preflight, tls, secrets (+ basic auth), credentials, automation-key, ansible-web, apt-cache, ntp, dashboard, dnsmasq, stacks, summary
-  apt-cache-mode.sh             # bascule le cache apt en ligne / hors ligne
+  apt-cache-mode.sh             # bascule le cache apt en ligne / hors ligne (ou le redemarre) en ligne de commande
   teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), reactive le DHCP integre d'Incus, desinstalle Docker
   docker-compose.yml            # bootstrap UNIQUEMENT : Dockhand (ne peut pas se creer via sa propre API)
   dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack (appelle dockhand_stack.py)
@@ -673,13 +686,15 @@ server/
     dashboard/{docker-compose.yml, dashboard.env, portal.env, services.yaml}   # le portail (code : portal/) ; les 3 fichiers .env/.yaml sont generes et non versionnes
     vpn-admin/docker-compose.yml                                      # build context = ../../vpn-admin
     git-mirror/{docker-compose.yml, data/}                            # data/ non versionne (clones bare + mirrors.yaml)
-    apt-cache/{docker-compose.yml, Dockerfile, entrypoint.sh, apt-cache.env, https-mirrors.conf, data/}  # apt-cacher-ng ; apt-cache.env, https-mirrors.conf et data/ non versionnes
+    apt-cache/{docker-compose.yml, Dockerfile, entrypoint.sh, apt-cache.env, config/, logs/, data/}  # apt-cacher-ng ; apt-cache.env (secret admin), config/ (mode, miroirs HTTPS), logs/ et data/ non versionnes
+    apt-cache-admin/docker-compose.yml                                # build context = ../../apt-cache-admin
     ansible-web/{docker-compose.yml, ansible-web.env, automation_key/, config.yaml, repo/, runs/}  # tout sauf docker-compose.yml non versionne ; execute bastion-ansible (depot separe, clone depuis git-mirror)
 webui/
   app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh
   Dockerfile                     # image (Flask + client Incus)
   templates/, static/            # page unique HTML/JS/CSS
 dnsmasq-admin/                  # meme forme que webui/ : app.py, Dockerfile, templates/, static/
+apt-cache-admin/                 # idem - interface du cache apt : etat, efficacite, journal, mode, miroirs HTTPS
 portal/                         # le portail (stack dashboard) : connexion unique, tiroir et onglets, verification de session pour Caddy
 caddy-admin/                     # idem - edite server/services.yaml, recharge Caddy via son admin API
 vpn-admin/                       # idem - appelle vpn/add-peer.sh et vpn/remove-peer.sh

@@ -1,6 +1,6 @@
 # Stack Dockhand "apt-cache" - cache apt (apt-cacher-ng) pour les machines
 # d'expo, voir Dockerfile. Pas de vhost Caddy : c'est un proxy HTTP, pas une
-# interface web.
+# interface web (l'interface d'administration est la stack apt-cache-admin).
 #
 # network_mode: host et ecoute sur 10.42.0.1 (hote sur expo-lan) : les
 # machines doivent le joindre, contrairement aux UIs d'administration liees a
@@ -12,15 +12,18 @@ services:
     restart: unless-stopped
     network_mode: host
     env_file:
-      # APT_CACHE_OFFLINE (0/1) - bascule par server/apt-cache-mode.sh, qui
-      # recree la stack (une variable d'environnement n'est lue qu'au
-      # demarrage du conteneur).
+      # APT_CACHE_ADMIN_SECRET : mot de passe de la page d'administration
+      # integree d'apt-cacher-ng, genere une fois par deploy-server.sh.
       - ${REPO_ROOT}/server/stacks/apt-cache/apt-cache.env
     volumes:
-      # Miroirs de depots HTTPS (nom -> URL amont), relu au demarrage du
-      # conteneur. Doit exister (bind-mount d'un fichier) : cree par
-      # deploy-server.sh, jamais ecrase. Non versionne.
-      - ${REPO_ROOT}/server/stacks/apt-cache/https-mirrors.conf:/etc/apt-cacher-ng-expolab/https-mirrors.conf:ro
+      # Mode (en ligne / hors ligne) et miroirs HTTPS : un DOSSIER (jamais un
+      # fichier seul, qu'un remplacement par renommage laisserait perime),
+      # modifie par apt-cache-admin / apt-cache-mode.sh puis relu au
+      # redemarrage du conteneur. Non versionne.
+      - ${REPO_ROOT}/server/stacks/apt-cache/config:/etc/apt-cacher-ng-expolab:ro
       # Gros et ecrit souvent : a deplacer sur SSD/NVMe plutot que la carte
       # SD si possible (usure). Non versionne, voir .gitignore.
       - ${REPO_ROOT}/server/stacks/apt-cache/data:/var/cache/apt-cacher-ng
+      # Journal des requetes conserve d'un redeploiement a l'autre : base des
+      # statistiques d'apt-cache-admin.
+      - ${REPO_ROOT}/server/stacks/apt-cache/logs:/var/log/apt-cacher-ng

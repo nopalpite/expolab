@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>expolab · Cache apt</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Cache apt</h1>
+        <p class="subtitle">Les machines de l'expo n'ont pas internet : tous leurs paquets passent par ce cache (apt-cacher-ng), qui télécharge ce qui manque.</p>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>État</h2>
+            <div class="cards">
+                <div class="card">
+                    <span class="label">Mode</span>
+                    <strong id="mode-value">…</strong>
+                    <span class="hint" id="mode-hint"></span>
+                    <button id="mode-btn" type="button" class="secondary">Changer</button>
+                </div>
+                <div class="card">
+                    <span class="label">Service</span>
+                    <strong id="running-value">…</strong>
+                    <span class="hint">Redémarrage : quelques secondes.</span>
+                    <button id="restart-btn" type="button" class="secondary">Redémarrer</button>
+                </div>
+                <div class="card">
+                    <span class="label">Disque</span>
+                    <strong id="disk-value">…</strong>
+                    <div class="bar"><div id="disk-bar"></div></div>
+                    <span class="hint" id="disk-hint"></span>
+                </div>
+                <div class="card">
+                    <span class="label">Paquets en cache</span>
+                    <strong id="packages-value">…</strong>
+                    <span class="hint" id="packages-hint"></span>
+                </div>
+            </div>
+            <p id="action-status" class="status" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Efficacité</h2>
+            <div class="cards">
+                <div class="card">
+                    <span class="label">Servis depuis le cache</span>
+                    <strong id="ratio-value">…</strong>
+                    <span class="hint" id="ratio-hint"></span>
+                </div>
+                <div class="card">
+                    <span class="label">Téléchargés depuis internet</span>
+                    <strong id="downloads-value">…</strong>
+                    <span class="hint" id="downloads-hint"></span>
+                </div>
+                <div class="card">
+                    <span class="label">Transfert évité</span>
+                    <strong id="saved-value">…</strong>
+                    <span class="hint" id="period-hint"></span>
+                </div>
+            </div>
+            <p class="subtitle">Calculé sur la fin du journal, uniquement pour les paquets (.deb).</p>
+        </section>
+
+        <section class="panel">
+            <h2>Machines</h2>
+            <table>
+                <thead><tr><th>Machine</th><th>Adresse</th><th>Paquets servis</th><th>Volume</th><th>Dernière activité</th></tr></thead>
+                <tbody id="clients-body"><tr><td colspan="5" class="empty">Chargement…</td></tr></tbody>
+            </table>
+        </section>
+
+        <section class="panel">
+            <h2>Miroirs HTTPS</h2>
+            <p class="subtitle">Dépôts apt en HTTPS joignables par les machines. Le serveur les télécharge en HTTPS ; la machine les demande en <code>http://</code> sous la même adresse, par son proxy habituel. Seuls ces dépôts sont joignables ainsi.</p>
+            <ul id="mirrors-list" class="mirrors"></ul>
+            <form id="mirror-form" class="inline-form">
+                <input type="text" id="mirror-url" placeholder="https://download.docker.com/linux/debian" autocomplete="off" aria-label="URL du dépôt">
+                <button type="submit" class="secondary">Ajouter</button>
+            </form>
+            <div class="actions">
+                <button id="mirrors-save" type="button" class="secondary">Enregistrer</button>
+                <button id="mirrors-apply" type="button">Enregistrer et appliquer</button>
+                <span class="hint">Appliquer redémarre le cache pour prendre la liste en compte.</span>
+            </div>
+            <p id="mirrors-status" class="status" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Journal</h2>
+            <form id="log-form" class="inline-form">
+                <input type="text" id="log-client" placeholder="Machine ou adresse" aria-label="Filtrer par machine">
+                <input type="text" id="log-q" placeholder="Nom de paquet ou chemin" aria-label="Filtrer par paquet">
+                <label class="check"><input type="checkbox" id="log-all"> Inclure les index</label>
+                <label class="check"><input type="checkbox" id="log-auto" checked> Actualisation auto</label>
+            </form>
+            <table>
+                <thead><tr><th>Heure</th><th>Événement</th><th>Machine</th><th>Taille</th><th>Fichier</th></tr></thead>
+                <tbody id="log-body"><tr><td colspan="5" class="empty">Chargement…</td></tr></tbody>
+            </table>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

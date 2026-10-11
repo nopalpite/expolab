@@ -1,4 +1,5 @@
 # Le cache (data/) peut peser des Go et n'a rien a faire dans le contexte de build.
 data/
+logs/
+config/
 apt-cache.env
-https-mirrors.conf
