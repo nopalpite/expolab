@@ -10,6 +10,9 @@
                caddy-admin). Le mot de passe est lu dans la variable
                d'environnement DOCKHAND_SETUP_PASSWORD (jamais en argument).
 
+  set-credentials  change l'identifiant et le mot de passe du compte admin
+               (server/set-credentials.sh) ; le jeton d'API reste valable.
+
 Idempotent : un jeton deja valide dans dockhand.env => rien a faire.
 Environnement : DOCKHAND_URL (defaut http://127.0.0.1:3000).
 Endpoints (spec OpenAPI de Dockhand, FEAT_API_DOCS=true) : /api/environments,
@@ -152,12 +155,47 @@ def ensure_auth(base_url: str, username: str, password: str, env_file: Path = EN
     return "configure"
 
 
+def set_credentials(base_url: str, old_user: str, new_user: str, new_password: str, env_file: Path = ENV_FILE) -> str:
+    """Change l'identifiant et le mot de passe du compte admin de Dockhand
+    (PUT /api/users/{id}, avec le jeton d'API de dockhand.env : il reste valable
+    apres le changement). Sans authentification active, la cree avec les nouveaux
+    identifiants (ensure_auth). Retourne "modifie" ou "configure"."""
+    token = read_token(env_file)
+    client = Client(base_url, token)
+    code, settings = client.request("GET", "/api/auth/settings")
+    if not (code == 401 or (code == 200 and settings.get("authEnabled"))):
+        ensure_auth(base_url, new_user, new_password, env_file)
+        return "configure"
+
+    code, users = client.request("GET", "/api/users")
+    if code == 401:
+        raise SetupError("Jeton d'API absent ou invalide (server/dockhand.env) : impossible de modifier le compte Dockhand.")
+    if code != 200 or not isinstance(users, list):
+        raise SetupError(f"Lecture des utilisateurs Dockhand impossible ({code}) : {_error_text(users)}")
+    admins = [u for u in users if u.get("isAdmin")]
+    target = next((u for u in users if u.get("username") == old_user), None) or (admins[0] if len(admins) == 1 else None)
+    if target is None:
+        raise SetupError(
+            f"Compte Dockhand '{old_user}' introuvable parmi {len(users)} utilisateur(s) "
+            f"({', '.join(u.get('username', '?') for u in users)}) : modification a faire dans l'interface de Dockhand."
+        )
+    code, updated = client.request("PUT", f"/api/users/{target['id']}", {"username": new_user, "password": new_password})
+    if code == 409:
+        raise SetupError(f"Dockhand a deja un utilisateur '{new_user}' : choisis un autre identifiant.")
+    if code != 200:
+        raise SetupError(f"Modification du compte Dockhand refusee ({code}) : {_error_text(updated)}")
+    return "modifie"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("ensure-env")
     auth = sub.add_parser("ensure-auth")
     auth.add_argument("--user", required=True)
+    change = sub.add_parser("set-credentials")
+    change.add_argument("--user", required=True, help="nouvel identifiant")
+    change.add_argument("--from", dest="old_user", default="", help="ancien identifiant (defaut : l'unique admin)")
     args = parser.parse_args()
 
     base_url = os.environ.get("DOCKHAND_URL", DEFAULT_URL)
@@ -166,6 +204,13 @@ def main() -> int:
             # Avec l'authentification deja active, le jeton de dockhand.env sert.
             env_id = ensure_environment(Client(base_url, read_token(ENV_FILE)))
             print(f"[+] Environnement Dockhand pret (id {env_id}).")
+        elif args.command == "set-credentials":
+            password = os.environ.get("DOCKHAND_SETUP_PASSWORD", "")
+            if not password:
+                print("DOCKHAND_SETUP_PASSWORD doit etre defini.", file=sys.stderr)
+                return 1
+            state = set_credentials(base_url, args.old_user, args.user, password)
+            print(f"[+] Compte Dockhand {state} (utilisateur '{args.user}').")
         else:
             password = os.environ.get("DOCKHAND_SETUP_PASSWORD", "")
             if not password:

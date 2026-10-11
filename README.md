@@ -374,8 +374,15 @@ via l'API Dockhand, sans repeter la bascule DHCP.
   Installation sans terminal : `EXPOLAB_ADMIN_USER` / `EXPOLAB_ADMIN_PASSWORD`
   (sinon le script s'arrete plutot que de laisser un mot de passe que personne
   n'a choisi). Un `bastion.env` anterieur garde son ancien mot de passe genere
-  (rappele a la fin du script) : pour tout unifier sur une installation
-  existante, supprimer `auth.env` et `bastion.env`, ou reinstaller.
+  (rappele a la fin du script).
+  **Changer le couple plus tard** (ou unifier une installation ancienne) :
+  `sudo ./server/set-credentials.sh` demande le nouveau couple (ou
+  `EXPOLAB_ADMIN_USER` / `EXPOLAB_ADMIN_PASSWORD`) et l'applique partout d'un
+  coup : compte Dockhand (par son API, le jeton reste valable), `auth.env`
+  (le portail le relit seul, sessions ouvertes fermees) et Bastion
+  (`bastion.env` + recreation de sa stack). Dockhand est modifie en premier :
+  s'il refuse, rien d'autre n'a bouge. Pour retrouver le couple actuel :
+  `sudo grep -E '^BASIC_AUTH_(USER|PASSWORD)=' server/stacks/caddy/auth.env`.
 - **Basic auth Caddy** devant les vhosts marques `auth: true` dans
   `server/services.yaml` (dockhand, fleet, dnsmasq, caddy, vpn, git-mirror,
   ansible-web). Identifiants = ceux choisis a l'installation
@@ -649,6 +656,7 @@ server/
   dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack (appelle dockhand_stack.py)
   dockhand_stack.py              # implementation unique de "supprimer + recreer une stack Dockhand" (bash ET caddy-admin)
   dockhand_setup.py              # configuration initiale de Dockhand par son API : environnement local, utilisateur admin, authentification, jeton
+  set-credentials.sh             # change le couple identifiant / mot de passe d'administration partout (Dockhand, portail, Bastion)
   services.yaml                  # services applicatifs exposes au reverse-proxy (dashboard, dockhand, fleet, bastion, dnsmasq/caddy/vpn-admin, git-mirror)
   render-caddyfile.py             # genere le Caddyfile a partir de server/services.yaml
   stacks/

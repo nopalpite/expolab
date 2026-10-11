@@ -59,6 +59,9 @@ jobs:
       - name: Test de la config du cache apt (miroirs HTTPS)
         run: bash tests/test_apt_cache_entrypoint.sh
 
+      - name: Test du changement d'identifiants d'administration
+        run: bash tests/test_set_credentials.sh
+
       # Le Caddyfile genere (forward_auth, en-tetes de cadre...) est valide par
       # Caddy lui-meme : une erreur de syntaxe ici couperait tous les services.
       - name: Validation du Caddyfile genere (Caddy)

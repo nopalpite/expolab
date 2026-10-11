@@ -40,6 +40,36 @@ _check_admin_password() {
     return 0
 }
 
+# _read_admin_credentials <identifiant par defaut> : saisie interactive de
+# l'identifiant puis du mot de passe (masque, confirme), jusqu'a ce qu'ils
+# soient valides. Positionne ADMIN_USER et ADMIN_PASSWORD. Terminal requis.
+_read_admin_credentials() {
+    local default_user="$1" user pw1 pw2 msg
+    while true; do
+        read -r -p "    Identifiant [$default_user] : " user
+        user="${user:-$default_user}"
+        if msg="$(_check_admin_user "$user")"; then break; fi
+        echo "    $msg"
+    done
+    while true; do
+        read -rs -p "    Mot de passe ($ADMIN_PASSWORD_MIN caracteres minimum) : " pw1
+        echo
+        if ! msg="$(_check_admin_password "$pw1")"; then
+            echo "    $msg"
+            continue
+        fi
+        read -rs -p "    Confirmer le mot de passe : " pw2
+        echo
+        if [ "$pw1" != "$pw2" ]; then
+            echo "    Les deux saisies different, recommencer."
+            continue
+        fi
+        break
+    done
+    ADMIN_USER="$user"
+    ADMIN_PASSWORD="$pw1"
+}
+
 setup_admin_credentials() {
     local auth_env="$SCRIPT_DIR/stacks/caddy/auth.env" msg
 
@@ -79,29 +109,6 @@ EOT
     utilise pour TOUTES les interfaces (Dockhand, Bastion, dnsmasq, Caddy,
     git-mirror, ansible-web, VPN, flotte). A choisir maintenant, une seule fois.
 EOT
-    local user pw1 pw2
-    while true; do
-        read -r -p "    Identifiant [admin] : " user
-        user="${user:-admin}"
-        if msg="$(_check_admin_user "$user")"; then break; fi
-        echo "    $msg"
-    done
-    while true; do
-        read -rs -p "    Mot de passe ($ADMIN_PASSWORD_MIN caracteres minimum) : " pw1
-        echo
-        if ! msg="$(_check_admin_password "$pw1")"; then
-            echo "    $msg"
-            continue
-        fi
-        read -rs -p "    Confirmer le mot de passe : " pw2
-        echo
-        if [ "$pw1" != "$pw2" ]; then
-            echo "    Les deux saisies different, recommencer."
-            continue
-        fi
-        break
-    done
-    ADMIN_USER="$user"
-    ADMIN_PASSWORD="$pw1"
+    _read_admin_credentials admin
     echo "[+] Identifiants enregistres (utilisateur : $ADMIN_USER)."
 }

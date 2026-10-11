@@ -56,6 +56,10 @@ class FakeDockhand:
                     if outer.auth_enabled and not self._authed():
                         return self._send({"error": "Unauthorized"}, 401)
                     return self._send(outer.envs)
+                if self.path == "/api/users":
+                    if outer.auth_enabled and not self._authed():
+                        return self._send({"error": "Unauthorized"}, 401)
+                    return self._send([{"id": i + 1, "username": n, "isAdmin": True} for i, n in enumerate(outer.users)])
                 self._send({}, 404)
 
             def do_PUT(self):
@@ -66,6 +70,21 @@ class FakeDockhand:
                         return self._send({"error": "no user"}, 400)
                     outer.auth_enabled = bool(body.get("authEnabled"))
                     return self._send({"authEnabled": outer.auth_enabled})
+                if self.path.startswith("/api/users/"):
+                    if not self._authed():
+                        return self._send({"error": "Unauthorized"}, 401)
+                    names = list(outer.users)
+                    index = int(self.path.rsplit("/", 1)[1]) - 1
+                    old_name = names[index]
+                    new_name = body.get("username", old_name)
+                    if new_name != old_name and new_name in outer.users:
+                        return self._send({"error": "username already exists"}, 409)
+                    if "password" in body and len(body["password"]) < 8:
+                        return self._send({"error": "Password must be at least 8 characters"}, 400)
+                    password = body.get("password", outer.users[old_name])
+                    del outer.users[old_name]
+                    outer.users[new_name] = password
+                    return self._send({"id": index + 1, "username": new_name, "isAdmin": True})
                 self._send({}, 404)
 
             def do_POST(self):
@@ -192,3 +211,47 @@ def test_existing_account_with_other_password_gives_a_clear_error(make, tmp_path
 def test_unreachable_dockhand_is_reported(tmp_path):
     with pytest.raises(ds.SetupError, match="joindre"):
         ds.ensure_auth("http://127.0.0.1:9", "admin", "Mot-de-passe-1", tmp_path / "dockhand.env")
+
+
+# --- changement du compte (server/set-credentials.sh) ------------------------
+
+def configured(make, tmp_path, **kwargs):
+    fake = make(**kwargs)
+    env_file = tmp_path / "dockhand.env"
+    ds.ensure_auth(fake.url, "admin", "Ancien-mdp-123", env_file)
+    return fake, env_file
+
+
+def test_set_credentials_changes_user_and_password_and_keeps_the_token(make, tmp_path):
+    fake, env_file = configured(make, tmp_path)
+    token = ds.read_token(env_file)
+    assert ds.set_credentials(fake.url, "admin", "gestion.expo", "Nouveau-mdp-456", env_file) == "modifie"
+    assert fake.users == {"gestion.expo": "Nouveau-mdp-456"}
+    # le jeton de dockhand.env ouvre toujours l'API
+    assert ds.Client(fake.url, token).request("GET", "/api/environments")[0] == 200
+
+
+def test_set_credentials_targets_the_only_admin_even_if_old_name_differs(make, tmp_path):
+    fake, env_file = configured(make, tmp_path)
+    ds.set_credentials(fake.url, "inconnu", "gestion.expo", "Nouveau-mdp-456", env_file)
+    assert list(fake.users) == ["gestion.expo"]
+
+
+def test_set_credentials_without_auth_creates_the_account(make, tmp_path):
+    fake = make()
+    env_file = tmp_path / "dockhand.env"
+    assert ds.set_credentials(fake.url, "admin", "gestion.expo", "Nouveau-mdp-456", env_file) == "configure"
+    assert fake.users == {"gestion.expo": "Nouveau-mdp-456"} and fake.auth_enabled is True
+
+
+def test_set_credentials_reports_a_taken_username(make, tmp_path):
+    fake, env_file = configured(make, tmp_path)
+    fake.users["autre"] = "Autre-mdp-123"  # un second compte porte deja le nom voulu
+    with pytest.raises(ds.SetupError, match="deja un utilisateur"):
+        ds.set_credentials(fake.url, "admin", "autre", "Nouveau-mdp-456", env_file)
+
+
+def test_set_credentials_needs_a_valid_token_when_auth_is_enabled(make, tmp_path):
+    fake = make(users={"admin": "Ancien-mdp-123"}, auth_enabled=True)
+    with pytest.raises(ds.SetupError, match="Jeton"):
+        ds.set_credentials(fake.url, "admin", "gestion.expo", "Nouveau-mdp-456", tmp_path / "dockhand.env")
