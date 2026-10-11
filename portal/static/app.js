@@ -16,7 +16,9 @@
     external: "M14 4h6v6 M20 4l-9 9 M18 14v5H5V6h5",
     logout: "M10 4H5v16h5 M15 8l4 4-4 4 M19 12H9",
     cert: "M12 3l2 3 3 .5-2 2.5.5 3-3.5-1.5L8.5 12l.5-3L7 6.5 10 6l2-3z M9 14l-1 7 4-2 4 2-1-7",
-    user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4 21c0-4 4-6 8-6s8 2 8 6"
+    user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4 21c0-4 4-6 8-6s8 2 8 6",
+    sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M12 2v2 M12 20v2 M4.9 4.9l1.4 1.4 M17.7 17.7l1.4 1.4 M2 12h2 M20 12h2 M4.9 19.1l1.4-1.4 M17.7 6.3l1.4-1.4",
+    moon: "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"
   };
   var SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -57,6 +59,22 @@
   var opened = {};        // nom -> { tab, frame }
   var order = [];       // noms des onglets ouverts, dans l'ordre
   var active = "home";
+
+  // --- theme clair / sombre (sombre par defaut, choix memorise) ---
+  var themeBtn = document.getElementById("theme-toggle");
+  function renderThemeButton() {
+    var dark = document.documentElement.getAttribute("data-theme") !== "light";
+    themeBtn.textContent = "";
+    themeBtn.appendChild(icon(dark ? "sun" : "moon"));  // l'icone montre ce vers quoi on bascule
+    themeBtn.setAttribute("aria-pressed", String(!dark));
+  }
+  themeBtn.addEventListener("click", function () {
+    var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("expolab.theme", next); } catch (e) { /* ignore */ }
+    renderThemeButton();
+  });
+  renderThemeButton();
 
   toggleBtn.appendChild(icon("menu"));
   externalBtn.appendChild(icon("external"));

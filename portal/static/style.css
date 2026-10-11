@@ -1,5 +1,29 @@
-:root {
+/* Theme sombre PAR DEFAUT, meme palette que les autres interfaces du lab
+   (caddy-admin, dnsmasq-admin...), independamment du reglage de l'OS : sans
+   ca le portail serait clair a cote de pages toutes sombres. Le bouton du
+   bandeau bascule vers le clair ; le choix est memorise (voir theme.js). */
+:root, :root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --stage: #0f1115;
+  --surface: #171a21;
+  --surface-2: #171a21;
+  --border: #2a2e38;
+  --text: #e6e8eb;
+  --muted: #9aa1ac;
+  --accent: #4f8cff;
+  --accent-bg: rgba(79, 140, 255, 0.16);
+  --ok: #3ecf8e;
+  --down: #ef5350;
+  --warn-bg: #3b3115;
+  --warn-text: #f0c872;
+  --radius: 8px;
+  --topbar: 44px;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
   --bg: #f6f6f4;
+  --stage: #ffffff;
   --surface: #ffffff;
   --surface-2: #f0efeb;
   --border: #dcdad3;
@@ -11,25 +35,6 @@
   --down: #c0392b;
   --warn-bg: #fdf1d6;
   --warn-text: #7a5300;
-  --radius: 8px;
-  --topbar: 44px;
-  color-scheme: light dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #161615;
-    --surface: #1f1f1d;
-    --surface-2: #2a2a27;
-    --border: #3a3a36;
-    --text: #ececE8;
-    --muted: #a3a29b;
-    --accent: #7aa7f0;
-    --accent-bg: #223452;
-    --ok: #55c07a;
-    --down: #ef6b5c;
-    --warn-bg: #3b3115;
-    --warn-text: #f0c872;
-  }
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -87,7 +92,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border-right: 1px solid var(--border); background: none; color: var(--muted); white-space: nowrap;
 }
 .tab:hover { color: var(--text); }
-.tab[aria-selected="true"] { background: var(--surface); color: var(--text); font-weight: 500; box-shadow: inset 0 -2px 0 var(--accent); }
+.tab[aria-selected="true"] { background: var(--stage); color: var(--text); font-weight: 500; box-shadow: inset 0 -2px 0 var(--accent); }
 .tab .close { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; border-radius: 4px; color: var(--muted); }
 .tab .close:hover { background: var(--surface-2); color: var(--text); }
 .tab .close svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; }
@@ -114,7 +119,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .app.collapsed .nav-item .label, .app.collapsed .group-title, .app.collapsed .nav-item .dot { display: none; }
 .app.collapsed .nav-item { justify-content: center; }
 
-.stage { position: relative; flex: 1; min-width: 0; background: var(--surface); }
+.stage { position: relative; flex: 1; min-width: 0; background: var(--stage); }
 .home { position: absolute; inset: 0; overflow-y: auto; padding: 20px; }
 .home[hidden], .frame[hidden] { display: none; }
 .home h2 { margin: 0 0 4px; font-size: 18px; font-weight: 500; }
@@ -135,7 +140,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .help p { margin: 0; flex: 1; }
 .help a { color: inherit; font-weight: 500; }
 
-.frame { position: absolute; inset: 0; background: var(--surface); }
+.frame { position: absolute; inset: 0; background: var(--stage); }
 .frame iframe { width: 100%; height: 100%; border: 0; display: block; }
 .frame .notice {
   position: absolute; left: 50%; top: 24px; transform: translateX(-50%); max-width: 90%;
