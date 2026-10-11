@@ -375,7 +375,10 @@ via l'API Dockhand, sans repeter la bascule DHCP.
   (sinon le script s'arrete plutot que de laisser un mot de passe que personne
   n'a choisi). Un `bastion.env` anterieur garde son ancien mot de passe genere
   (rappele a la fin du script).
-  **Changer le couple plus tard** (ou unifier une installation ancienne) :
+  **Changer le couple plus tard** - **depuis l'interface** : tiroir du portail
+  > **Compte > Identifiants** (section de caddy-admin ; mot de passe actuel exige,
+  application partout d'un coup, puis reconnexion) ; **ou en ligne de commande**
+  (aussi pour unifier une installation ancienne) :
   `sudo ./server/set-credentials.sh` demande le nouveau couple (ou
   `EXPOLAB_ADMIN_USER` / `EXPOLAB_ADMIN_PASSWORD`) et l'applique partout d'un
   coup : compte Dockhand (par son API, le jeton reste valable), `auth.env`
@@ -657,6 +660,7 @@ server/
   dockhand_stack.py              # implementation unique de "supprimer + recreer une stack Dockhand" (bash ET caddy-admin)
   dockhand_setup.py              # configuration initiale de Dockhand par son API : environnement local, utilisateur admin, authentification, jeton
   set-credentials.sh             # change le couple identifiant / mot de passe d'administration partout (Dockhand, portail, Bastion)
+  admin_credentials.py           # meme logique en Python, utilisee par caddy-admin (formulaire "Identifiants")
   services.yaml                  # services applicatifs exposes au reverse-proxy (dashboard, dockhand, fleet, bastion, dnsmasq/caddy/vpn-admin, git-mirror)
   render-caddyfile.py             # genere le Caddyfile a partir de server/services.yaml
   stacks/

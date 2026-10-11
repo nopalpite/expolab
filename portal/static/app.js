@@ -15,7 +15,8 @@
     x: "M6 6l12 12 M18 6L6 18",
     external: "M14 4h6v6 M20 4l-9 9 M18 14v5H5V6h5",
     logout: "M10 4H5v16h5 M15 8l4 4-4 4 M19 12H9",
-    cert: "M12 3l2 3 3 .5-2 2.5.5 3-3.5-1.5L8.5 12l.5-3L7 6.5 10 6l2-3z M9 14l-1 7 4-2 4 2-1-7"
+    cert: "M12 3l2 3 3 .5-2 2.5.5 3-3.5-1.5L8.5 12l.5-3L7 6.5 10 6l2-3z M9 14l-1 7 4-2 4 2-1-7",
+    user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4 21c0-4 4-6 8-6s8 2 8 6"
   };
   var SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -99,6 +100,12 @@
         drawer.appendChild(item);
       });
     });
+    if (byName.caddy) {
+      drawer.appendChild(el("div", { "class": "group-title", text: "Compte" }));
+      var account = el("button", { "class": "nav-item", type: "button", "data-nav": "compte", title: "Changer l'identifiant et le mot de passe" }, [icon("user"), el("span", { "class": "label", text: "Identifiants" })]);
+      account.addEventListener("click", function () { openAccount(); if (window.matchMedia("(max-width: 760px)").matches) setCollapsed(true); });
+      drawer.appendChild(account);
+    }
     if (hasCa) {
       drawer.appendChild(el("div", { "class": "group-title", text: "Aide" }));
       var cert = el("a", { "class": "nav-item", href: "/ca.crt", title: "Télécharger le certificat racine" }, [icon("cert"), el("span", { "class": "label", text: "Certificat racine" })]);
@@ -207,6 +214,15 @@
     select(name);
   }
 
+  // "Compte" : la section Identifiants de la page caddy-admin, dans un onglet a part.
+  function openAccount() {
+    if (!byName.caddy) return;
+    if (!byName.compte) {
+      byName.compte = { name: "compte", title: "Identifiants", group: "Compte", icon: "user", description: "", framed: true, url: byName.caddy.url + "#identifiants" };
+    }
+    openService("compte");
+  }
+
   function closeService(name) {
     var entry = opened[name];
     if (!entry) return;
@@ -228,9 +244,22 @@
 
   function fromHash() {
     var name = window.location.hash.replace(/^#/, "");
-    if (name && byName[name]) openService(name); else select("home");
+    if (name === "compte") openAccount();
+    else if (name && byName[name]) openService(name);
+    else select("home");
   }
   window.addEventListener("hashchange", fromHash);
+
+  // caddy-admin (dans un cadre) previent quand le couple d'identifiants a change :
+  // les sessions sont fermees, retour a la connexion. Seules les pages du meme
+  // domaine sont ecoutees.
+  window.addEventListener("message", function (ev) {
+    var domain = document.body.getAttribute("data-domain");
+    var host = "";
+    try { host = new URL(ev.origin).hostname; } catch (e) { return; }
+    if (host !== domain && !host.endsWith("." + domain)) return;
+    if (ev.data && ev.data.type === "expolab-credentials-changed") window.location.href = "/login";
+  });
 
   // --- demarrage ---
   fetchJson("/api/services").then(function (data) {

@@ -311,3 +311,74 @@ document.getElementById("tls-form").addEventListener("submit", async (e) => {
 });
 
 loadTls().then(() => loadServices().then(loadDiscoveries));
+
+// --- Identifiants d'administration -------------------------------------------
+
+async function loadCredentialsUser() {
+    try {
+        const res = await fetch("/api/credentials");
+        const data = await res.json();
+        document.getElementById("cred_user").value = data.user || "";
+    } catch (e) {
+        /* champ laisse vide : l'utilisateur le saisit */
+    }
+}
+
+document.getElementById("cred-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const status = document.getElementById("cred-status");
+    const btn = document.getElementById("cred-save-btn");
+    const fail = (message) => {
+        status.hidden = false;
+        status.className = "status status-error";
+        status.textContent = message;
+    };
+
+    const newPassword = document.getElementById("cred_new").value;
+    if (newPassword !== document.getElementById("cred_confirm").value) {
+        return fail("Les deux saisies du nouveau mot de passe different.");
+    }
+    if (!confirm("Appliquer ce nouveau couple a Dockhand, Bastion et au portail ? Tu seras reconnecte.")) return;
+
+    btn.disabled = true;
+    status.hidden = false;
+    status.className = "status";
+    status.textContent = "Application en cours (Dockhand, portail, Bastion)...";
+    try {
+        const res = await fetch("/api/credentials", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                current_password: document.getElementById("cred_current").value,
+                new_user: document.getElementById("cred_user").value.trim(),
+                new_password: newPassword,
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            const done = (data.done || []).length ? ` Deja applique : ${data.done.join(", ")}.` : "";
+            return fail((data.error || "Erreur") + done);
+        }
+        status.className = "status status-ok";
+        status.textContent = `Identifiants changes (${data.steps.join(", ")}). Reconnexion...`;
+        ["cred_current", "cred_new", "cred_confirm"].forEach((id) => { document.getElementById(id).value = ""; });
+        // Les sessions sont fermees : on previent le portail qui affiche cette page
+        // dans un cadre (il renvoie vers la connexion) ; hors portail, retour a l'accueil.
+        const portalOrigin = "https://dashboard." + location.hostname.split(".").slice(1).join(".");
+        if (window.parent !== window) {
+            window.parent.postMessage({ type: "expolab-credentials-changed" }, portalOrigin);
+        } else {
+            setTimeout(() => { window.location.href = portalOrigin + "/login"; }, 1500);
+        }
+    } catch (err) {
+        fail("Erreur reseau (si Caddy ou le portail viennent d'etre recrees, recharge la page et reessaie).");
+    } finally {
+        btn.disabled = false;
+    }
+});
+
+loadCredentialsUser();
+if (location.hash === "#identifiants") {
+    document.getElementById("identifiants").scrollIntoView();
+}
+

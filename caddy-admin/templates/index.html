@@ -40,6 +40,31 @@
             <p id="create-status" class="status" hidden></p>
         </section>
 
+        <section class="panel" id="identifiants">
+            <h2>Identifiants d'administration</h2>
+            <p class="subtitle">Un seul couple identifiant / mot de passe pour toutes les interfaces : Dockhand, Bastion, ce portail et les pages d'administration. Le changement s'applique partout d'un coup, puis tu es reconnecte.</p>
+            <form id="cred-form">
+                <div class="field">
+                    <label for="cred_current">Mot de passe actuel</label>
+                    <input type="password" id="cred_current" autocomplete="current-password" required>
+                </div>
+                <div class="field">
+                    <label for="cred_user">Nouvel identifiant</label>
+                    <input type="text" id="cred_user" autocomplete="username" required>
+                </div>
+                <div class="field">
+                    <label for="cred_new">Nouveau mot de passe (8 caracteres minimum)</label>
+                    <input type="password" id="cred_new" autocomplete="new-password" required>
+                </div>
+                <div class="field">
+                    <label for="cred_confirm">Confirmer</label>
+                    <input type="password" id="cred_confirm" autocomplete="new-password" required>
+                </div>
+                <button type="submit" id="cred-save-btn">Changer partout</button>
+            </form>
+            <p id="cred-status" class="status" hidden></p>
+        </section>
+
         <section class="panel">
             <h2>Certificat TLS</h2>
             <p class="subtitle">Mode global, s'applique a tous les services ci-dessous.</p>

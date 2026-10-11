@@ -21,6 +21,8 @@ import os
 import re
 import subprocess
 import sys
+import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -32,6 +34,8 @@ from ruamel.yaml import YAML
 # partagee avec server/dockhand-api.sh (voir son en-tete) : /server est
 # monte en entier dans ce conteneur.
 sys.path.insert(0, "/server")
+import admin_credentials  # noqa: E402
+import dockhand_setup  # noqa: E402
 import dockhand_stack  # noqa: E402
 
 app = Flask(__name__)
@@ -474,6 +478,76 @@ def api_services_delete(name: str):
     if not ok:
         return jsonify({"error": f"Service retire mais rechargement Caddy echoue : {err}"}), 500
     return jsonify({"ok": True})
+
+
+# --- Identifiants d'administration (un seul couple pour toutes les interfaces) ---
+# Meme logique que server/set-credentials.sh, voir server/admin_credentials.py.
+# Ici parce que ce service a deja l'acces en ecriture a server/, au jeton Dockhand
+# et au socket Docker - le portail (page de connexion exposee) n'a rien de tout ca.
+AUTH_ENV_PATH = SERVER_DIR / "stacks" / "caddy" / "auth.env"
+CRED_LIMIT = 5      # mots de passe actuels faux...
+CRED_WINDOW = 300   # ...par IP sur cette fenetre (secondes)
+_cred_failures: dict[str, list[float]] = {}
+_cred_lock = threading.Lock()
+
+
+def _dockhand_update(old_user: str, new_user: str, new_password: str) -> None:
+    dockhand_setup.set_credentials(
+        os.environ.get("DOCKHAND_URL", dockhand_setup.DEFAULT_URL), old_user, new_user, new_password
+    )
+
+
+def _redeploy_bastion() -> None:
+    # Un env_file n'est relu qu'a la creation du conteneur. Sans reconstruction
+    # d'image (Bastion est tire, pas construit) ni attente.
+    dockhand_stack.upsert_stack(
+        "bastion", SERVER_DIR / "stacks" / "bastion" / "docker-compose.yml", REPO_ROOT, rebuild_images=False, wait=False
+    )
+
+
+def _client_ip() -> str:
+    return request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr or "?"
+
+
+@app.route("/api/credentials", methods=["GET"])
+def api_credentials_get():
+    # Jamais le mot de passe : seulement l'identifiant, pour pre-remplir le formulaire.
+    return jsonify({"user": admin_credentials.env_value(AUTH_ENV_PATH, "BASIC_AUTH_USER")})
+
+
+@app.route("/api/credentials", methods=["POST"])
+def api_credentials_update():
+    body = request.get_json(force=True, silent=True) or {}
+    current = body.get("current_password") or ""
+    new_user = (body.get("new_user") or "").strip()
+    new_password = body.get("new_password") or ""
+
+    ip = _client_ip()
+    now = time.time()
+    recent = [t for t in _cred_failures.get(ip, []) if now - t < CRED_WINDOW]
+    _cred_failures[ip] = recent
+    if len(recent) >= CRED_LIMIT:
+        return jsonify({"error": "Trop de tentatives. Reessaie dans quelques minutes."}), 429
+    # Le mot de passe ACTUEL est exige : un cookie de session vole ne suffit pas a prendre le compte.
+    if not admin_credentials.verify_current(SERVER_DIR, current):
+        recent.append(now)
+        return jsonify({"error": "Mot de passe actuel incorrect."}), 403
+
+    error = admin_credentials.check_user(new_user) or admin_credentials.check_password(new_password)
+    if error:
+        return jsonify({"error": error}), 400
+    if not _cred_lock.acquire(blocking=False):
+        return jsonify({"error": "Un changement d'identifiants est deja en cours."}), 409
+    try:
+        steps = admin_credentials.apply_credentials(
+            SERVER_DIR, new_user, new_password, dockhand_update=_dockhand_update, redeploy_bastion=_redeploy_bastion
+        )
+    except admin_credentials.CredentialsError as exc:
+        return jsonify({"error": str(exc), "done": exc.done}), 502
+    finally:
+        _cred_lock.release()
+    _cred_failures.pop(ip, None)
+    return jsonify({"ok": True, "steps": steps})
 
 
 if __name__ == "__main__":

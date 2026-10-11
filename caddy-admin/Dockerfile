@@ -9,10 +9,13 @@
 # la premiere modification. python3-yaml reste installe pour
 # render-caddyfile.py (lecture seule, execute en subprocess depuis ce
 # meme conteneur - safe_load suffit largement pour ce cas-la).
+#
+# python3-bcrypt : hash du mot de passe d'administration (changement des
+# identifiants depuis l'UI, voir server/admin_credentials.py).
 FROM debian:trixie-slim
 
 RUN apt-get update -qq && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-flask python3-yaml python3-ruamel.yaml docker.io && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-flask python3-yaml python3-ruamel.yaml python3-bcrypt docker.io && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
