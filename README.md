@@ -61,7 +61,7 @@ chaque service comme **stack Dockhand independante** via son API REST
     sur `/domain/zone/*`, cree sur
     https://www.ovh.com/auth/api/createToken/) - saisi au premier
     `deploy-server.sh` (voir ci-dessus) ou plus tard dans caddy-admin, qui
-    redeploie alors les stacks `caddy`/`dashboard` via l'API
+    redeploie alors les stacks `caddy`/`dashboard`/`dnsmasq` via l'API
     Dockhand apres sauvegarde (necessaire pour qu'elles relisent leurs
     variables d'environnement - OVH_\* pour Caddy, PORTAL_DOMAIN
     pour dashboard - un simple rechargement a chaud ne suffit jamais pour

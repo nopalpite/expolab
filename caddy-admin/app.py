@@ -209,6 +209,16 @@ def sync_public_domain_dependents(tls: dict) -> None:
     dashboard_env = SERVER_DIR / "stacks" / "dashboard" / "dashboard.env"
     dashboard_env.write_text(f"PORTAL_DOMAIN={domain}\nPORTAL_TLS_MODE={tls['TLS_MODE']}\n")
 
+    # Resolution locale du domaine signe (voir setup_public_domain_dns dans
+    # server/lib/tls.sh) : sans elle, un appareil connecte au VPN chercherait
+    # ce nom dans le DNS public, ou aucun enregistrement A n'existe (DNS-01 ne
+    # cree que des TXT). dnsmasq ne relit ce fichier qu'a son demarrage.
+    public_domain_conf = SERVER_DIR / "stacks" / "dnsmasq" / "admin-config" / "public-domain.conf"
+    if tls["TLS_MODE"] == "signed":
+        public_domain_conf.write_text(f"address=/{domain}/10.42.0.1\n")
+    else:
+        public_domain_conf.write_text("")
+
 
 def sync_portal_services() -> None:
     """Copie services.yaml pour le portail, SUR PLACE (meme inode) : le portail
@@ -333,6 +343,9 @@ def api_tls_update():
     for name, compose_rel in (
         ("caddy", "stacks/caddy/docker-compose.yml"),
         ("dashboard", "stacks/dashboard/docker-compose.yml"),
+        # public-domain.conf (voir sync_public_domain_dependents) n'est lu
+        # qu'au demarrage de dnsmasq.
+        ("dnsmasq", "stacks/dnsmasq/docker-compose.yml"),
     ):
         try:
             # Sans reconstruction d'image ni attente : seul l'environnement
