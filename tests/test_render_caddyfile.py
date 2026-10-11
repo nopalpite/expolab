@@ -87,7 +87,8 @@ def test_auth_without_portal_fails_closed(tmp_path):
 def test_framed_services_only_allow_the_portal_as_parent(tmp_path):
     result = render(tmp_path, [PORTAL, {"name": "fleet", "auth": True, "backend_port": 5050}])
     block = vhost(result.stdout, "fleet")
-    assert 'header +Content-Security-Policy "frame-ancestors https://dashboard.web.expolab.lan"' in block
+    # le portail ET le service lui-meme (sous-cadres : session SSH de Bastion)
+    assert "header +Content-Security-Policy \"frame-ancestors 'self' https://dashboard.web.expolab.lan\"" in block
     # le service ne peut pas imposer son propre refus de cadre
     assert "header_down -X-Frame-Options" in block
     assert "frame-ancestors[^;]*" in block
@@ -95,7 +96,7 @@ def test_framed_services_only_allow_the_portal_as_parent(tmp_path):
 
 def test_frame_parent_follows_the_public_domain(tmp_path):
     result = render(tmp_path, [PORTAL, {"name": "fleet", "backend_port": 5050}], "signed", "expolab.example.fr")
-    assert 'frame-ancestors https://dashboard.expolab.example.fr"' in result.stdout
+    assert "frame-ancestors 'self' https://dashboard.expolab.example.fr\"" in result.stdout
 
 
 def test_portal_itself_is_never_framed_by_caddy_headers(tmp_path):

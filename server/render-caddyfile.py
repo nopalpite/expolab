@@ -43,8 +43,11 @@
 # Affichage dans le portail : les services sont ouverts dans des cadres
 # (iframe) de https://dashboard.<domaine>. Sauf `framed: false`, Caddy retire
 # X-Frame-Options et le `frame-ancestors` du service, puis impose
-# `frame-ancestors https://dashboard.<domaine>` : le cadre n'est autorise que
-# depuis le portail, jamais depuis un site tiers.
+# `frame-ancestors 'self' https://dashboard.<domaine>` : le cadre n'est autorise
+# que depuis le portail ET depuis le service lui-meme (un cadre peut contenir un
+# sous-cadre du meme service : la page de session SSH de Bastion, par exemple -
+# frame-ancestors verifie TOUS les ancetres, pas seulement le premier), jamais
+# depuis un site tiers.
 #
 # Usage: render-caddyfile.py <chemin_services.yaml> [tls_mode] [domaine]
 #   tls_mode : internal (defaut) ou signed
@@ -137,7 +140,7 @@ def main() -> None:
                 print(line)
         framed = is_framed(svc)
         if framed:
-            print(f'    header +Content-Security-Policy "frame-ancestors https://{PORTAL_NAME}.{public_domain}"')
+            print(f"    header +Content-Security-Policy \"frame-ancestors 'self' https://{PORTAL_NAME}.{public_domain}\"")
         for route in svc.get("extra_routes", []):
             route_host = route.get("backend_host", backend_host)
             print(f"    reverse_proxy {route['path']} {route_host}:{route['backend_port']}")

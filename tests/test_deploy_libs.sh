@@ -176,7 +176,7 @@ setup_public_domain_dns
 contains "$SCRIPT_DIR/stacks/caddy/Caddyfile" "dns ovh {"
 contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "PORTAL_DOMAIN=expolab.example.fr"
 contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "PORTAL_TLS_MODE=signed"
-contains "$SCRIPT_DIR/stacks/caddy/Caddyfile" "frame-ancestors https://dashboard.expolab.example.fr"
+contains "$SCRIPT_DIR/stacks/caddy/Caddyfile" "frame-ancestors 'self' https://dashboard.expolab.example.fr"
 contains "$SCRIPT_DIR/stacks/dnsmasq/admin-config/public-domain.conf" "address=/expolab.example.fr/10.42.0.1"
 
 # deploy_stacks : vpn-admin n'est redeploye que si le VPN est installe.

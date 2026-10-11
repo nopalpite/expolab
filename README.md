@@ -127,7 +127,8 @@ chaque service comme **stack Dockhand independante** via son API REST
   certificat racine de Caddy (telechargeable sur la page de connexion, dans le
   tiroir "Aide" ou `/ca.crt`) ; en certificat signe (Let's Encrypt), rien a faire.
   Caddy n'autorise l'affichage en cadre que depuis le portail
-  (`frame-ancestors https://dashboard.<domaine>`).
+  (`frame-ancestors 'self' https://dashboard.<domaine>` : le portail, et le service
+  lui-meme pour ses propres sous-cadres, comme la session SSH de Bastion).
 - **dnsmasq-admin**, **caddy-admin**, **vpn-admin** - pages minimales
   (Flask, meme style que la webui) pour piloter dnsmasq/Caddy/WireGuard
   sans repasser par la ligne de commande, sur le meme principe que la
