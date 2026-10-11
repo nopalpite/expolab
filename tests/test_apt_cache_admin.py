@@ -249,3 +249,56 @@ def test_a_download_is_not_paired_with_a_serve_for_another_machine_or_much_later
     ]
     assert sorted(e["kind"] for e in admin.group_events(too_late)) == ["fetch", "hit"]
 
+
+# --- echecs : le cache repond par une page d'erreur (ex. 503 hors ligne) ----------------
+
+OFFLINE_FAILURE = [
+    # cache hors ligne, paquet absent : apt reessaie, le cache repond sa page d'erreur (688 octets)
+    "1791742838|O|688|10.42.0.147|debrep/pool/main/s/sl/sl_5.02-1_arm64.deb",
+    "1791742841|O|688|10.42.0.147|debrep/pool/main/s/sl/sl_5.02-1_arm64.deb",
+    "1791742845|O|688|10.42.0.147|debrep/pool/main/s/sl/sl_5.02-1_arm64.deb",
+]
+
+
+def parsed(admin, lines):
+    return [admin.parse_line(line) for line in lines]
+
+
+def test_a_small_serve_for_a_package_absent_from_the_cache_is_a_failure(admin):
+    events = admin.group_events(parsed(admin, OFFLINE_FAILURE), cached=set())
+    assert [e["kind"] for e in events] == ["error"] * 3
+
+
+def test_a_small_serve_for_a_package_present_in_the_cache_is_a_hit(admin):
+    # un vrai petit paquet deja en cache n'est pas une erreur
+    events = admin.group_events(parsed(admin, OFFLINE_FAILURE[:1]), cached={"sl_5.02-1_arm64.deb"})
+    assert [e["kind"] for e in events] == ["hit"]
+
+
+def test_a_big_serve_is_never_a_failure_even_if_the_file_left_the_cache(admin):
+    big = ["1791742838|O|900000|10.42.0.147|debrep/pool/main/s/sl/sl_5.02-1_arm64.deb"]
+    assert [e["kind"] for e in admin.group_events(parsed(admin, big), cached=set())] == ["hit"]
+
+
+def test_without_cache_listing_nothing_is_flagged_as_a_failure(admin):
+    assert [e["kind"] for e in admin.group_events(parsed(admin, OFFLINE_FAILURE), cached=None)] == ["hit"] * 3
+
+
+def test_failures_do_not_count_as_served_packages_or_hits(admin):
+    entries = parsed(admin, LOG[:2] + OFFLINE_FAILURE)  # un vrai acces (miss) + 3 echecs
+    stats = admin.compute_stats(entries, {"10.42.0.147": "bobby"}, cached={"figlet_2.2.5-3_arm64.deb"})
+    assert (stats["requests"], stats["hits"], stats["errors"]) == (1, 0, 3)
+    assert stats["hit_ratio"] == 0
+    bobby = [c for c in stats["clients"] if c["client"] == "10.42.0.147"][0]
+    assert bobby["errors"] == 3 and bobby["requests"] == 0 and bobby["bytes"] == 0
+
+
+def test_status_and_log_endpoints_expose_failures(admin):
+    (admin.cache / "debrep").mkdir()
+    (admin.cache / "debrep" / "figlet_2.2.5-3_arm64.deb").write_bytes(b"x" * 10)
+    write_log(admin, LOG[:2] + OFFLINE_FAILURE)
+    status = admin.client.get("/api/status").get_json()
+    assert status["efficiency"]["errors"] == 3 and status["efficiency"]["requests"] == 1
+    kinds = [e["kind"] for e in admin.client.get("/api/log").get_json()["entries"]]
+    assert kinds.count("error") == 3 and kinds.count("miss") == 1
+

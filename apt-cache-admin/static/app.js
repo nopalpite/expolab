@@ -75,19 +75,25 @@ function renderStatus(data) {
     $("ratio-hint").textContent = `${eff.hits} paquet(s) sur ${eff.requests} demandé(s) par les machines`;
     $("downloads-value").textContent = String(eff.downloads);
     $("downloads-hint").textContent = `${formatBytes(eff.downloaded_bytes)} récupérés pour le cache`;
+    $("errors-value").textContent = String(eff.errors);
+    $("errors-value").style.color = eff.errors ? "var(--error)" : "";
+    $("errors-hint").textContent = eff.errors
+        ? "paquet(s) demandé(s) mais indisponible(s) : cache hors ligne ou fichier introuvable"
+        : "aucun paquet indisponible";
     $("saved-value").textContent = formatBytes(eff.saved_bytes);
     $("period-hint").textContent = eff.since ? `Du ${formatDate(eff.since)} au ${formatDate(eff.until)}` : "Journal vide";
 
     const body = $("clients-body");
     body.textContent = "";
     if (!data.clients.length) {
-        body.appendChild(el("tr", {}, [el("td", { colspan: "5", "class": "empty", text: "Aucune requête de paquet dans le journal." })]));
+        body.appendChild(el("tr", {}, [el("td", { colspan: "6", "class": "empty", text: "Aucune requête de paquet dans le journal." })]));
     }
     data.clients.forEach((c) => {
         body.appendChild(el("tr", {}, [
             el("td", { text: c.name || "(nom inconnu)" }),
             el("td", { text: c.client }),
             el("td", { "class": "num", text: String(c.requests) }),
+            el("td", { "class": "num" + (c.errors ? " ev-error" : ""), text: String(c.errors) }),
             el("td", { "class": "num", text: formatBytes(c.bytes) }),
             el("td", { text: formatDate(c.last) }),
         ]));
@@ -205,6 +211,7 @@ const EVENT_LABELS = {
     hit: "Servi depuis le cache",
     miss: "Cache : téléchargé sur internet, puis servi",
     fetch: "Cache : récupéré sur internet (sans machine en attente)",
+    error: "Échec : le cache n'a pas pu fournir le fichier (hors ligne ou introuvable)",
 };
 
 async function loadLog() {

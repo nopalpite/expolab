@@ -81,6 +81,7 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .ev-miss { color: var(--warn); }
 .ev-hit { color: var(--ok); }
 .ev-fetch { color: var(--muted); }
+.ev-error { color: var(--error); }
 
 .status { margin: 10px 0 0; padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; background: var(--bg); border: 1px solid var(--border); }
 .status[hidden] { display: none; }

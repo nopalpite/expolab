@@ -51,7 +51,7 @@ MIRRORS_HEADER = """# Depots apt en HTTPS joignables par les machines de l'expo 
 # a la main, puis : sudo ./server/apt-cache-mode.sh restart
 """
 
-_usage_cache: dict = {"at": 0.0, "value": None}
+_usage_cache: dict = {"at": 0.0, "value": None, "names": set()}
 _lock = threading.Lock()  # un seul redemarrage / ecriture de config a la fois
 
 
@@ -107,33 +107,76 @@ def iso(epoch: int | None) -> str | None:
     return datetime.datetime.fromtimestamp(epoch).isoformat(timespec="seconds") if epoch else None
 
 
-def compute_stats(entries: list[dict], names: dict[str, str]) -> dict:
-    """Efficacite du cache. Une requete servie a une machine produit une ligne O ;
-    si le cache a du telecharger le paquet, une ligne I la precede. Donc :
-    paquets servis = lignes O (.deb), telecharges = lignes I (.deb), le reste
-    est servi directement par le cache."""
-    served = downloaded = served_bytes = downloaded_bytes = 0
-    clients: dict[str, dict] = {}
+PAIR_WINDOW = 15      # secondes : une ligne I suivie d'une ligne O pour le meme fichier = un seul acces
+ERROR_MAX_BYTES = 4096  # une page d'erreur du cache (503, 404...) fait moins de 1 Ko : au-dela, ce n'est pas une erreur
+
+
+def group_events(entries: list[dict], cached: set[str] | None = None) -> list[dict]:
+    """Regroupe le journal en acces lisibles. Une machine ne parle QU'AU cache :
+    quand il n'a pas le fichier, il le telecharge d'abord (ligne I, c'est LUI qui
+    sort sur internet) puis le sert (ligne O). Donc :
+      miss  = I puis O pour le meme fichier : le cache est alle le chercher pour la machine
+      hit   = O seul : servi directement depuis le cache
+      fetch = I sans O : le cache a recupere un fichier sans qu'une machine l'attende (index...)
+      error = O seul pour un paquet ABSENT du cache et de la taille d'une page d'erreur :
+              le cache a repondu par une erreur (ex. 503 "Unable to download in offline
+              mode") et la machine n'a rien recu - le journal ne note pas le code HTTP,
+              c'est le seul moyen de ne pas compter un echec comme un acces reussi.
+    `cached` : noms des .deb presents dans le cache (None = detection des erreurs desactivee)."""
+    pending: dict[tuple[str, str], list[dict]] = {}
+    events: list[dict] = []
     for e in entries:
-        if not is_package(e["path"]):
-            continue
+        key = (e["client"], e["path"])
         if e["dir"] == "I":
-            downloaded += 1
-            downloaded_bytes += e["bytes"]
+            fetch = {"time": e["time"], "kind": "fetch", "bytes": e["bytes"], "fetched_bytes": e["bytes"], "client": e["client"], "path": e["path"]}
+            pending.setdefault(key, []).append(fetch)
+            events.append(fetch)
             continue
-        served += 1
+        waiting = [f for f in pending.get(key, []) if e["time"] - f["time"] <= PAIR_WINDOW]
+        if waiting:
+            fetch = waiting[-1]
+            pending[key].remove(fetch)
+            fetch.update(kind="miss", bytes=e["bytes"])  # taille servie a la machine
+            continue
+        kind = "hit"
+        if cached is not None and is_package(e["path"]) and e["bytes"] < ERROR_MAX_BYTES and e["path"].rsplit("/", 1)[-1] not in cached:
+            kind = "error"
+        events.append({"time": e["time"], "kind": kind, "bytes": e["bytes"], "fetched_bytes": 0, "client": e["client"], "path": e["path"]})
+    return events
+
+
+def compute_stats(entries: list[dict], names: dict[str, str], cached: set[str] | None = None) -> dict:
+    """Efficacite du cache, sur les paquets (.deb) uniquement :
+    requests = acces reussis (hit + miss), hit_ratio = part servie sans telechargement,
+    errors = paquets demandes mais indisponibles (cache hors ligne, introuvable...)."""
+    events = [e for e in group_events(entries, cached) if is_package(e["path"])]
+    hits = misses = errors = fetches = 0
+    served_bytes = downloaded_bytes = 0
+    clients: dict[str, dict] = {}
+    for e in events:
+        downloaded_bytes += e["fetched_bytes"]
+        if e["kind"] == "fetch":
+            fetches += 1
+            continue
+        c = clients.setdefault(e["client"], {"client": e["client"], "name": names.get(e["client"], ""), "requests": 0, "errors": 0, "bytes": 0, "last": 0})
+        c["last"] = max(c["last"], e["time"])
+        if e["kind"] == "error":
+            errors += 1
+            c["errors"] += 1
+            continue
+        hits += e["kind"] == "hit"
+        misses += e["kind"] == "miss"
         served_bytes += e["bytes"]
-        c = clients.setdefault(e["client"], {"client": e["client"], "name": names.get(e["client"], ""), "requests": 0, "bytes": 0, "last": 0})
         c["requests"] += 1
         c["bytes"] += e["bytes"]
-        c["last"] = max(c["last"], e["time"])
-    hits = max(0, served - downloaded)
+    requests = hits + misses
     times = [e["time"] for e in entries]
     return {
-        "requests": served,
-        "downloads": downloaded,
+        "requests": requests,
+        "downloads": misses + fetches,
         "hits": hits,
-        "hit_ratio": round(hits / served, 3) if served else None,
+        "errors": errors,
+        "hit_ratio": round(hits / requests, 3) if requests else None,
         "served_bytes": served_bytes,
         "downloaded_bytes": downloaded_bytes,
         "saved_bytes": max(0, served_bytes - downloaded_bytes),
@@ -146,39 +189,10 @@ def compute_stats(entries: list[dict], names: dict[str, str]) -> dict:
     }
 
 
-PAIR_WINDOW = 15  # secondes : une ligne I suivie d'une ligne O pour le meme fichier = un seul acces
-
-
-def group_events(entries: list[dict]) -> list[dict]:
-    """Regroupe le journal en acces lisibles. Une machine ne parle QU'AU cache :
-    quand il n'a pas le fichier, il le telecharge d'abord (ligne I, c'est LUI qui
-    sort sur internet) puis le sert (ligne O). Donc :
-      miss  = I puis O pour le meme fichier : le cache est alle le chercher pour la machine
-      hit   = O seul : servi directement depuis le cache
-      fetch = I sans O : le cache a recupere un fichier sans qu'une machine l'attende (index...)"""
-    pending: dict[tuple[str, str], list[dict]] = {}
-    events: list[dict] = []
-    for e in entries:
-        key = (e["client"], e["path"])
-        if e["dir"] == "I":
-            fetch = {"time": e["time"], "kind": "fetch", "bytes": e["bytes"], "client": e["client"], "path": e["path"]}
-            pending.setdefault(key, []).append(fetch)
-            events.append(fetch)
-            continue
-        waiting = [f for f in pending.get(key, []) if e["time"] - f["time"] <= PAIR_WINDOW]
-        if waiting:
-            fetch = waiting[-1]
-            pending[key].remove(fetch)
-            fetch.update(kind="miss", bytes=e["bytes"])  # taille servie a la machine
-        else:
-            events.append({"time": e["time"], "kind": "hit", "bytes": e["bytes"], "client": e["client"], "path": e["path"]})
-    return events
-
-
-def recent_entries(entries: list[dict], names: dict[str, str], limit: int, client: str, query: str, only_packages: bool) -> list[dict]:
+def recent_entries(entries: list[dict], names: dict[str, str], limit: int, client: str, query: str, only_packages: bool, cached: set[str] | None = None) -> list[dict]:
     query = query.lower()
     out = []
-    for e in reversed(group_events(entries)):
+    for e in reversed(group_events(entries, cached)):
         if only_packages and not is_package(e["path"]):
             continue
         name = names.get(e["client"], "")
@@ -199,6 +213,7 @@ def cache_usage(now: float | None = None) -> dict:
     if _usage_cache["value"] is not None and now - _usage_cache["at"] < USAGE_CACHE_SECONDS:
         return _usage_cache["value"]
     packages = total = 0
+    names: set[str] = set()
     for root, _dirs, files in os.walk(CACHE_DIR, followlinks=False):
         for name in files:
             try:
@@ -208,8 +223,15 @@ def cache_usage(now: float | None = None) -> dict:
             total += size
             if is_package(name):
                 packages += 1
-    _usage_cache.update(at=now, value={"packages": packages, "bytes": total})
+                names.add(name)
+    _usage_cache.update(at=now, value={"packages": packages, "bytes": total}, names=names)
     return _usage_cache["value"]
+
+
+def cached_names() -> set[str]:
+    """Noms des .deb presents dans le cache (memorises comme cache_usage)."""
+    cache_usage()
+    return _usage_cache["names"]
 
 
 def disk_usage() -> dict:
@@ -293,7 +315,7 @@ def index():
 @app.route("/api/status")
 def api_status():
     entries, log_size = read_entries()
-    stats = compute_stats(entries, load_names())
+    stats = compute_stats(entries, load_names(), cached_names())
     return jsonify(
         {
             "mode": read_mode(),
@@ -317,7 +339,7 @@ def api_log():
     return jsonify(
         {
             "entries": recent_entries(
-                entries, load_names(), limit, request.args.get("client", "").strip(), request.args.get("q", "").strip(), only_packages
+                entries, load_names(), limit, request.args.get("client", "").strip(), request.args.get("q", "").strip(), only_packages, cached_names()
             )
         }
     )
