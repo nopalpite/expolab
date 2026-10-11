@@ -146,10 +146,39 @@ def compute_stats(entries: list[dict], names: dict[str, str]) -> dict:
     }
 
 
+PAIR_WINDOW = 15  # secondes : une ligne I suivie d'une ligne O pour le meme fichier = un seul acces
+
+
+def group_events(entries: list[dict]) -> list[dict]:
+    """Regroupe le journal en acces lisibles. Une machine ne parle QU'AU cache :
+    quand il n'a pas le fichier, il le telecharge d'abord (ligne I, c'est LUI qui
+    sort sur internet) puis le sert (ligne O). Donc :
+      miss  = I puis O pour le meme fichier : le cache est alle le chercher pour la machine
+      hit   = O seul : servi directement depuis le cache
+      fetch = I sans O : le cache a recupere un fichier sans qu'une machine l'attende (index...)"""
+    pending: dict[tuple[str, str], list[dict]] = {}
+    events: list[dict] = []
+    for e in entries:
+        key = (e["client"], e["path"])
+        if e["dir"] == "I":
+            fetch = {"time": e["time"], "kind": "fetch", "bytes": e["bytes"], "client": e["client"], "path": e["path"]}
+            pending.setdefault(key, []).append(fetch)
+            events.append(fetch)
+            continue
+        waiting = [f for f in pending.get(key, []) if e["time"] - f["time"] <= PAIR_WINDOW]
+        if waiting:
+            fetch = waiting[-1]
+            pending[key].remove(fetch)
+            fetch.update(kind="miss", bytes=e["bytes"])  # taille servie a la machine
+        else:
+            events.append({"time": e["time"], "kind": "hit", "bytes": e["bytes"], "client": e["client"], "path": e["path"]})
+    return events
+
+
 def recent_entries(entries: list[dict], names: dict[str, str], limit: int, client: str, query: str, only_packages: bool) -> list[dict]:
     query = query.lower()
     out = []
-    for e in reversed(entries):
+    for e in reversed(group_events(entries)):
         if only_packages and not is_package(e["path"]):
             continue
         name = names.get(e["client"], "")
@@ -157,16 +186,7 @@ def recent_entries(entries: list[dict], names: dict[str, str], limit: int, clien
             continue
         if query and query not in e["path"].lower():
             continue
-        out.append(
-            {
-                "time": iso(e["time"]),
-                "kind": "telecharge" if e["dir"] == "I" else "servi",
-                "bytes": e["bytes"],
-                "client": e["client"],
-                "name": name,
-                "path": e["path"],
-            }
-        )
+        out.append({"time": iso(e["time"]), "kind": e["kind"], "bytes": e["bytes"], "client": e["client"], "name": name, "path": e["path"]})
         if len(out) >= limit:
             break
     return out

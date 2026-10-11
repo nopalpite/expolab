@@ -199,6 +199,14 @@ $("mirrors-apply").addEventListener("click", () => saveMirrors(true));
 
 // --- journal ----------------------------------------------------------------------
 
+// Une machine ne parle QU'AU cache : "telecharge" designe toujours le CACHE qui va
+// chercher le fichier sur internet, jamais la machine.
+const EVENT_LABELS = {
+    hit: "Servi depuis le cache",
+    miss: "Cache : téléchargé sur internet, puis servi",
+    fetch: "Cache : récupéré sur internet (sans machine en attente)",
+};
+
 async function loadLog() {
     const params = new URLSearchParams({ limit: "100" });
     if ($("log-client").value.trim()) params.set("client", $("log-client").value.trim());
@@ -214,7 +222,7 @@ async function loadLog() {
         data.entries.forEach((e) => {
             body.appendChild(el("tr", {}, [
                 el("td", { text: formatDate(e.time) }),
-                el("td", { "class": "ev-" + e.kind, text: e.kind === "servi" ? "Servi à la machine" : "Téléchargé sur internet" }),
+                el("td", { "class": "ev-" + e.kind, text: EVENT_LABELS[e.kind] || e.kind }),
                 el("td", { text: e.name ? `${e.name} (${e.client})` : e.client }),
                 el("td", { "class": "num", text: formatBytes(e.bytes) }),
                 el("td", { "class": "path", text: e.path }),

@@ -78,8 +78,9 @@ th { color: var(--muted); font-weight: 500; }
 td.path { word-break: break-all; font-family: ui-monospace, monospace; font-size: 0.82rem; }
 td.num, th.num { text-align: right; white-space: nowrap; }
 .empty { color: var(--muted); text-align: center; }
-.ev-telecharge { color: var(--warn); }
-.ev-servi { color: var(--ok); }
+.ev-miss { color: var(--warn); }
+.ev-hit { color: var(--ok); }
+.ev-fetch { color: var(--muted); }
 
 .status { margin: 10px 0 0; padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; background: var(--bg); border: 1px solid var(--border); }
 .status[hidden] { display: none; }

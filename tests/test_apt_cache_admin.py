@@ -103,11 +103,12 @@ def test_recent_entries_filters_and_orders_newest_first(admin):
     recent = admin.recent_entries(entries, names, 100, "", "", only_packages=True)
     assert [e["time"] for e in recent] == sorted((e["time"] for e in recent), reverse=True)
     assert all(e["path"].endswith(".deb") for e in recent)
-    assert {e["kind"] for e in recent} == {"servi", "telecharge"}
-    assert len(admin.recent_entries(entries, names, 100, "", "", only_packages=False)) == 6
+    assert {e["kind"] for e in recent} == {"hit", "miss"}
+    assert len(recent) == 3  # un acces "miss" (I puis O regroupes) + deux "hit"
+    assert len(admin.recent_entries(entries, names, 100, "", "", only_packages=False)) == 4
     assert {e["client"] for e in admin.recent_entries(entries, names, 100, "bobby", "", True)} == {"10.42.0.148"}  # par NOM
     assert {e["client"] for e in admin.recent_entries(entries, names, 100, "149", "", True)} == {"10.42.0.149"}
-    assert len(admin.recent_entries(entries, names, 100, "", "FIGLET", True)) == 4
+    assert len(admin.recent_entries(entries, names, 100, "", "FIGLET", True)) == 3
     assert admin.recent_entries(entries, names, 100, "", "inexistant", True) == []
     assert len(admin.recent_entries(entries, names, 2, "", "", True)) == 2
 
@@ -209,11 +210,42 @@ def test_status_endpoint_aggregates_everything(admin):
 def test_log_endpoint_filters_and_validates_limit(admin):
     write_log(admin, LOG)
     assert len(admin.client.get("/api/log?limit=1").get_json()["entries"]) == 1
-    assert len(admin.client.get("/api/log?limit=abc").get_json()["entries"]) == 4
-    assert len(admin.client.get("/api/log?all=1").get_json()["entries"]) == 6
+    assert len(admin.client.get("/api/log?limit=abc").get_json()["entries"]) == 3
+    assert len(admin.client.get("/api/log?all=1").get_json()["entries"]) == 4
     assert admin.client.get("/api/log?client=bobby&q=figlet").get_json()["entries"][0]["name"] == "bobby"
 
 
 def test_page_is_served(admin):
     res = admin.client.get("/")
     assert res.status_code == 200 and b"Cache apt" in res.data
+
+
+# --- regroupement des acces du journal ------------------------------------------------
+
+def test_a_download_followed_by_a_serve_is_one_miss_for_that_machine(admin):
+    entries = [admin.parse_line(l) for l in LOG[:2]]
+    events = admin.group_events(entries)
+    assert len(events) == 1
+    assert events[0]["kind"] == "miss" and events[0]["client"] == "10.42.0.148"
+    assert events[0]["bytes"] == 134537  # taille servie a la machine, pas celle du telechargement
+
+
+def test_a_serve_alone_is_a_hit_and_a_download_alone_is_a_cache_fetch(admin):
+    hit = admin.group_events([admin.parse_line(LOG[2])])
+    assert [e["kind"] for e in hit] == ["hit"]
+    fetch = admin.group_events([admin.parse_line("1791656424|I|760|10.42.0.148|debrep/dists/bookworm/InRelease")])
+    assert [e["kind"] for e in fetch] == ["fetch"]
+
+
+def test_a_download_is_not_paired_with_a_serve_for_another_machine_or_much_later(admin):
+    other_machine = [
+        admin.parse_line("100|I|10|10.42.0.148|debrep/pool/main/a/a.deb"),
+        admin.parse_line("100|O|10|10.42.0.149|debrep/pool/main/a/a.deb"),
+    ]
+    assert sorted(e["kind"] for e in admin.group_events(other_machine)) == ["fetch", "hit"]
+    too_late = [
+        admin.parse_line("100|I|10|10.42.0.148|debrep/pool/main/a/a.deb"),
+        admin.parse_line(f"{100 + admin.PAIR_WINDOW + 1}|O|10|10.42.0.148|debrep/pool/main/a/a.deb"),
+    ]
+    assert sorted(e["kind"] for e in admin.group_events(too_late)) == ["fetch", "hit"]
+
