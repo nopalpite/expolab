@@ -14,7 +14,6 @@ chaque flash et jamais seulement a l'affichage :
   - un fichier (mode simulation) est cree si besoin, un peripherique JAMAIS :
     ouvrir un chemin /dev inexistant ne doit pas creer un fichier dans /dev.
 """
-import base64
 import gzip
 import hashlib
 import json
@@ -36,7 +35,7 @@ HOSTNAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 IMAGE_SUFFIXES = (".img", ".img.gz", ".img.xz", ".img.zst")
 SYSTEM_MOUNTPOINTS = ("/", "/boot", "/boot/firmware", "/var/lib/docker", "/home", "/var", "/usr", "/etc")
 SSH_KEY_RE = re.compile(r"^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp\d+|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/=]+( .*)?$")
-CONF_NAME = "expolab.conf"  # ecrit sur la partition de demarrage, lu par image/expolab-firstboot.sh
+SEED_FILES = ("user-data", "network-config", "meta-data")  # graine cloud-init (NoCloud) sur la partition de demarrage
 
 
 class FlashError(Exception):
@@ -272,18 +271,49 @@ def check_settings(settings: dict) -> None:
             raise FlashError(f"Cle SSH invalide : {key[:40]}...")
 
 
-def render_conf(hostname: str, settings: dict) -> str:
-    """Contenu de expolab.conf : lignes CLE=VALEUR, relues SANS `source` par
-    image/expolab-firstboot.sh. Les cles SSH (plusieurs lignes) passent en base64."""
+def render_seed(hostname: str, settings: dict, now: int | None = None) -> dict[str, str]:
+    """Graine cloud-init (source NoCloud) a poser sur la partition de demarrage
+    (`system-boot`, FAT) d'Ubuntu Server : {nom de fichier: contenu}.
+      user-data      hostname, cles SSH autorisees, regeneration des cles d'hote
+      network-config  DHCP sur l'Ethernet, Wi-Fi si configure (netplan)
+      meta-data       instance-id UNIQUE a chaque flash : cloud-init traite donc la carte
+                      comme une nouvelle instance et rejoue ses modules (utilisateur,
+                      cles SSH, hostname) meme si le master avait deja demarre une fois
+    Les valeurs passent par json.dumps : le JSON est du YAML valide, sans aucun risque de
+    guillemet ou de caractere special mal interprete."""
     check_hostname(hostname)
     check_settings(settings)
-    lines = ["# Genere par sd-flasher - supprime par expolab-firstboot.sh apres application", f"HOSTNAME={hostname}"]
-    if settings.get("wifi_ssid"):
-        lines += [f"WIFI_SSID={settings['wifi_ssid']}", f"WIFI_PSK={settings['wifi_psk']}", f"WIFI_COUNTRY={settings.get('wifi_country') or 'FR'}"]
+
+    def dump(data) -> str:
+        return json.dumps(data, indent=2, ensure_ascii=True) + "\n"
+
+    user = {"hostname": hostname, "preserve_hostname": False, "manage_etc_hosts": True, "ssh_deletekeys": True}
     keys = [k.strip() for k in (settings.get("authorized_keys") or []) if k.strip()]
     if keys:
-        lines.append("AUTHORIZED_KEYS_B64=" + base64.b64encode("\n".join(keys).encode()).decode())
-    return "\n".join(lines) + "\n"
+        user["ssh_authorized_keys"] = keys
+
+    network = {"version": 2, "ethernets": {"all-eth": {"match": {"name": "e*"}, "dhcp4": True, "optional": True}}}
+    if settings.get("wifi_ssid"):
+        network["wifis"] = {
+            "wlan0": {
+                "dhcp4": True,
+                "optional": True,
+                "regulatory-domain": settings.get("wifi_country") or "FR",
+                "access-points": {settings["wifi_ssid"]: {"password": settings["wifi_psk"]}},
+            }
+        }
+
+    instance = f"expolab-{hostname}-{now if now is not None else int(time.time())}"
+    return {
+        "user-data": "#cloud-config\n" + dump(user),
+        "network-config": dump({"network": network}),
+        "meta-data": f"instance-id: {instance}\nlocal-hostname: {hostname}\n",
+    }
+
+
+def write_seed(boot_dir: Path, seed: dict[str, str]) -> None:
+    for name, content in seed.items():
+        _write_text(boot_dir / name, content)
 
 
 def partition_path(device: str, number: int) -> str:
@@ -362,7 +392,7 @@ def reset_identity(root: Path, hostname: str) -> list[str]:
         le meme identifiant client DHCP a toutes les machines (baux qui se
         volent la meme adresse) ;
       - cles SSH d'hote supprimees : sinon toutes les machines partagent la meme
-        identite SSH. Elles sont regenerees au demarrage (expolab-firstboot).
+        identite SSH. cloud-init les regenere au premier demarrage (ssh_deletekeys).
     Retourne la liste de ce qui a ete fait (pour le journal)."""
     check_hostname(hostname)
     etc = root / "etc"
@@ -415,7 +445,7 @@ def run_flash(*, image_path: Path, target: str, hostname: str, settings: dict, d
     """Execute les 4 etapes. `update(step=..., percent=..., message=...)` rend compte
     de l'avancement. Retourne un resume. Leve FlashError au premier probleme."""
     check_hostname(hostname)
-    conf = render_conf(hostname, settings)  # valide tout AVANT de toucher au disque
+    seed = render_seed(hostname, settings)  # valide tout AVANT de toucher au disque
 
     def progress(step: str, fraction: float, message: str = ""):
         lo, hi = STEP_SPAN[step]
@@ -446,12 +476,12 @@ def run_flash(*, image_path: Path, target: str, hostname: str, settings: dict, d
         boot_dir, root_dir = base / f"{hostname}-boot", base / f"{hostname}-root"
         (root_dir / "etc" / "ssh").mkdir(parents=True, exist_ok=True)
         boot_dir.mkdir(parents=True, exist_ok=True)
-        (boot_dir / CONF_NAME).write_text(conf)
+        write_seed(boot_dir, seed)
         progress("customize", 0.5, "Identite de la machine")
         actions = reset_identity(root_dir, hostname)
     else:
         with boot_mount(target) as boot_dir:
-            (boot_dir / CONF_NAME).write_text(conf)
+            write_seed(boot_dir, seed)
         progress("customize", 0.5, "Identite de la machine")
         with root_mount(target) as root_dir:
             actions = reset_identity(root_dir, hostname)

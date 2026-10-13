@@ -1,7 +1,7 @@
 """Tests de sd-flasher : detection des cartes (garde-fous), lecture/ecriture/verification
 de l'image, identite de la carte, pipeline complet et API. Aucun vrai disque : des
 fichiers ordinaires jouent les peripheriques."""
-import base64
+
 import gzip
 import importlib.util
 import json
@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytest.importorskip("flask")
 
@@ -153,16 +154,43 @@ def test_writing_never_creates_a_missing_device(tmp_path):
 GOOD_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIexample expolab-automation"
 
 
-def test_conf_contains_hostname_wifi_and_keys():
-    conf = flasher.render_conf("module-02", {"wifi_ssid": "expo", "wifi_psk": "motdepasse1", "wifi_country": "FR",
-                                             "authorized_keys": [GOOD_KEY, GOOD_KEY.replace("example", "autre")]})
-    values = dict(line.split("=", 1) for line in conf.splitlines() if "=" in line)
-    assert values["HOSTNAME"] == "module-02" and values["WIFI_SSID"] == "expo"
-    assert base64.b64decode(values["AUTHORIZED_KEYS_B64"]).decode().count("\n") == 1  # deux cles, deux lignes
+def seed(hostname="module-02", settings=None, now=1_800_000_000):
+    files = flasher.render_seed(hostname, settings or {}, now=now)
+    assert files["user-data"].startswith("#cloud-config\n")  # cloud-init refuse un user-data sans cet en-tete
+    return files, yaml.safe_load(files["user-data"]), yaml.safe_load(files["network-config"])["network"]
 
 
-def test_conf_without_wifi_or_keys_is_minimal():
-    assert flasher.render_conf("module-02", {}).splitlines()[-1] == "HOSTNAME=module-02"
+def test_seed_sets_hostname_keys_and_fresh_ssh_host_keys():
+    keys = [GOOD_KEY, GOOD_KEY.replace("example", "autre")]
+    files, user, _net = seed(settings={"authorized_keys": keys})
+    assert user["hostname"] == "module-02" and user["preserve_hostname"] is False
+    assert user["manage_etc_hosts"] is True and user["ssh_deletekeys"] is True
+    assert user["ssh_authorized_keys"] == keys
+    assert set(files) == set(flasher.SEED_FILES)
+
+
+def test_seed_without_keys_or_wifi_is_minimal():
+    _files, user, net = seed()
+    assert "ssh_authorized_keys" not in user
+    assert "wifis" not in net and net["ethernets"]["all-eth"]["dhcp4"] is True
+
+
+def test_seed_wifi_round_trips_awkward_characters():
+    # guillemets, deux-points, accolades, #, antislash, unicode : le YAML doit les restituer a l'identique
+    ssid, psk = 'Expo "wifi": {2026} #1 é', "p@ss: 'word' \\ {x} #y"
+    _files, _user, net = seed(settings={"wifi_ssid": ssid, "wifi_psk": psk, "wifi_country": "FR"})
+    wlan = net["wifis"]["wlan0"]
+    assert wlan["access-points"] == {ssid: {"password": psk}}
+    assert wlan["regulatory-domain"] == "FR" and wlan["dhcp4"] is True
+
+
+def test_every_flash_gets_a_new_instance_id():
+    # sinon cloud-init croit avoir deja configure cette carte (copie du master) et ne rejoue rien
+    first, _, _ = seed(now=1_800_000_000)
+    second, _, _ = seed(now=1_800_000_001)
+    assert first["meta-data"] != second["meta-data"]
+    meta = yaml.safe_load(first["meta-data"])
+    assert meta["instance-id"].startswith("expolab-module-02-") and meta["local-hostname"] == "module-02"
 
 
 @pytest.mark.parametrize("hostname", ["", "a", "Module-02", "module_02", "-bad", "bad-", "x" * 40, "mod ule", "mod\nule", "../etc"])
@@ -252,8 +280,10 @@ def test_dry_run_goes_through_all_four_steps(tmp_path, images):
     assert steps[-1]["percent"] == 100
     percents = [s["percent"] for s in steps]
     assert percents == sorted(percents)  # la progression ne recule jamais
-    conf = (tmp_path / "sim" / "module-02-boot" / flasher.CONF_NAME).read_text()
-    assert "HOSTNAME=module-02" in conf and "WIFI_SSID=expo" in conf
+    boot = tmp_path / "sim" / "module-02-boot"
+    assert {p.name for p in boot.iterdir()} == set(flasher.SEED_FILES)
+    assert yaml.safe_load((boot / "user-data").read_text())["hostname"] == "module-02"
+    assert "expo" in yaml.safe_load((boot / "network-config").read_text())["network"]["wifis"]["wlan0"]["access-points"]
     assert (tmp_path / "sim" / "module-02-root" / "etc" / "hostname").read_text() == "module-02\n"
     assert result["dry_run"] and result["bytes"] == len(PAYLOAD)
 
@@ -352,8 +382,8 @@ def test_full_flash_through_the_api(api):
     assert job["state"] == "done" and job["ip"] == "10.42.0.148" and job["percent"] == 100
     sim = api.tmp / "sim"
     assert (sim / "sda").stat().st_size > 0
-    conf = (sim / "module-02-boot" / flasher.CONF_NAME).read_text()
-    assert "AUTHORIZED_KEYS_B64" in conf  # cle d'automatisation injectee par defaut
+    user = yaml.safe_load((sim / "module-02-boot" / "user-data").read_text())
+    assert user["ssh_authorized_keys"] == [GOOD_KEY]  # cle d'automatisation injectee par defaut
     events = [e["event"] for e in api.client.get("/api/audit").get_json()]
     assert events[:2] == ["flash-done", "flash-start"]
 

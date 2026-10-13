@@ -1,41 +1,45 @@
-# Préparer l'image master
+# Préparer l'image master (Ubuntu Server)
 
 L'image master est **commune à toutes les machines** : le flasheur (`sd-flasher`) l'écrit telle quelle, puis ne change que ce qui rend chaque carte unique. Ce que fait le déploiement Ansible ensuite (rôles selon le hostname) n'est pas du ressort de cette image.
 
-## Ce que le flasheur fait à chaque carte
+Hypothèse de travail : **Ubuntu Server 24.04 LTS pour Raspberry Pi** (image arm64 préinstallée, compatible Pi 5). Elle s'appuie sur **cloud-init** : c'est lui qui applique la personnalisation au premier démarrage, il n'y a aucun script maison à installer dans le master.
 
-Avant le premier démarrage, sur la carte :
+## Ce que le flasheur fait à chaque carte
 
 | Où | Quoi | Pourquoi |
 |---|---|---|
-| partition racine (`ext4`) | `/etc/hostname`, `/etc/hosts` | le nom doit être le bon dès la première requête DHCP : les réservations de dnsmasq sont **par nom** |
-| partition racine | `/etc/machine-id` vidé | sinon toutes les machines ont le même identifiant client DHCP et se disputent la même adresse |
-| partition racine | `/etc/ssh/ssh_host_*` supprimés | sinon toutes les machines ont la même identité SSH |
-| partition de démarrage (`FAT`) | `expolab.conf` | Wi-Fi, clés SSH autorisées ; lu et supprimé par `expolab-firstboot` |
+| partition `system-boot` (FAT) | `user-data`, `network-config`, `meta-data` | graine cloud-init (source NoCloud) : hostname, clés SSH autorisées, Wi-Fi, DHCP |
+| `meta-data` | `instance-id` **nouveau à chaque flash** | sans ça, cloud-init croit avoir déjà configuré cette carte (copie du master) et ne rejoue rien |
+| partition `writable` (ext4) | `/etc/hostname`, `/etc/hosts` | le nom doit être le bon dès la première requête DHCP : les réservations de dnsmasq sont **par nom**, et cloud-init n'applique le hostname qu'après le réseau |
+| partition `writable` | `/etc/machine-id` vidé | sinon toutes les machines ont le même identifiant machine (journal, certains clients DHCP) |
+| partition `writable` | `/etc/ssh/ssh_host_*` supprimés | sinon toutes les machines ont la même identité SSH ; cloud-init en génère de neuves (`ssh_deletekeys`) |
 
-## Ce que le master doit contenir
+## Préparer le master
 
-1. **`expolab-firstboot`** : copier `image/expolab-firstboot.sh` dans `/usr/local/sbin/` (mode 755) et `image/expolab-firstboot.service` dans `/etc/systemd/system/`, puis `systemctl enable expolab-firstboot.service`. Il régénère les clés SSH d'hôte, installe les clés autorisées et le profil Wi-Fi.
-2. **Un seul utilisateur normal** (uid 1000) : c'est lui qui reçoit les clés SSH autorisées (ou l'utilisateur nommé par `SSH_USER` dans `expolab.conf`).
-3. **DHCP activé** et **le nom de la machine annoncé** dans la requête DHCP (`send host-name` pour `dhcpcd`, comportement par défaut de NetworkManager et systemd-networkd).
-4. **L'agrandissement du système de fichiers au premier démarrage** : l'image est *réduite* (PiShrink ou équivalent), donc la carte entière n'est utilisée qu'après agrandissement de la partition 2 et de son système de fichiers. À valider sur votre système :
-   - Raspberry Pi OS **Bookworm** : le mécanisme d'agrandissement d'origine (`init_resize.sh` via `init=` dans `cmdline.txt`) est conservé ou rétabli par l'outil de réduction ;
-   - **Trixie** : à vérifier (cloud-init / `rpi-resize` selon l'image).
-5. Ne **pas** laisser de fichier `expolab.conf` dans l'image.
+1. Installer Ubuntu Server sur une carte, la démarrer, créer l'environnement commun (utilisateur, paquets), et lancer `image/machine-setup.sh` (proxy apt vers le cache du serveur, serveur de temps, clé d'automatisation et `sudo` sans mot de passe).
+2. **Remettre la carte « à neuf » avant de la capturer**, puis l'éteindre **sans la redémarrer** :
+   ```
+   sudo cloud-init clean --logs --seed --machine-id --configs all   # options à confirmer avec `cloud-init clean --help`
+   sudo truncate -s 0 /etc/machine-id
+   sudo rm -f /etc/ssh/ssh_host_*
+   sudo apt-get clean && history -c
+   sudo poweroff
+   ```
+3. Capturer la carte en image (`dd`, Win32DiskImager…), puis la **réduire** (PiShrink avec `-s` : sans son propre agrandissement automatique, c'est cloud-init qui agrandit au premier démarrage), et la compresser (`.xz` ou `.zst`).
+4. Déposer l'image dans `server/stacks/sd-flasher/images/` sur le serveur (la plus récente est utilisée par défaut).
 
-## Format de `expolab.conf`
+**Agrandissement au premier démarrage** : les modules `growpart` et `resizefs` de cloud-init agrandissent la partition racine puis son système de fichiers jusqu'à la taille de la carte. Ils tournent à chaque démarrage, donc même sur une copie du master.
 
-Lignes `CLE=VALEUR`, lues sans interprétation (jamais exécutées) :
+## À valider sur une vraie carte
 
-```
-HOSTNAME=module-02
-WIFI_SSID=mon-reseau
-WIFI_PSK=********
-WIFI_COUNTRY=FR
-AUTHORIZED_KEYS_B64=<clés publiques, une par ligne, encodées en base64>
-SSH_USER=pi            # optionnel
-```
+- l'image réduite redémarre et la racine occupe bien toute la carte (`df -h /`) ;
+- `cloud-init status --long` termine en `done`, sans erreur ;
+- le hostname, la clé SSH et le Wi-Fi demandés sont appliqués ;
+- `/etc/machine-id` et les clés SSH d'hôte diffèrent d'une carte à l'autre ;
+- dnsmasq voit le nom dans la requête DHCP (réservation par nom → bonne adresse).
 
-## Où mettre l'image
+## Bon à savoir
 
-Sur le serveur, dans `server/stacks/sd-flasher/images/` : `.img`, `.img.gz`, `.img.xz` ou `.img.zst`. La plus récente est utilisée par défaut.
+- `user-data` et `network-config` **restent** sur la partition FAT après le démarrage, mot de passe Wi-Fi compris, en clair (comme avec Raspberry Pi Imager). Garder la carte avec la machine.
+- Ne pas supprimer la configuration NoCloud d'Ubuntu (`/etc/cloud/cloud.cfg.d/`) : c'est elle qui fait lire `system-boot`.
+- La clé d'automatisation est déjà dans le master si `machine-setup.sh` y est passé ; l'injecter aussi depuis le flasheur est inoffensif (la même clé n'est pas dupliquée).

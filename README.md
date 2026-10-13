@@ -517,8 +517,8 @@ l'hote et le conteneur ansible-web n'utilisent pas dnsmasq comme resolveur).
 
 ### L'image type
 
-Raspberry Pi OS standard + `image/machine-setup.sh` (execute une fois, par
-exemple depuis le `firstrun.sh` de l'Imager). Il pose :
+Ubuntu Server pour Raspberry Pi + `image/machine-setup.sh` (execute une fois sur
+la carte modele - preparation complete : `image/README-master.md`). Il pose :
 
 - l'utilisateur d'automatisation, la cle publique
   `server/stacks/ansible-web/automation_key/automation_ed25519.pub` et un
@@ -551,15 +551,18 @@ master commune, puis la personnalise.
    comparaison de l'empreinte), personnalisation, ejection. A la fin : « Carte
    prete, tu peux la retirer — module-02 / 10.42.0.148 ».
 
-Ce qui rend chaque carte unique, ecrit **avant** le premier demarrage :
+Le master est un **Ubuntu Server** : la personnalisation passe par **cloud-init**,
+sans script maison dans le master. Ecrit **avant** le premier demarrage :
+une graine cloud-init sur la partition `system-boot` (`user-data` : hostname, cles
+SSH autorisees ; `network-config` : DHCP et Wi-Fi ; `meta-data` : un `instance-id`
+neuf a chaque flash, pour que cloud-init rejoue tout), puis sur la racine
 `/etc/hostname` (le nom est annonce des la premiere requete DHCP, or les
 reservations sont par nom), `/etc/machine-id` vide (sinon toutes les machines ont
-le meme identifiant client DHCP), cles SSH d'hote supprimees (regenerees par
-`image/expolab-firstboot.sh`), et `expolab.conf` sur la partition de demarrage
-(Wi-Fi, cles SSH autorisees ; supprime apres usage). Reglages Wi-Fi et cles dans
-la page (la cle d'automatisation Ansible est injectee par defaut) ; le mot de
-passe Wi-Fi reste sur le serveur (`data/settings.json`, mode 600), jamais renvoye
-au navigateur.
+le meme identifiant) et cles SSH d'hote supprimees (cloud-init en genere de
+neuves). L'agrandissement du systeme de fichiers au premier demarrage est fait par
+cloud-init (`growpart`/`resizefs`). Reglages Wi-Fi et cles dans la page (la cle
+d'automatisation Ansible est injectee par defaut) ; le mot de passe Wi-Fi reste sur
+le serveur (`data/settings.json`, mode 600), jamais renvoye au navigateur.
 
 **Garde-fous** (verifies a chaque flash, pas seulement a l'affichage) : seuls les
 disques **USB** en ecriture, de 1 Go a 256 Go ; jamais un disque que le serveur
@@ -576,8 +579,9 @@ touche) - c'est comme ca que les tests tournent, sans materiel.
 
 **Reste a valider sur materiel** : detection du lecteur depuis le conteneur
 (partitions qui apparaissent apres l'ecriture), montage des partitions de la
-carte, ejection, premier demarrage d'une vraie carte, et le mecanisme
-d'agrandissement du master sur votre OS (Bookworm ou Trixie).
+carte, ejection, et le premier demarrage d'une vraie carte (cloud-init
+applique la graine, agrandissement de la racine, cles d'hote differentes) - liste
+de verification dans `image/README-master.md`.
 
 ### Paquets sans internet : le cache apt
 
@@ -754,8 +758,7 @@ fleet/
   offline-rehearsal.sh        # repetition du remplacement d'une machine isolee d'internet (voir plus haut)
 image/
   machine-setup.sh            # preparation de l'image type (cle d'automatisation, sudo, proxy apt, NTP)
-  expolab-firstboot.{sh,service}  # a installer dans le MASTER : cles SSH d'hote, Wi-Fi, cles autorisees au premier demarrage
-  README-master.md            # preparer l'image master (contrat avec sd-flasher)
+  README-master.md            # preparer l'image master Ubuntu (cloud-init) - contrat avec sd-flasher
 server/
   deploy-server.sh             # orchestration : installe Docker, demarre Dockhand, cree/redeploie les stacks via son API
   lib/                           # une fonction par responsabilite, sources par deploy-server.sh :
