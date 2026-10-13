@@ -1,0 +1,31 @@
+# Stack Dockhand "sd-flasher" - ecrit l'image master sur une carte SD branchee
+# (lecteur USB) sur le serveur, puis la personnalise (hostname, identite, Wi-Fi,
+# cles SSH). Publie sur 127.0.0.1 : joignable uniquement via Caddy
+# (https://sd-flasher.<domaine>, derriere le portail).
+#
+# ATTENTION - conteneur PRIVILEGIE : il doit ecrire sur des disques bruts, ce que
+# ni un navigateur ni un conteneur ordinaire ne peut faire. Risque assume et
+# encadre par des garde-fous dans le code (sd-flasher/flasher.py) : uniquement les
+# disques USB, jamais un disque utilise par le serveur, taille plafonnee,
+# confirmation par retape du hostname, un flash a la fois, journal d'audit.
+services:
+  sd-flasher:
+    build: ${REPO_ROOT}/sd-flasher
+    container_name: expolab-sd-flasher
+    restart: unless-stopped
+    privileged: true
+    # Voir les montages de l'HOTE (/proc/1/mountinfo) pour ne jamais ecrire sur
+    # un disque que le serveur utilise.
+    pid: host
+    ports:
+      - "127.0.0.1:5057:5057"
+    volumes:
+      - /dev:/dev
+      # Images master : lecture seule (copiees a la main dans ce dossier).
+      - ${REPO_ROOT}/server/stacks/sd-flasher/images:/images:ro
+      # Reglages (Wi-Fi, cles - mode 600) et journal d'audit.
+      - ${REPO_ROOT}/server/stacks/sd-flasher/data:/data
+      # Cle publique d'automatisation Ansible (un dossier, pas un fichier).
+      - ${REPO_ROOT}/server/stacks/sd-flasher/keys:/keys:ro
+      # Reservations DHCP (lecture seule) : liste des noms de machines.
+      - ${REPO_ROOT}/server/stacks/dnsmasq/admin-config:/dnsmasq-admin-config:ro

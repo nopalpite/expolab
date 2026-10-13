@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>expolab · Flasheur de cartes SD</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Flasheur de cartes SD</h1>
+        <p class="subtitle">Branche un lecteur de carte USB sur le serveur : l'image master est écrite, vérifiée, puis personnalisée pour la machine choisie.</p>
+        <p id="dry-banner" class="status status-warn" hidden>Mode simulation : aucune carte réelle n'est écrite.</p>
+    </header>
+
+    <main>
+        <section class="panel" id="card-panel">
+            <h2>Carte</h2>
+
+            <div id="view-waiting">
+                <p class="waiting">Aucune carte détectée.</p>
+                <p class="hint">Branche le lecteur USB avec la carte. Seuls les disques USB sont proposés : le disque du serveur n'est jamais affiché.</p>
+                <p class="hint" id="ignored-hint"></p>
+            </div>
+
+            <div id="view-ready" hidden>
+                <div id="device-pick" class="field" hidden>
+                    <label for="device-select">Carte</label>
+                    <select id="device-select"></select>
+                </div>
+                <div class="device" id="device-info"></div>
+
+                <div class="field">
+                    <label for="host-select">Machine</label>
+                    <select id="host-select"></select>
+                    <input type="text" id="host-new" placeholder="nouveau-nom" autocomplete="off" aria-label="Nouveau hostname" hidden>
+                    <span class="hint" id="host-hint"></span>
+                </div>
+
+                <div class="field" id="image-pick" hidden>
+                    <label for="image-select">Image</label>
+                    <select id="image-select"></select>
+                </div>
+                <p class="hint" id="image-info"></p>
+
+                <div class="summary" id="summary" hidden>
+                    <strong>Sera écrit</strong>
+                    <ul id="summary-list"></ul>
+                    <p class="warn">Tout le contenu actuel de la carte sera effacé.</p>
+                </div>
+
+                <div class="field">
+                    <label for="confirm">Confirmation</label>
+                    <input type="text" id="confirm" placeholder="retape le nom de la machine" autocomplete="off" aria-label="Retaper le hostname">
+                </div>
+                <div class="actions">
+                    <button id="flash-btn" type="button" disabled>Flasher la carte</button>
+                </div>
+                <p id="flash-status" class="status" hidden></p>
+            </div>
+
+            <div id="view-job" hidden>
+                <h3 id="job-title"></h3>
+                <ol class="steps" id="job-steps"></ol>
+                <div class="bar"><div id="job-bar"></div></div>
+                <p class="hint" id="job-message"></p>
+                <div id="job-done" hidden>
+                    <p class="done" id="done-text"></p>
+                    <button id="dismiss-btn" type="button">Carte suivante</button>
+                </div>
+                <div id="job-error" hidden>
+                    <p class="status status-error" id="error-text"></p>
+                    <button id="dismiss-error-btn" type="button" class="secondary">Fermer</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Image master</h2>
+            <div id="images-body" class="hint">Chargement…</div>
+        </section>
+
+        <section class="panel">
+            <h2>Réglages écrits sur chaque carte</h2>
+            <p class="subtitle">Appliqués à chaque flash. Le mot de passe Wi-Fi reste sur le serveur : il n'est jamais renvoyé à cette page.</p>
+            <div class="grid">
+                <div class="field"><label for="wifi-ssid">Wi-Fi (SSID)</label><input type="text" id="wifi-ssid" autocomplete="off"></div>
+                <div class="field"><label for="wifi-psk">Mot de passe Wi-Fi</label><input type="password" id="wifi-psk" autocomplete="new-password" placeholder="(inchangé)"></div>
+                <div class="field"><label for="wifi-country">Pays</label><input type="text" id="wifi-country" maxlength="2" size="3" autocomplete="off"></div>
+            </div>
+            <label class="check"><input type="checkbox" id="use-automation"> Injecter la clé SSH d'automatisation (Ansible)</label>
+            <span class="hint" id="automation-hint"></span>
+            <div class="field stacked">
+                <label for="extra-keys">Autres clés SSH publiques (une par ligne)</label>
+                <textarea id="extra-keys" rows="3" spellcheck="false"></textarea>
+            </div>
+            <div class="actions">
+                <button id="settings-save" type="button" class="secondary">Enregistrer</button>
+                <button id="wifi-clear" type="button" class="secondary">Retirer le Wi-Fi</button>
+            </div>
+            <p id="settings-status" class="status" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Historique</h2>
+            <table>
+                <thead><tr><th>Heure</th><th>Événement</th><th>Détail</th></tr></thead>
+                <tbody id="audit-body"><tr><td colspan="3" class="empty">Chargement…</td></tr></tbody>
+            </table>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

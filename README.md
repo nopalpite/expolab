@@ -535,6 +535,50 @@ existantes) : le lab reste fidele a l'image reelle. Le secours par mot de
 passe d'`ansible-web` (`ansible_ssh_pass`) pourra etre retire une fois la
 cle partout.
 
+### Flasher les cartes SD
+
+**Interface "Cartes SD"** (portail > Infrastructure > Cartes SD, `sd-flasher/`).
+Un lecteur de carte USB branche **sur le serveur** (un navigateur ne peut pas
+ecrire sur un disque brut) : la page detecte la carte, propose les machines
+connues (reservations DHCP **par nom**, avec leur adresse), et ecrit l'image
+master commune, puis la personnalise.
+
+1. Copier l'image master dans `server/stacks/sd-flasher/images/`
+   (`.img`, `.img.gz`, `.img.xz`, `.img.zst` ; la plus recente est utilisee).
+   Sa preparation (reduite, agrandie au premier demarrage) : `image/README-master.md`.
+2. Brancher le lecteur, choisir la machine, **retaper son nom** pour confirmer.
+3. Quatre etapes affichees : ecriture, verification (relecture du support et
+   comparaison de l'empreinte), personnalisation, ejection. A la fin : « Carte
+   prete, tu peux la retirer — module-02 / 10.42.0.148 ».
+
+Ce qui rend chaque carte unique, ecrit **avant** le premier demarrage :
+`/etc/hostname` (le nom est annonce des la premiere requete DHCP, or les
+reservations sont par nom), `/etc/machine-id` vide (sinon toutes les machines ont
+le meme identifiant client DHCP), cles SSH d'hote supprimees (regenerees par
+`image/expolab-firstboot.sh`), et `expolab.conf` sur la partition de demarrage
+(Wi-Fi, cles SSH autorisees ; supprime apres usage). Reglages Wi-Fi et cles dans
+la page (la cle d'automatisation Ansible est injectee par defaut) ; le mot de
+passe Wi-Fi reste sur le serveur (`data/settings.json`, mode 600), jamais renvoye
+au navigateur.
+
+**Garde-fous** (verifies a chaque flash, pas seulement a l'affichage) : seuls les
+disques **USB** en ecriture, de 1 Go a 256 Go ; jamais un disque que le serveur
+utilise (montages lus dans `/proc/1/mountinfo` de l'hote ; si illisibles, tout
+est refuse) ; le peripherique doit figurer dans la liste actuelle des cartes
+eligibles (jamais un chemin pris tel quel), et re-verifie (meme numero de serie, meme
+taille) juste avant d'ecrire ; image brute plus grande que la carte refusee d'emblee ;
+confirmation par retape du nom ; un seul flash a la fois ; journal d'audit (`data/audit.log`, affiche dans la page).
+Le conteneur est **privilegie** (`pid: host`, `/dev`) : c'est le prix d'ecrire
+sur un disque ; il ne publie qu'un port local, derriere le portail.
+
+`SD_FLASHER_DRY_RUN=1` : mode simulation (ecrit dans des fichiers, aucun disque
+touche) - c'est comme ca que les tests tournent, sans materiel.
+
+**Reste a valider sur materiel** : detection du lecteur depuis le conteneur
+(partitions qui apparaissent apres l'ecriture), montage des partitions de la
+carte, ejection, premier demarrage d'une vraie carte, et le mecanisme
+d'agrandissement du master sur votre OS (Bookworm ou Trixie).
+
 ### Paquets sans internet : le cache apt
 
 **Interface "Cache apt"** (portail > Reseau > Cache apt, `apt-cache-admin/`) :
@@ -710,10 +754,12 @@ fleet/
   offline-rehearsal.sh        # repetition du remplacement d'une machine isolee d'internet (voir plus haut)
 image/
   machine-setup.sh            # preparation de l'image type (cle d'automatisation, sudo, proxy apt, NTP)
+  expolab-firstboot.{sh,service}  # a installer dans le MASTER : cles SSH d'hote, Wi-Fi, cles autorisees au premier demarrage
+  README-master.md            # preparer l'image master (contrat avec sd-flasher)
 server/
   deploy-server.sh             # orchestration : installe Docker, demarre Dockhand, cree/redeploie les stacks via son API
   lib/                           # une fonction par responsabilite, sources par deploy-server.sh :
-                                 #   preflight, tls, secrets (+ basic auth), credentials, automation-key, ansible-web, apt-cache, ntp, dashboard, dnsmasq, stacks, summary
+                                 #   preflight, tls, secrets (+ basic auth), credentials, automation-key, ansible-web, apt-cache, sd-flasher, ntp, dashboard, dnsmasq, stacks, summary
   apt-cache-mode.sh             # bascule le cache apt en ligne / hors ligne (ou le redemarre) en ligne de commande
   teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), reactive le DHCP integre d'Incus, desinstalle Docker
   docker-compose.yml            # bootstrap UNIQUEMENT : Dockhand (ne peut pas se creer via sa propre API)
@@ -736,6 +782,7 @@ server/
     git-mirror/{docker-compose.yml, data/}                            # data/ non versionne (clones bare + mirrors.yaml)
     apt-cache/{docker-compose.yml, Dockerfile, entrypoint.sh, apt-cache.env, config/, logs/, data/}  # apt-cacher-ng ; apt-cache.env (secret admin), config/ (mode, miroirs HTTPS), logs/ et data/ non versionnes
     apt-cache-admin/docker-compose.yml                                # build context = ../../apt-cache-admin
+    sd-flasher/{docker-compose.yml, images/, data/, keys/}            # conteneur privilegie ; images/ (master), data/ (reglages, audit), keys/ non versionnes
     ansible-web/{docker-compose.yml, ansible-web.env, automation_key/, config.yaml, repo/, runs/}  # tout sauf docker-compose.yml non versionne ; execute bastion-ansible (depot separe, clone depuis git-mirror)
 webui/
   app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh
@@ -748,6 +795,7 @@ caddy-admin/                     # idem - edite server/services.yaml, recharge C
 vpn-admin/                       # idem - appelle vpn/add-peer.sh et vpn/remove-peer.sh
 git-mirror/                      # idem, mais fait lui-meme le travail git (clone/fetch), rien a piloter
 ansible-web/                     # idem, mais fait lui-meme le travail ansible-playbook (clone/pull depuis git-mirror, execute)
+sd-flasher/                      # flasheur de cartes SD : flasher.py (logique, garde-fous), app.py (API), templates/, static/
 vpn/
   install.sh                  # genere wg0.conf, cree/redeploie les stacks Dockhand "wireguard" et "vpn-admin"
   uninstall.sh                 # arrete la stack (docker compose direct), supprime la config generee

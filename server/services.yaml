@@ -71,6 +71,13 @@ services:
     group: Réseau
     icon: download
     description: Paquets, journal, miroirs HTTPS
+  - name: sd-flasher
+    auth: true
+    backend_port: 5057
+    title: Cartes SD
+    group: Infrastructure
+    icon: box
+    description: Flasher les cartes des machines
   - name: bastion
     backend_port: 5000
     title: Bastion

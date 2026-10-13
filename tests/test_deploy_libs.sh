@@ -42,7 +42,7 @@ SERVICES="$SCRIPT_DIR/services.yaml"
 export REPO_ROOT SCRIPT_DIR SERVICES
 
 export CHRONY_CONF_DIR="$WORK/chrony"
-for lib in tls secrets credentials automation-key ansible-web apt-cache ntp lan-isolation dashboard dnsmasq stacks summary; do
+for lib in tls secrets credentials automation-key ansible-web sd-flasher apt-cache ntp lan-isolation dashboard dnsmasq stacks summary; do
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/lib/$lib.sh"
 done
@@ -179,6 +179,18 @@ contains "$SCRIPT_DIR/stacks/dashboard/dashboard.env" "PORTAL_TLS_MODE=signed"
 contains "$SCRIPT_DIR/stacks/caddy/Caddyfile" "frame-ancestors 'self' https://dashboard.expolab.example.fr"
 contains "$SCRIPT_DIR/stacks/dnsmasq/admin-config/public-domain.conf" "address=/expolab.example.fr/10.42.0.1"
 
+# setup_sd_flasher : dossiers crees, cle PUBLIQUE copiee (jamais la privee), rien d'ecrase.
+FLASH="$SCRIPT_DIR/stacks/sd-flasher"
+ensure_automation_key "$REPO_ROOT"
+setup_sd_flasher
+[ -d "$FLASH/images" ] && [ -d "$FLASH/data" ] || fail "dossiers sd-flasher absents"
+contains "$FLASH/keys/automation.pub" "expolab-automation"
+[ ! -e "$FLASH/keys/automation_ed25519" ] || fail "cle privee copiee dans sd-flasher"
+echo "master" > "$FLASH/images/master.img"
+setup_sd_flasher
+[ "$(cat "$FLASH/images/master.img")" = "master" ] || fail "image sd-flasher ecrasee"
+
+
 # deploy_stacks : vpn-admin n'est redeploye que si le VPN est installe.
 DEPLOYED=""
 dockhand_upsert_stack() { DEPLOYED="$DEPLOYED $1"; }
@@ -187,6 +199,7 @@ case "$DEPLOYED" in *" vpn-admin"*) fail "vpn-admin deploye alors que le VPN n'e
 case "$DEPLOYED" in *" ansible-web"*) ;; *) fail "ansible-web absent des stacks deployees" ;; esac
 case "$DEPLOYED" in *" apt-cache"*) ;; *) fail "apt-cache absent des stacks deployees" ;; esac
 case "$DEPLOYED" in *" apt-cache-admin"*) ;; *) fail "apt-cache-admin absent des stacks deployees" ;; esac
+case "$DEPLOYED" in *" sd-flasher"*) ;; *) fail "sd-flasher absent des stacks deployees" ;; esac
 mkdir -p "$WORK/vpn/wireguard/config" && touch "$WORK/vpn/wireguard/config/wg0.conf"
 DEPLOYED="" && deploy_stacks > /dev/null
 case "$DEPLOYED" in *" vpn-admin"*) ;; *) fail "vpn-admin non redeploye alors que le VPN est installe" ;; esac

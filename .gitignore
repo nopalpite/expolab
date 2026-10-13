@@ -75,3 +75,9 @@ server/stacks/apt-cache/data/
 server/stacks/apt-cache/logs/
 server/stacks/apt-cache/config/
 server/stacks/apt-cache/apt-cache.env
+
+# Flasheur de cartes SD : images master (plusieurs Go), reglages (mot de passe
+# Wi-Fi), journal d'audit et copie de la cle publique - etat runtime.
+server/stacks/sd-flasher/images/
+server/stacks/sd-flasher/data/
+server/stacks/sd-flasher/keys/
