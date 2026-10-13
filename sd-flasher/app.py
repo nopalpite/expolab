@@ -38,7 +38,8 @@ DRY_RUN_DIR = Path(os.environ.get("SD_FLASHER_DRY_RUN_DIR", "/tmp/sd-flasher-dry
 DEVICES_FILE = os.environ.get("SD_FLASHER_DEVICES_FILE")
 
 UPLOAD_RESERVE = int(os.environ.get("SD_FLASHER_UPLOAD_RESERVE_MB", "1024")) * 1024 * 1024  # espace laisse libre au serveur
-IMAGE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$")
+# + = @ , : presents dans les noms d'images officiels (ubuntu-...-arm64+raspi.img.xz) et sans risque dans un nom de fichier
+IMAGE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+=@,-]{0,120}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 MAGIC = {".gz": b"\x1f\x8b", ".xz": b"\xfd7zXZ\x00", ".zst": b"\x28\xb5\x2f\xfd"}  # debut des archives reconnues
 UPLOAD_CHUNK = 4 * 1024 * 1024
@@ -175,7 +176,7 @@ def list_images() -> list[dict]:
 
 def image_name_error(name: str) -> str | None:
     if not IMAGE_NAME_RE.match(name) or ".." in name:
-        return "Nom de fichier invalide (lettres, chiffres, point, tiret et soulignement ; 100 caracteres maximum)."
+        return "Nom de fichier invalide (lettres, chiffres et . _ - + = @ , uniquement ; sans espace ni accent ; 120 caracteres maximum)."
     if not name.endswith(flasher.IMAGE_SUFFIXES):
         return "Type de fichier non reconnu : .img, .img.gz, .img.xz ou .img.zst."
     return None

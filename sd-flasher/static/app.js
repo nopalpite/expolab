@@ -122,11 +122,18 @@ const UPLOAD_SUFFIXES = [".img.gz", ".img.xz", ".img.zst", ".img"];
 const MAGIC = { ".gz": [0x1f, 0x8b], ".xz": [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00], ".zst": [0x28, 0xb5, 0x2f, 0xfd] };
 let uploadRequest = null;
 
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._+=@,-]{0,120}$/;
+
+// Nom propose pour le serveur : sans accent, caracteres non autorises remplaces par "_".
+function sanitizeName(name) {
+    return name.normalize("NFD").replace(/[̀-ͯ]/g, "")
+        .replace(/[^A-Za-z0-9._+=@,-]/g, "_").replace(/^[^A-Za-z0-9]+/, "");
+}
+
 // Meme controle que le serveur, fait avant d'envoyer des Go pour rien.
-async function checkImageFile(file) {
-    const name = file.name;
+async function checkImageFile(file, name) {
     if (!UPLOAD_SUFFIXES.some((s) => name.endsWith(s))) return "Type non reconnu : .img, .img.gz, .img.xz ou .img.zst.";
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/.test(name)) return "Nom invalide : lettres, chiffres, point, tiret et soulignement uniquement, sans espace ni accent.";
+    if (!NAME_RE.test(name) || name.includes("..")) return "Nom invalide : lettres, chiffres et . _ - + = @ , uniquement, sans espace ni accent.";
     if (state.status.images.some((i) => i.name === name)) return "Une image de ce nom existe déjà : supprime-la d'abord.";
     const head = new Uint8Array(await file.slice(0, 512).arrayBuffer());
     const ext = Object.keys(MAGIC).find((e) => name.endsWith(e));
@@ -139,21 +146,30 @@ async function checkImageFile(file) {
     return null;
 }
 
-async function onUploadFileChange() {
+async function validateUpload() {
     const file = $("upload-file").files[0];
     const status = $("upload-status");
+    const name = $("upload-name").value.trim();
     $("upload-btn").disabled = true;
     if (!file) { status.hidden = true; return; }
-    const problem = await checkImageFile(file);
+    const problem = await checkImageFile(file, name);
     if (problem) { showStatus(status, problem, "error"); return; }
-    showStatus(status, `${file.name} : ${formatBytes(file.size)}, prêt à envoyer.`, "ok");
+    const renamed = name !== file.name ? ` (enregistrée sous le nom ${name})` : "";
+    showStatus(status, `${file.name} : ${formatBytes(file.size)}, prête à envoyer${renamed}.`, "ok");
     $("upload-btn").disabled = false;
+}
+
+async function onUploadFileChange() {
+    const file = $("upload-file").files[0];
+    $("upload-name").value = file ? sanitizeName(file.name) : "";   // modifiable avant l'envoi
+    await validateUpload();
 }
 
 function setUploading(on) {
     $("upload-btn").disabled = on;
     $("upload-file").disabled = on;
     $("upload-sha").disabled = on;
+    $("upload-name").disabled = on;
     $("upload-cancel").hidden = !on;
     $("upload-bar-wrap").hidden = !on;
     window.onbeforeunload = on ? () => "Un envoi d'image est en cours." : null;
@@ -163,7 +179,7 @@ function startUpload() {
     const file = $("upload-file").files[0];
     if (!file) return;
     const sha = $("upload-sha").value.trim();
-    const url = "/api/images/" + encodeURIComponent(file.name) + (sha ? "?sha256=" + encodeURIComponent(sha) : "");
+    const url = "/api/images/" + encodeURIComponent($("upload-name").value.trim()) + (sha ?"?sha256=" + encodeURIComponent(sha) : "");
     const status = $("upload-status");
     const started = Date.now();
     const xhr = new XMLHttpRequest();
@@ -184,7 +200,7 @@ function startUpload() {
         uploadRequest = null;
         setUploading(false);
         showStatus(status, message, ok ? "ok" : "error");
-        if (ok) { $("upload-file").value = ""; $("upload-sha").value = ""; $("upload-btn").disabled = true; }
+        if (ok) { $("upload-file").value = ""; $("upload-name").value = ""; $("upload-sha").value = ""; $("upload-btn").disabled = true; }
         refresh();
     };
     xhr.onload = () => {
@@ -396,6 +412,7 @@ $("host-select").addEventListener("change", onHostChange);
 $("host-new").addEventListener("input", async () => { await refreshSummary(); updateFlashButton(); });
 $("confirm").addEventListener("input", updateFlashButton);
 $("upload-file").addEventListener("change", onUploadFileChange);
+$("upload-name").addEventListener("input", validateUpload);
 $("upload-btn").addEventListener("click", startUpload);
 $("upload-cancel").addEventListener("click", () => uploadRequest && uploadRequest.abort());
 $("flash-btn").addEventListener("click", startFlash);

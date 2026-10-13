@@ -676,3 +676,25 @@ def test_a_truncated_archive_gives_a_clear_error(tmp_path):
     (tmp_path / "abimee.img.xz").write_bytes(lzma.compress(PAYLOAD)[:200])
     with pytest.raises(flasher.FlashError, match="corrompue"):
         b"".join(flasher.iter_image(tmp_path / "abimee.img.xz"))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "ubuntu-24.04.3-preinstalled-server-arm64+raspi.img.xz",  # nom officiel d'Ubuntu : contient un "+"
+        "master_v2=final@jeudi,1.img.xz",
+        "Master.IMG.xz".replace("IMG", "img"),
+    ],
+)
+def test_names_with_plus_and_similar_are_accepted(api, name):
+    res = put_image(api, name, lzma.compress(PAYLOAD))
+    assert res.status_code == 201, res.get_json()
+    assert name in {i["name"] for i in api.client.get("/api/status").get_json()["images"]}
+    assert api.client.delete(f"/api/images/{name.replace('+', '%2B')}").status_code == 200  # le "+" survit a l'URL
+
+
+@pytest.mark.parametrize("name", ["+debut.img", "-debut.img", "=x.img", "a/b.img", "a\\b.img", "x*.img", "x?.img", "x%.img", "x:y.img"])
+def test_unsafe_names_stay_refused(api, name):
+    res = put_image(api, name.replace("/", "%2F"), MBR)
+    assert res.status_code in (400, 404)
+    assert not [p for p in api.IMAGES_DIR.iterdir() if p.name not in {"master.img", "master-gz.img.gz", "master-xz.img.xz", "notes.txt"}]
