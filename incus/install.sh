@@ -40,6 +40,9 @@ else
     incus admin init --auto --storage-backend=dir
 fi
 
+# Sans ca Incus (donc le pont expo-lan) ne demarre pas apres un redemarrage de l'hote.
+bash "$(dirname "${BASH_SOURCE[0]}")/enable-at-boot.sh"
+
 cat <<EOF
 
 [+] Incus est installe.

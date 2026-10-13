@@ -1,6 +1,8 @@
 # Profil Incus applique a chaque "faux Raspberry Pi" de la flotte.
 # Applique/mis a jour automatiquement par network-setup.sh.
 config:
+  # Les faux Pi repartent seuls apres un redemarrage de l'hote (coupure de courant).
+  boot.autostart: "true"
   limits.cpu: "1"
   limits.memory: 512MiB
   limits.memory.enforce: soft

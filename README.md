@@ -611,6 +611,32 @@ Non couvert par la repetition : le materiel reel (firmware, GPIO, Raspberry
 Pi OS Trixie/cloud-init a verifier sur une vraie carte), et l'heure (les
 conteneurs partagent l'horloge de l'hote - NTP est non verifiable dans le lab).
 
+## Redemarrage de l'hote (coupure de courant)
+
+Apres un redemarrage, tout doit revenir **sans relancer `install.sh`** : c'est ce
+qui garde l'acces distant. Ce qui s'y passe, dans l'ordre :
+
+1. **Incus demarre avec l'hote** (`incus/enable-at-boot.sh`, appele par
+   `incus/install.sh` et par `server/deploy-server.sh`). Le paquet Incus ne le
+   fait pas : sans ca, le demon ne se lance que quand un client ouvre sa socket -
+   donc jamais, apres une coupure - et le pont `expo-lan` (`10.42.0.1`) n'existe
+   pas. Constate une fois : dnsmasq en boucle d'erreur, plus de DNS pour le VPN.
+2. **Docker relance les conteneurs** (`restart: unless-stopped`). dnsmasq
+   **attend** que son interface porte son adresse (`server/stacks/dnsmasq/entrypoint.sh`)
+   au lieu de s'arreter : si Incus est plus lent que Docker, il demarre des que le
+   pont apparait. L'interface et l'adresse sont lues dans `dnsmasq.conf` (pas de nom
+   en dur : avec un vrai reseau, ce sera sa carte reseau) ; sans elle apres 10 min,
+   le conteneur s'arrete en erreur plutot que de rester "en marche" sans servir.
+3. **La flotte repart** (`boot.autostart` dans `incus/profiles/fake-pi.yaml`).
+
+Point de fragilite restant : le DNS des clients VPN (`10.42.0.1`) vit sur un pont
+gere par Incus. Si Incus lui-meme ne demarre pas, les noms ne se resolvent plus a
+distance (WireGuard, lui, reste joignable) - `journalctl -u incus` sur le Pi.
+
+Pour verifier apres un changement : `sudo reboot`, puis, une minute plus tard,
+`ip -br addr show expo-lan` (adresse `10.42.0.1/24`) et `docker ps` (tout `Up`,
+`expolab-dnsmasq` sans redemarrages).
+
 ## Rollback (retour a l'etat initial)
 
 Deux niveaux, a combiner :
@@ -672,6 +698,7 @@ incus/
   uninstall.sh               # desinstalle Incus (symetrique de install.sh)
   network-setup.sh           # cree le reseau expo-lan (bridge isole, sans NAT) + profil fake-pi
   lan-internet.sh            # NAT des machines : on / off / status (normalement off)
+  enable-at-boot.sh          # fait demarrer Incus avec l'hote (sinon pas de pont expo-lan apres une coupure)
   network-teardown.sh        # defait network-setup.sh
   profiles/fake-pi.yaml      # profil Incus flotte (reseau + limites CPU/RAM + pool disque)
 fleet/

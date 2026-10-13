@@ -18,6 +18,10 @@ preflight_checks() {
         exit 1
     fi
 
+    # Installations existantes : Incus doit demarrer avec l'hote (pont expo-lan,
+    # dont dnsmasq et le DNS du VPN dependent) - voir incus/enable-at-boot.sh.
+    bash "$REPO_ROOT/incus/enable-at-boot.sh"
+
     if ! command -v docker &>/dev/null; then
         echo "[+] Installation de Docker (script officiel get.docker.com)..."
         curl -fsSL https://get.docker.com | sh
