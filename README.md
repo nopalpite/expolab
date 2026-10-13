@@ -543,9 +543,11 @@ ecrire sur un disque brut) : la page detecte la carte, propose les machines
 connues (reservations DHCP **par nom**, avec leur adresse), et ecrit l'image
 master commune, puis la personnalise.
 
-1. Copier l'image master dans `server/stacks/sd-flasher/images/`
-   (`.img`, `.img.gz`, `.img.xz`, `.img.zst` ; la plus recente est utilisee).
-   Sa preparation (reduite, agrandie au premier demarrage) : `image/README-master.md`.
+1. Envoyer l'image master **depuis la page** (section "Image master" : choisir le
+   fichier, SHA-256 attendu facultatif, barre de progression ; `.img`, `.img.gz`,
+   `.img.xz`, `.img.zst`), ou la copier a la main dans
+   `server/stacks/sd-flasher/images/`. La plus recente est utilisee par defaut ; un
+   bouton supprime les anciennes. Sa preparation : `image/README-master.md`.
 2. Brancher le lecteur, choisir la machine, **retaper son nom** pour confirmer.
 3. Quatre etapes affichees : ecriture, verification (relecture du support et
    comparaison de l'empreinte), personnalisation, ejection. A la fin : « Carte
@@ -573,6 +575,14 @@ taille) juste avant d'ecrire ; image brute plus grande que la carte refusee d'em
 confirmation par retape du nom ; un seul flash a la fois ; journal d'audit (`data/audit.log`, affiche dans la page).
 Le conteneur est **privilegie** (`pid: host`, `/dev`) : c'est le prix d'ecrire
 sur un disque ; il ne publie qu'un port local, derriere le portail.
+
+**Envoi d'images** : le fichier est ecrit en flux directement sur disque (jamais
+en memoire) dans `<nom>.part`, puis renomme - une image a moitie envoyee n'apparait
+jamais. Refuses : nom hors `[A-Za-z0-9._-]`, type inconnu, fichier dont le debut ne
+correspond pas a son extension (verifie aussi dans le navigateur avant d'envoyer),
+nom deja pris, espace insuffisant (1 Go est toujours laisse au serveur), envoi
+interrompu, un envoi deja en cours, et un SHA-256 qui ne correspond pas a celui
+fourni. Une image en cours d'ecriture ne peut pas etre supprimee.
 
 `SD_FLASHER_DRY_RUN=1` : mode simulation (ecrit dans des fichiers, aucun disque
 touche) - c'est comme ca que les tests tournent, sans materiel.

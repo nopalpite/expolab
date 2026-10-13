@@ -23,6 +23,7 @@ import re
 import subprocess
 import tempfile
 import time
+import zlib
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Iterator
@@ -175,7 +176,11 @@ def iter_image(path: Path, progress: Callable[[int, int], None] | None = None) -
             position = raw.tell
         try:
             while True:
-                chunk = stream.read(CHUNK)
+                try:
+                    chunk = stream.read(CHUNK)
+                except (OSError, EOFError, lzma.LZMAError, zlib.error) as exc:
+                    # archive tronquee ou corrompue (envoi interrompu, fichier abime)
+                    raise FlashError(f"Image illisible ou corrompue ({path.name}) : {exc}") from exc
                 if not chunk:
                     break
                 if progress:

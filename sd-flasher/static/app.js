@@ -92,21 +92,120 @@ function renderImages() {
 
     const body = $("images-body");
     body.textContent = "";
+    $("images-free").textContent = `Espace libre sur le serveur : ${formatBytes(state.status.images_free)}.`;
     if (!images.length) {
-        body.appendChild(el("p", { class: "warn", text: "Aucune image. Copie l'image master dans server/stacks/sd-flasher/images/ sur le serveur (.img, .img.gz, .img.xz ou .img.zst)." }));
+        body.appendChild(el("p", { class: "warn", text: "Aucune image : envoie-en une ci-dessous." }));
         $("image-info").textContent = "";
         return;
     }
     const table = el("table");
-    table.appendChild(el("thead", {}, [el("tr", {}, ["Image", "Taille", "Date"].map((t) => el("th", { text: t })))]));
+    table.appendChild(el("thead", {}, [el("tr", {}, ["Image", "Taille", "Date", "SHA-256", ""].map((t) => el("th", { text: t })))]));
     const tbody = el("tbody");
-    images.forEach((i) => tbody.appendChild(el("tr", {}, [
-        el("td", { text: i.name }), el("td", { text: formatBytes(i.size) }), el("td", { text: formatTime(i.mtime) }),
-    ])));
+    images.forEach((i) => {
+        const del = el("button", { type: "button", class: "secondary small", text: "Supprimer" });
+        del.addEventListener("click", () => deleteImage(i.name));
+        const sha = el("td", { class: "mono", text: i.sha256 ? i.sha256.slice(0, 12) + "…" : "—" });
+        if (i.sha256) sha.setAttribute("title", i.sha256);
+        tbody.appendChild(el("tr", {}, [
+            el("td", { text: i.name }), el("td", { text: formatBytes(i.size) }), el("td", { text: formatTime(i.mtime) }), sha, el("td", {}, [del]),
+        ]));
+    });
     table.appendChild(tbody);
     body.appendChild(table);
     const current = images.find((i) => i.name === pick.value) || images[0];
     $("image-info").textContent = `Image : ${current.name} (${formatBytes(current.size)}${images.length > 1 ? "" : ", la plus récente"}).`;
+}
+
+// --- envoi et suppression d'images ----------------------------------------------------------
+
+const UPLOAD_SUFFIXES = [".img.gz", ".img.xz", ".img.zst", ".img"];
+const MAGIC = { ".gz": [0x1f, 0x8b], ".xz": [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00], ".zst": [0x28, 0xb5, 0x2f, 0xfd] };
+let uploadRequest = null;
+
+// Meme controle que le serveur, fait avant d'envoyer des Go pour rien.
+async function checkImageFile(file) {
+    const name = file.name;
+    if (!UPLOAD_SUFFIXES.some((s) => name.endsWith(s))) return "Type non reconnu : .img, .img.gz, .img.xz ou .img.zst.";
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/.test(name)) return "Nom invalide : lettres, chiffres, point, tiret et soulignement uniquement, sans espace ni accent.";
+    if (state.status.images.some((i) => i.name === name)) return "Une image de ce nom existe déjà : supprime-la d'abord.";
+    const head = new Uint8Array(await file.slice(0, 512).arrayBuffer());
+    const ext = Object.keys(MAGIC).find((e) => name.endsWith(e));
+    if (ext) {
+        if (!MAGIC[ext].every((b, i) => head[i] === b)) return `Ce fichier n'est pas une archive ${ext} valide.`;
+    } else if (!(head.length >= 512 && head[510] === 0x55 && head[511] === 0xaa)) {
+        return "Ce fichier ne ressemble pas à une image de carte SD (pas de table de partitions).";
+    }
+    if (file.size + 1024 ** 3 > state.status.images_free) return `Espace insuffisant : ${formatBytes(file.size)} à envoyer, ${formatBytes(Math.max(0, state.status.images_free - 1024 ** 3))} disponibles.`;
+    return null;
+}
+
+async function onUploadFileChange() {
+    const file = $("upload-file").files[0];
+    const status = $("upload-status");
+    $("upload-btn").disabled = true;
+    if (!file) { status.hidden = true; return; }
+    const problem = await checkImageFile(file);
+    if (problem) { showStatus(status, problem, "error"); return; }
+    showStatus(status, `${file.name} : ${formatBytes(file.size)}, prêt à envoyer.`, "ok");
+    $("upload-btn").disabled = false;
+}
+
+function setUploading(on) {
+    $("upload-btn").disabled = on;
+    $("upload-file").disabled = on;
+    $("upload-sha").disabled = on;
+    $("upload-cancel").hidden = !on;
+    $("upload-bar-wrap").hidden = !on;
+    window.onbeforeunload = on ? () => "Un envoi d'image est en cours." : null;
+}
+
+function startUpload() {
+    const file = $("upload-file").files[0];
+    if (!file) return;
+    const sha = $("upload-sha").value.trim();
+    const url = "/api/images/" + encodeURIComponent(file.name) + (sha ? "?sha256=" + encodeURIComponent(sha) : "");
+    const status = $("upload-status");
+    const started = Date.now();
+    const xhr = new XMLHttpRequest();
+    uploadRequest = xhr;
+    setUploading(true);
+    $("upload-bar").style.width = "0%";
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return;
+        const pct = (e.loaded / e.total) * 100;
+        const speed = e.loaded / Math.max(1, (Date.now() - started) / 1000);
+        const eta = speed ? Math.round((e.total - e.loaded) / speed) : 0;
+        $("upload-bar").style.width = pct.toFixed(1) + "%";
+        showStatus(status, `Envoi : ${pct.toFixed(0)} % (${formatBytes(e.loaded)} / ${formatBytes(e.total)}, ${formatBytes(speed)}/s, reste ~${Math.floor(eta / 60)} min ${eta % 60} s)`, "ok");
+    };
+    const finish = (message, ok) => {
+        uploadRequest = null;
+        setUploading(false);
+        showStatus(status, message, ok ? "ok" : "error");
+        if (ok) { $("upload-file").value = ""; $("upload-sha").value = ""; $("upload-btn").disabled = true; }
+        refresh();
+    };
+    xhr.onload = () => {
+        let data = {};
+        try { data = JSON.parse(xhr.responseText); } catch (e) { /* corps vide */ }
+        if (xhr.status === 201) finish(`${data.name} envoyée (${formatBytes(data.size)}, SHA-256 ${data.sha256.slice(0, 12)}…).`, true);
+        else finish(data.error || `Erreur ${xhr.status}`, false);
+    };
+    xhr.onerror = () => finish("Envoi interrompu : connexion perdue.", false);
+    xhr.onabort = () => finish("Envoi annulé.", false);
+    xhr.send(file);
+}
+
+async function deleteImage(name) {
+    if (!confirm(`Supprimer l'image ${name} ?`)) return;
+    try {
+        await api("/api/images/" + encodeURIComponent(name), { method: "DELETE" });
+    } catch (err) {
+        showStatus($("upload-status"), err.message, "error");
+    }
+    refresh();
 }
 
 async function onHostChange() {
@@ -253,7 +352,10 @@ async function saveSettings(extra = {}) {
     }
 }
 
-const EVENT_LABELS = { "flash-start": "Flash démarré", "flash-done": "Flash terminé", "flash-error": "Échec", settings: "Réglages modifiés" };
+const EVENT_LABELS = {
+    "flash-start": "Flash démarré", "flash-done": "Flash terminé", "flash-error": "Échec", settings: "Réglages modifiés",
+    "image-upload": "Image envoyée", "image-delete": "Image supprimée",
+};
 
 async function loadAudit() {
     const rows = await api("/api/audit");
@@ -264,7 +366,7 @@ async function loadAudit() {
         return;
     }
     rows.forEach((r) => {
-        const detail = r.hostname ? `${r.hostname}${r.model ? " · " + r.model : ""}${r.error ? " · " + r.error : ""}` : (r.wifi_ssid || "");
+        const detail = r.hostname ? `${r.hostname}${r.model ? " · " + r.model : ""}${r.error ? " · " + r.error : ""}` : (r.image || r.wifi_ssid || "");
         body.appendChild(el("tr", {}, [el("td", { text: formatTime(r.time) }), el("td", { text: EVENT_LABELS[r.event] || r.event }), el("td", { text: detail })]));
     });
 }
@@ -293,6 +395,9 @@ $("device-select").addEventListener("change", () => { renderDeviceInfo(); refres
 $("host-select").addEventListener("change", onHostChange);
 $("host-new").addEventListener("input", async () => { await refreshSummary(); updateFlashButton(); });
 $("confirm").addEventListener("input", updateFlashButton);
+$("upload-file").addEventListener("change", onUploadFileChange);
+$("upload-btn").addEventListener("click", startUpload);
+$("upload-cancel").addEventListener("click", () => uploadRequest && uploadRequest.abort());
 $("flash-btn").addEventListener("click", startFlash);
 $("settings-save").addEventListener("click", () => saveSettings());
 $("wifi-clear").addEventListener("click", () => saveSettings({ clear_wifi: true }));

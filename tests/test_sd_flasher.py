@@ -535,3 +535,144 @@ def test_an_image_too_big_for_the_card_fails_before_writing(api, tmp_path, monke
     assert flash(api, image="zzz-huge.img").status_code == 202
     job = wait_done(api)
     assert job["state"] == "error" and "plus grande" in job["error"]
+
+
+# --- envoi et suppression d'images depuis la page ------------------------------------------------------
+
+MBR = b"\x00" * 510 + b"\x55\xaa" + b"\x00" * 2000  # debut d'une image de carte : signature de partitions
+
+
+def put_image(api, name, body, sha256=None, headers=None):
+    url = f"/api/images/{name}" + (f"?sha256={sha256}" if sha256 else "")
+    return api.client.put(url, data=body, content_type="application/octet-stream", headers=headers or {})
+
+
+def leftovers(api):
+    return sorted(p.name for p in api.IMAGES_DIR.glob("*.part"))
+
+
+def test_uploaded_archive_is_stored_and_listed_with_its_hash(api):
+    import hashlib
+
+    body = gzip.compress(PAYLOAD)
+    res = put_image(api, "nouveau.img.gz", body)
+    assert res.status_code == 201, res.get_json()
+    digest = hashlib.sha256(body).hexdigest()
+    assert (api.IMAGES_DIR / "nouveau.img.gz").read_bytes() == body
+    assert res.get_json() == {"name": "nouveau.img.gz", "size": len(body), "sha256": digest}
+    listed = {i["name"]: i for i in api.client.get("/api/status").get_json()["images"]}
+    assert listed["nouveau.img.gz"]["sha256"] == digest and listed["master.img"]["sha256"] == ""  # copiee a la main : inconnue
+    assert api.client.get("/api/audit").get_json()[0]["event"] == "image-upload"
+    assert leftovers(api) == []
+
+
+def test_uploaded_image_can_be_flashed(api):
+    put_image(api, "zz-nouveau.img.xz", lzma.compress(PAYLOAD))
+    assert flash(api, image="zz-nouveau.img.xz").status_code == 202
+    assert wait_done(api)["state"] == "done"
+    assert (api.tmp / "sim" / "sda").read_bytes() == PAYLOAD
+
+
+def test_raw_image_needs_a_partition_table(api):
+    assert put_image(api, "brute.img", MBR).status_code == 201
+    res = put_image(api, "pas-une-image.img", b"juste du texte" * 100)
+    assert res.status_code == 400 and "table de partitions" in res.get_json()["error"]
+    assert not (api.IMAGES_DIR / "pas-une-image.img").exists() and leftovers(api) == []
+
+
+def test_archive_must_match_its_extension(api):
+    res = put_image(api, "faux.img.gz", b"ceci n'est pas du gzip" * 50)
+    assert res.status_code == 400 and ".gz" in res.get_json()["error"]
+    assert not (api.IMAGES_DIR / "faux.img.gz").exists() and leftovers(api) == []
+
+
+@pytest.mark.parametrize("name", [".cache.img", "a b.img", "x.txt", "sans-extension", "x..img", "é.img", "x.img.exe"])
+def test_bad_file_names_are_refused(api, name):
+    assert put_image(api, name, MBR).status_code == 400
+
+
+def test_an_existing_image_is_never_overwritten(api):
+    assert put_image(api, "master.img", MBR).status_code == 409
+    assert (api.IMAGES_DIR / "master.img").read_bytes() == PAYLOAD
+
+
+def test_wrong_expected_hash_discards_the_upload(api):
+    import hashlib
+
+    res = put_image(api, "corrompue.img", MBR, sha256="0" * 64)
+    assert res.status_code == 400 and "SHA-256" in res.get_json()["error"]
+    assert not (api.IMAGES_DIR / "corrompue.img").exists() and leftovers(api) == []
+    assert put_image(api, "correcte.img", MBR, sha256=hashlib.sha256(MBR).hexdigest().upper()).status_code == 201
+    assert put_image(api, "invalide.img", MBR, sha256="pas-un-hash").status_code == 400
+
+
+def test_upload_is_refused_when_there_is_no_room(api, monkeypatch):
+    from collections import namedtuple
+
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(api.shutil, "disk_usage", lambda path: usage(10**12, 10**12 - 5_000_000, 5_000_000))
+    res = put_image(api, "grosse.img", MBR)
+    assert res.status_code == 507 and "insuffisant" in res.get_json()["error"]
+    assert not (api.IMAGES_DIR / "grosse.img").exists()
+
+
+def test_empty_or_truncated_uploads_leave_nothing_behind(api):
+    assert put_image(api, "vide.img", b"").status_code == 411
+    # le navigateur annonce plus d'octets qu'il n'en envoie (connexion coupee) : on force CONTENT_LENGTH au niveau WSGI
+    res = api.client.put("/api/images/coupee.img", data=MBR, content_type="application/octet-stream",
+                         environ_overrides={"CONTENT_LENGTH": str(len(MBR) + 5000)})
+    assert res.status_code == 400
+    assert not (api.IMAGES_DIR / "coupee.img").exists() and leftovers(api) == []
+
+
+def test_only_one_upload_at_a_time(api):
+    assert api._upload_lock.acquire(blocking=False)
+    try:
+        res = put_image(api, "deux.img", MBR)
+        assert res.status_code == 409 and "en cours" in res.get_json()["error"]
+    finally:
+        api._upload_lock.release()
+    assert put_image(api, "deux.img", MBR).status_code == 201
+
+
+def test_stale_partial_uploads_are_cleaned_at_startup(api):
+    (api.IMAGES_DIR / "interrompue.img.part").write_bytes(b"x" * 100)
+    assert "interrompue.img.part" not in {i["name"] for i in api.client.get("/api/status").get_json()["images"]}
+    api.remove_stale_parts()
+    assert leftovers(api) == []
+
+
+def test_delete_removes_the_image_and_its_hash(api):
+    put_image(api, "temporaire.img", MBR)
+    assert (api.IMAGES_DIR / "temporaire.img.sha256").exists()
+    assert api.client.delete("/api/images/temporaire.img").status_code == 200
+    assert not (api.IMAGES_DIR / "temporaire.img").exists() and not (api.IMAGES_DIR / "temporaire.img.sha256").exists()
+    assert api.client.get("/api/audit").get_json()[0]["event"] == "image-delete"
+
+
+def test_delete_only_touches_listed_images(api):
+    (api.IMAGES_DIR / "notes.txt").write_text("pas une image")
+    assert api.client.delete("/api/images/notes.txt").status_code == 404
+    assert api.client.delete("/api/images/inexistante.img").status_code == 404
+    assert (api.IMAGES_DIR / "notes.txt").exists()
+
+
+def test_image_being_written_cannot_be_deleted(api):
+    api._job = {"state": "running", "image": "master.img"}
+    assert api.client.delete("/api/images/master.img").status_code == 409
+    assert (api.IMAGES_DIR / "master.img").exists()
+    assert api.client.delete("/api/images/master-gz.img.gz").status_code == 200  # une autre image : ok
+
+
+def test_status_reports_free_space(api):
+    assert api.client.get("/api/status").get_json()["images_free"] > 0
+
+
+def test_a_truncated_archive_gives_a_clear_error(tmp_path):
+    full = gzip.compress(PAYLOAD)
+    (tmp_path / "coupee.img.gz").write_bytes(full[: len(full) // 2])
+    with pytest.raises(flasher.FlashError, match="corrompue"):
+        b"".join(flasher.iter_image(tmp_path / "coupee.img.gz"))
+    (tmp_path / "abimee.img.xz").write_bytes(lzma.compress(PAYLOAD)[:200])
+    with pytest.raises(flasher.FlashError, match="corrompue"):
+        b"".join(flasher.iter_image(tmp_path / "abimee.img.xz"))

@@ -4,15 +4,18 @@ sur le serveur) et la personnalise pour une machine : hostname, identite unique,
 Wi-Fi et cles SSH. Voir flasher.py pour la logique et les garde-fous.
 
 Dossiers montes dans le conteneur :
-  /images             images master (.img, .img.gz, .img.xz, .img.zst), lecture seule
+  /images             images master (.img, .img.gz, .img.xz, .img.zst) : envoyees depuis la page
+                      (PUT /api/images/<nom>, flux ecrit directement sur disque) ou copiees a la main
   /data               settings.json (Wi-Fi, cle SSH - mode 600) et audit.log
   /dnsmasq-admin-config  reservations DHCP (lecture seule) : liste des noms de machines
   /keys/automation.pub  cle publique d'automatisation Ansible (optionnelle)
 Le conteneur est privilegie (pid: host, /dev) : il ecrit sur des disques bruts.
 """
+import hashlib
 import json
 import os
 import re
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -34,8 +37,15 @@ DRY_RUN = os.environ.get("SD_FLASHER_DRY_RUN") == "1"
 DRY_RUN_DIR = Path(os.environ.get("SD_FLASHER_DRY_RUN_DIR", "/tmp/sd-flasher-dry-run"))
 DEVICES_FILE = os.environ.get("SD_FLASHER_DEVICES_FILE")
 
+UPLOAD_RESERVE = int(os.environ.get("SD_FLASHER_UPLOAD_RESERVE_MB", "1024")) * 1024 * 1024  # espace laisse libre au serveur
+IMAGE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+MAGIC = {".gz": b"\x1f\x8b", ".xz": b"\xfd7zXZ\x00", ".zst": b"\x28\xb5\x2f\xfd"}  # debut des archives reconnues
+UPLOAD_CHUNK = 4 * 1024 * 1024
+
 _job_lock = threading.Lock()
 _job: dict = {"state": "idle"}  # idle | running | done | error
+_upload_lock = threading.Lock()  # un seul envoi a la fois
 
 
 def settings_path() -> Path:
@@ -147,6 +157,49 @@ def pick_image(name: str | None) -> Path | None:
     return IMAGES_DIR / chosen["name"] if chosen else None
 
 
+# --- images : liste, envoi, suppression ------------------------------------------------------
+
+def sha_path(name: str) -> Path:
+    return IMAGES_DIR / (name + ".sha256")
+
+
+def list_images() -> list[dict]:
+    images = flasher.list_images(IMAGES_DIR)
+    for image in images:
+        try:
+            image["sha256"] = sha_path(image["name"]).read_text().strip()
+        except OSError:
+            image["sha256"] = ""  # image copiee a la main : pas d'empreinte connue
+    return images
+
+
+def image_name_error(name: str) -> str | None:
+    if not IMAGE_NAME_RE.match(name) or ".." in name:
+        return "Nom de fichier invalide (lettres, chiffres, point, tiret et soulignement ; 100 caracteres maximum)."
+    if not name.endswith(flasher.IMAGE_SUFFIXES):
+        return "Type de fichier non reconnu : .img, .img.gz, .img.xz ou .img.zst."
+    return None
+
+
+def magic_error(name: str, head: bytes) -> str | None:
+    """Le debut du fichier correspond-il a son extension ? (evite d'envoyer un mauvais fichier pendant des minutes)"""
+    for suffix, magic in MAGIC.items():
+        if name.endswith(suffix):
+            return None if head.startswith(magic) else f"Ce fichier n'est pas une archive {suffix} valide."
+    # image brute : table de partitions MBR (signature 55 AA a l'offset 510), y compris derriere un GPT
+    return None if len(head) >= 512 and head[510:512] == b"\x55\xaa" else "Ce fichier ne ressemble pas a une image de carte SD (pas de table de partitions)."
+
+
+def remove_stale_parts() -> None:
+    """Envois interrompus par un arret du service : les restes .part ne servent a rien."""
+    if IMAGES_DIR.is_dir():
+        for part in IMAGES_DIR.glob("*.part"):
+            try:
+                part.unlink()
+            except OSError:
+                pass
+
+
 # --- routes ----------------------------------------------------------------------------------
 
 @app.route("/")
@@ -160,13 +213,87 @@ def api_status():
     return jsonify(
         {
             "devices": devices,
-            "images": flasher.list_images(IMAGES_DIR),
+            "images": list_images(),
+            "images_free": shutil.disk_usage(IMAGES_DIR).free if IMAGES_DIR.is_dir() else 0,
             "machines": machine_names(),
             "job": _job,
             "dry_run": DRY_RUN,
             "max_gb": MAX_BYTES // 10**9,
         }
     )
+
+
+@app.route("/api/images/<name>", methods=["PUT"])
+def api_image_put(name):
+    """Recoit une image : corps brut de la requete, ecrit par morceaux dans <nom>.part puis
+    renomme (jamais d'image a moitie ecrite dans la liste). Rien n'est charge en memoire."""
+    error = image_name_error(name)
+    if error:
+        return jsonify({"error": error}), 400
+    expected = request.args.get("sha256", "").strip().lower()
+    if expected and not SHA256_RE.match(expected):
+        return jsonify({"error": "Empreinte SHA-256 invalide (64 caracteres hexadecimaux)."}), 400
+    length = request.content_length
+    if not length:
+        return jsonify({"error": "Taille de l'envoi inconnue."}), 411
+    if not IMAGES_DIR.is_dir():
+        return jsonify({"error": "Dossier des images introuvable."}), 500
+    target, part = IMAGES_DIR / name, IMAGES_DIR / (name + ".part")
+    if target.exists():
+        return jsonify({"error": "Une image de ce nom existe deja : supprime-la d'abord."}), 409
+    free = shutil.disk_usage(IMAGES_DIR).free
+    if length + UPLOAD_RESERVE > free:
+        return jsonify({"error": f"Espace insuffisant : {length / 1e9:.1f} Go a envoyer, {max(0, free - UPLOAD_RESERVE) / 1e9:.1f} Go disponibles."}), 507
+    if not _upload_lock.acquire(blocking=False):
+        return jsonify({"error": "Un autre envoi est en cours."}), 409
+    try:
+        digest, received = hashlib.sha256(), 0
+        with open(part, "wb") as f:
+            while True:
+                chunk = request.stream.read(UPLOAD_CHUNK)
+                if not chunk:
+                    break
+                if received == 0:
+                    bad = magic_error(name, chunk[:512])
+                    if bad:
+                        return jsonify({"error": bad}), 400
+                f.write(chunk)
+                digest.update(chunk)
+                received += len(chunk)
+            f.flush()
+            os.fsync(f.fileno())
+        if received != length:
+            return jsonify({"error": "Envoi interrompu : fichier incomplet."}), 400
+        if expected and digest.hexdigest() != expected:
+            return jsonify({"error": "L'empreinte SHA-256 ne correspond pas : fichier corrompu pendant l'envoi."}), 400
+        os.replace(part, target)
+        sha_path(name).write_text(digest.hexdigest() + "\n")
+        audit("image-upload", image=name, bytes=received, sha256=digest.hexdigest())
+        return jsonify({"name": name, "size": received, "sha256": digest.hexdigest()}), 201
+    except OSError as exc:  # disque plein, etc.
+        return jsonify({"error": f"Ecriture impossible : {exc}"}), 507
+    finally:
+        _upload_lock.release()
+        try:
+            part.unlink()
+        except OSError:
+            pass
+
+
+@app.route("/api/images/<name>", methods=["DELETE"])
+def api_image_delete(name):
+    images = {i["name"] for i in flasher.list_images(IMAGES_DIR)}
+    if name not in images:  # nom pris dans la liste, jamais un chemin
+        return jsonify({"error": "Image introuvable."}), 404
+    if _job.get("state") == "running" and _job.get("image") == name:
+        return jsonify({"error": "Cette image est en cours d'ecriture."}), 409
+    try:
+        (IMAGES_DIR / name).unlink()
+        sha_path(name).unlink(missing_ok=True)
+    except OSError as exc:
+        return jsonify({"error": f"Suppression impossible : {exc}"}), 500
+    audit("image-delete", image=name)
+    return jsonify({"deleted": name})
 
 
 @app.route("/api/settings", methods=["GET"])
@@ -310,4 +437,5 @@ def api_audit():
 
 
 if __name__ == "__main__":
+    remove_stale_parts()
     app.run(host="0.0.0.0", port=5057)

@@ -21,8 +21,8 @@ services:
       - "127.0.0.1:5057:5057"
     volumes:
       - /dev:/dev
-      # Images master : lecture seule (copiees a la main dans ce dossier).
-      - ${REPO_ROOT}/server/stacks/sd-flasher/images:/images:ro
+      # Images master : envoyees depuis la page (ou copiees a la main dans ce dossier).
+      - ${REPO_ROOT}/server/stacks/sd-flasher/images:/images
       # Reglages (Wi-Fi, cles - mode 600) et journal d'audit.
       - ${REPO_ROOT}/server/stacks/sd-flasher/data:/data
       # Cle publique d'automatisation Ansible (un dossier, pas un fichier).
