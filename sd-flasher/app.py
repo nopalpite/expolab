@@ -368,6 +368,7 @@ def api_preview():
             "user": eff["user_name"] or None,
             "password": bool(eff["user_password"]),
             "sudo": bool(eff["user_name"] and eff["user_sudo"]),
+            "reboot": bool(eff["wifi_ssid"]),  # redemarrage unique au premier demarrage (active le Wi-Fi)
             "warnings": warnings,
             "keys": len(eff["authorized_keys"]),
             "actions": ["hostname", "machine-id vide", "cles SSH d'hote supprimees", "ejection"],

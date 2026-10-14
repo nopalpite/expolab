@@ -339,6 +339,14 @@ def render_seed(hostname: str, settings: dict, now: int | None = None, hasher=ha
     elif keys:
         user["ssh_authorized_keys"] = keys  # pas de compte defini : cles pour le compte par defaut de l'image
 
+    if settings.get("wifi_ssid"):
+        # Le Wi-Fi decrit dans network-config est ecrit mais PAS active au premier demarrage
+        # (comportement connu de cloud-init/netplan : le plus simple est de redemarrer, ce qui
+        # evite de debrancher la machine a la main). power_state : une seule fois par instance,
+        # donc un redemarrage par flash et aucun aux demarrages suivants.
+        user["power_state"] = {"mode": "reboot", "delay": "now", "timeout": 30, "condition": True,
+                               "message": "expolab : redemarrage unique apres la premiere configuration (active le Wi-Fi)"}
+
     network = {"version": 2, "ethernets": {"all-eth": {"match": {"name": "e*"}, "dhcp4": True, "optional": True}}}
     if settings.get("wifi_ssid"):
         network["wifis"] = {

@@ -18,6 +18,13 @@ Image utilisée : **Ubuntu Server 26.04 LTS pour Raspberry Pi** (`ubuntu-26.04.1
 ## Préparer le master
 
 1. Installer Ubuntu Server sur une carte, la démarrer, créer l'environnement commun (paquets), et lancer `image/machine-setup.sh --user NOM` (proxy apt vers le cache du serveur, serveur de temps, clé d'automatisation et `sudo` sans mot de passe) avec **le même nom de compte** que celui défini dans l'interface du flasheur : cloud-init le crée au premier démarrage de chaque carte. Si ce compte existe déjà dans le master, à valider sur une vraie carte : que son mot de passe et ses clés soient bien réappliqués (sinon, laisser le compte être créé par cloud-init et ne pas le créer dans le master).
+   Toujours dans le master, avant la capture :
+   ```
+   sudo apt install avahi-daemon                      # la machine répond à Bastion avec son vrai nom (mDNS)
+   sudo systemctl disable --now unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
+   ```
+   - **`avahi-daemon`** : Bastion trouve le nom d'une machine par mDNS, puis par DNS inverse. Ubuntu Server ne répond pas en mDNS de lui-même, donc un scan Bastion n'affichait aucun nom (et la box peut renvoyer un faux nom, hérité d'un ancien appareil à la même adresse). Les faux Pi de `fleet/` ont déjà `avahi-daemon`.
+   - **Mises à jour automatiques** : sans internet elles échouent et, en attendant, gardent le verrou `dpkg` pendant des minutes, ce qui bloque `apt` et Ansible. Les mises à jour passent par le cache apt du serveur, au moment choisi.
 2. **Remettre la carte « à neuf » avant de la capturer**, puis l'éteindre **sans la redémarrer** :
    ```
    sudo cloud-init clean --logs --seed --machine-id --configs all   # options à confirmer avec `cloud-init clean --help`
@@ -30,6 +37,12 @@ Image utilisée : **Ubuntu Server 26.04 LTS pour Raspberry Pi** (`ubuntu-26.04.1
 4. Déposer l'image dans `server/stacks/sd-flasher/images/` sur le serveur (la plus récente est utilisée par défaut).
 
 **Agrandissement au premier démarrage** : les modules `growpart` et `resizefs` de cloud-init agrandissent la partition racine puis son système de fichiers jusqu'à la taille de la carte. Ils tournent à chaque démarrage, donc même sur une copie du master.
+
+## Premier démarrage et Wi-Fi
+
+Le Wi-Fi décrit dans `network-config` est écrit par cloud-init mais **pas activé au premier démarrage** : c'est un comportement connu (cloud-init n'applique pas la configuration Wi-Fi à ce moment-là), constaté sur Ubuntu 26.04 sur une vraie carte, où la machine n'avait pas de réseau avant d'être débranchée puis rebranchée. Le flasheur ajoute donc `power_state: {mode: reboot}` à `user-data` quand un Wi-Fi est configuré : cloud-init redémarre la machine **une seule fois** à la fin de sa première configuration (une fois par instance : un redémarrage par flash, aucun aux démarrages suivants). Sans Wi-Fi (Ethernet seul), aucun redémarrage.
+
+Conséquence : au premier démarrage, l'écran s'arrête sur les clés SSH, puis la machine redémarre toute seule après environ une minute. Ne pas la débrancher.
 
 ## À valider sur une vraie carte
 

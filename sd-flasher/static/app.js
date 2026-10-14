@@ -247,7 +247,7 @@ async function refreshSummary() {
         list.textContent = "";
         list.appendChild(el("li", { text: `Image master vers ${selectedDevice().path}, puis vérification` }));
         list.appendChild(el("li", { text: `Hostname : ${data.hostname}` }));
-        list.appendChild(el("li", { text: data.wifi ? `Wi-Fi : ${data.wifi}` : "Pas de Wi-Fi" }));
+        list.appendChild(el("li", { text: data.wifi ? `Wi-Fi : ${data.wifi} (un redémarrage automatique au premier démarrage l'active)` : "Pas de Wi-Fi" }));
         let account = "Aucun compte défini";
         if (data.user) account = `Compte : ${data.user} (${data.password ? "mot de passe" : "sans mot de passe"}${data.sudo ? ", sudo sans mot de passe" : ""})`;
         list.appendChild(el("li", { text: account }));

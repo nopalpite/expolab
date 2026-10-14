@@ -858,3 +858,39 @@ def test_a_flash_writes_the_account_to_the_card(api):
     entry = yaml.safe_load(text)["users"][0]
     assert entry["name"] == "expo" and entry["passwd"].startswith("$6$")
     assert "motdepasse-secret" not in text
+
+
+# --- Wi-Fi : redemarrage unique au premier demarrage --------------------------------------------------
+
+def test_wifi_seed_reboots_once_after_the_first_configuration():
+    # le Wi-Fi n'est pas active au premier demarrage : cloud-init redemarre la machine (power_state, une fois par instance)
+    _files, user, _net = seed(settings={"wifi_ssid": "expo", "wifi_psk": "motdepasse1"})
+    assert user["power_state"]["mode"] == "reboot" and user["power_state"]["condition"] is True
+
+
+def test_seed_without_wifi_never_reboots():
+    _files, user, _net = seed()
+    assert "power_state" not in user
+
+
+def test_the_reboot_is_per_instance_so_it_cannot_loop():
+    # power_state ne s'applique qu'une fois par instance : l'instance-id change a chaque flash (donc un
+    # redemarrage par flash) et reste identique aux demarrages suivants (donc plus de redemarrage)
+    first, _, _ = seed(settings={"wifi_ssid": "expo", "wifi_psk": "motdepasse1"}, now=1_800_000_000)
+    again, _, _ = seed(settings={"wifi_ssid": "expo", "wifi_psk": "motdepasse1"}, now=1_800_000_000)
+    assert first["meta-data"] == again["meta-data"]
+
+
+def test_preview_announces_the_reboot_only_with_wifi(api):
+    assert api.client.get("/api/preview?hostname=module-02").get_json()["reboot"] is False
+    api.client.put("/api/settings", json={"wifi_ssid": "expo", "wifi_psk": "motdepasse1"})
+    assert api.client.get("/api/preview?hostname=module-02").get_json()["reboot"] is True
+
+
+def test_a_flash_with_wifi_writes_the_reboot_to_the_card(api):
+    api.client.put("/api/settings", json={"wifi_ssid": "expo", "wifi_psk": "motdepasse1"})
+    assert flash(api).status_code == 202
+    assert wait_done(api)["state"] == "done"
+    user = yaml.safe_load((api.tmp / "sim" / "module-02-boot" / "user-data").read_text())
+    assert user["power_state"]["mode"] == "reboot"
+
