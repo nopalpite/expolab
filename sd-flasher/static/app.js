@@ -248,7 +248,11 @@ async function refreshSummary() {
         list.appendChild(el("li", { text: `Image master vers ${selectedDevice().path}, puis vérification` }));
         list.appendChild(el("li", { text: `Hostname : ${data.hostname}` }));
         list.appendChild(el("li", { text: data.wifi ? `Wi-Fi : ${data.wifi}` : "Pas de Wi-Fi" }));
+        let account = "Aucun compte défini";
+        if (data.user) account = `Compte : ${data.user} (${data.password ? "mot de passe" : "sans mot de passe"}${data.sudo ? ", sudo sans mot de passe" : ""})`;
+        list.appendChild(el("li", { text: account }));
         list.appendChild(el("li", { text: `${data.keys} clé(s) SSH autorisée(s)` }));
+        data.warnings.forEach((w) => list.appendChild(el("li", { class: "warn", text: "Attention : " + w })));
         list.appendChild(el("li", { text: "Identité unique : machine-id vidé, clés SSH d'hôte supprimées" }));
         list.appendChild(el("li", { text: "Éjection de la carte à la fin" }));
         box.hidden = false;
@@ -343,6 +347,12 @@ async function loadSettings() {
     $("wifi-psk").value = "";
     $("wifi-psk").placeholder = s.has_wifi_psk ? "(inchangé)" : "";
     $("extra-keys").value = s.extra_keys.join("\n");
+    $("user-name").value = s.user_name;
+    $("user-password").value = "";
+    $("user-password").placeholder = s.has_user_password ? "(inchangé)" : "";
+    $("user-sudo").checked = s.user_sudo;
+    $("user-pwauth").checked = s.user_pwauth;
+    $("user-password-clear").hidden = !s.has_user_password;
     $("use-automation").checked = s.use_automation_key;
     $("use-automation").disabled = !s.automation_key_available;
     $("automation-hint").textContent = s.automation_key_available ? "" : "Clé d'automatisation introuvable sur le serveur.";
@@ -357,6 +367,8 @@ async function saveSettings(extra = {}) {
             body: JSON.stringify({
                 wifi_ssid: $("wifi-ssid").value, wifi_psk: $("wifi-psk").value, wifi_country: $("wifi-country").value,
                 use_automation_key: $("use-automation").checked,
+                user_name: $("user-name").value, user_password: $("user-password").value,
+                user_sudo: $("user-sudo").checked, user_pwauth: $("user-pwauth").checked,
                 extra_keys: $("extra-keys").value.split("\n"), ...extra,
             }),
         });
@@ -418,6 +430,7 @@ $("upload-cancel").addEventListener("click", () => uploadRequest && uploadReques
 $("flash-btn").addEventListener("click", startFlash);
 $("settings-save").addEventListener("click", () => saveSettings());
 $("wifi-clear").addEventListener("click", () => saveSettings({ clear_wifi: true }));
+$("user-password-clear").addEventListener("click", () => saveSettings({ clear_user_password: true }));
 for (const id of ["dismiss-btn", "dismiss-error-btn"]) {
     $(id).addEventListener("click", async () => { await api("/api/job/dismiss", { method: "POST" }); state.formDevice = null; refresh(); });
 }

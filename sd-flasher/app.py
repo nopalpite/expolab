@@ -73,6 +73,10 @@ def load_settings() -> dict:
         "wifi_country": data.get("wifi_country", "FR"),
         "extra_keys": [k for k in data.get("extra_keys", []) if isinstance(k, str)],
         "use_automation_key": data.get("use_automation_key", True),
+        "user_name": data.get("user_name", ""),
+        "user_password": data.get("user_password", ""),
+        "user_sudo": data.get("user_sudo", True),
+        "user_pwauth": data.get("user_pwauth", True),
     }
 
 
@@ -90,7 +94,8 @@ def effective_settings() -> dict:
     key = automation_key()
     if s["use_automation_key"] and key:
         keys.insert(0, key)
-    return {"wifi_ssid": s["wifi_ssid"], "wifi_psk": s["wifi_psk"], "wifi_country": s["wifi_country"], "authorized_keys": keys}
+    return {"wifi_ssid": s["wifi_ssid"], "wifi_psk": s["wifi_psk"], "wifi_country": s["wifi_country"], "authorized_keys": keys,
+            "user_name": s["user_name"], "user_password": s["user_password"], "user_sudo": s["user_sudo"], "user_pwauth": s["user_pwauth"]}
 
 
 def save_settings(data: dict) -> None:
@@ -108,6 +113,10 @@ def public_settings() -> dict:
         "wifi_ssid": s["wifi_ssid"],
         "wifi_country": s["wifi_country"],
         "has_wifi_psk": bool(s["wifi_psk"]),  # jamais renvoye : le mot de passe ne quitte pas le serveur
+        "user_name": s["user_name"],
+        "has_user_password": bool(s["user_password"]),  # idem
+        "user_sudo": s["user_sudo"],
+        "user_pwauth": s["user_pwauth"],
         "extra_keys": s["extra_keys"],
         "use_automation_key": s["use_automation_key"],
         "automation_key_available": bool(automation_key()),
@@ -312,18 +321,27 @@ def api_settings_put():
         "extra_keys": [k.strip() for k in body.get("extra_keys", current["extra_keys"]) if isinstance(k, str) and k.strip()],
         "use_automation_key": bool(body.get("use_automation_key", current["use_automation_key"])),
         "wifi_psk": current["wifi_psk"],
+        "user_name": str(body.get("user_name", current["user_name"])).strip(),
+        "user_sudo": bool(body.get("user_sudo", current["user_sudo"])),
+        "user_pwauth": bool(body.get("user_pwauth", current["user_pwauth"])),
+        "user_password": current["user_password"],
     }
     if body.get("wifi_psk"):  # vide = on garde l'actuel
         new["wifi_psk"] = str(body["wifi_psk"])
     if body.get("clear_wifi"):
         new["wifi_ssid"] = new["wifi_psk"] = ""
+    if body.get("user_password"):
+        new["user_password"] = str(body["user_password"])
+    if body.get("clear_user_password") or not new["user_name"]:
+        new["user_password"] = ""  # pas de compte, pas de mot de passe
     try:
         flasher.check_settings({"wifi_ssid": new["wifi_ssid"], "wifi_psk": new["wifi_psk"], "wifi_country": new["wifi_country"],
-                                "authorized_keys": new["extra_keys"]})
+                                "authorized_keys": new["extra_keys"], "user_name": new["user_name"],
+                                "user_password": new["user_password"]})
     except flasher.FlashError as exc:
         return jsonify({"error": str(exc)}), 400
     save_settings(new)
-    audit("settings", wifi_ssid=new["wifi_ssid"], keys=len(new["extra_keys"]))
+    audit("settings", wifi_ssid=new["wifi_ssid"], keys=len(new["extra_keys"]), user=new["user_name"])
     return jsonify(public_settings())
 
 
@@ -337,10 +355,20 @@ def api_preview():
         flasher.check_settings(eff)
     except flasher.FlashError as exc:
         return jsonify({"error": str(exc)}), 400
+    personal_keys = len(load_settings()["extra_keys"])
+    warnings = []
+    if not eff["user_name"]:
+        warnings.append("Aucun compte utilisateur defini : le compte par defaut de l'image sera cree sans mot de passe.")
+    elif not eff["user_password"] and not personal_keys:
+        warnings.append("Ni mot de passe ni cle SSH personnelle : seule la cle d'automatisation pourra se connecter.")
     return jsonify(
         {
             "hostname": hostname,
             "wifi": eff["wifi_ssid"] or None,
+            "user": eff["user_name"] or None,
+            "password": bool(eff["user_password"]),
+            "sudo": bool(eff["user_name"] and eff["user_sudo"]),
+            "warnings": warnings,
             "keys": len(eff["authorized_keys"]),
             "actions": ["hostname", "machine-id vide", "cles SSH d'hote supprimees", "ejection"],
         }

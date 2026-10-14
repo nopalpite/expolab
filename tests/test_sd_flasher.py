@@ -698,3 +698,163 @@ def test_unsafe_names_stay_refused(api, name):
     res = put_image(api, name.replace("/", "%2F"), MBR)
     assert res.status_code in (400, 404)
     assert not [p for p in api.IMAGES_DIR.iterdir() if p.name not in {"master.img", "master-gz.img.gz", "master-xz.img.xz", "notes.txt"}]
+
+
+# --- compte utilisateur -----------------------------------------------------------------------------------
+
+import shutil  # noqa: E402
+
+needs_openssl = pytest.mark.skipif(shutil.which("openssl") is None, reason="openssl absent")
+FAKE_HASH = "$6$sel$" + "a" * 86
+
+
+def fake_hasher(password):
+    return FAKE_HASH
+
+
+def account_seed(**overrides):
+    settings = {"user_name": "expo", "user_password": "motdepasse-secret", "authorized_keys": [GOOD_KEY]}
+    settings.update(overrides)
+    files = flasher.render_seed("module-02", settings, now=1_800_000_000, hasher=fake_hasher)
+    return files, yaml.safe_load(files["user-data"])
+
+
+def test_account_is_created_with_hashed_password_sudo_and_keys():
+    _files, user = account_seed()
+    entry = user["users"][0]
+    assert entry["name"] == "expo" and entry["shell"] == "/bin/bash"
+    assert entry["passwd"] == FAKE_HASH and entry["lock_passwd"] is False
+    assert entry["sudo"] == "ALL=(ALL) NOPASSWD:ALL" and "sudo" in entry["groups"]
+    assert entry["ssh_authorized_keys"] == [GOOD_KEY]
+    assert "ssh_authorized_keys" not in user           # les cles sont rattachees au compte, pas au compte par defaut
+    assert user["ssh_pwauth"] is True and user["chpasswd"] == {"expire": False}
+    assert len(user["users"]) == 1                      # pas de "default" : le compte "ubuntu" n'est pas cree en plus
+
+
+def test_the_plain_password_is_never_written_to_the_card():
+    files, _user = account_seed()
+    assert all("motdepasse-secret" not in content for content in files.values())
+
+
+def test_account_without_password_is_key_only():
+    _files, user = account_seed(user_password="")
+    entry = user["users"][0]
+    assert entry["lock_passwd"] is True and "passwd" not in entry
+    assert user["ssh_pwauth"] is False
+
+
+def test_password_ssh_login_can_be_switched_off():
+    _files, user = account_seed(user_pwauth=False)
+    assert user["users"][0]["passwd"] == FAKE_HASH and user["ssh_pwauth"] is False  # console seulement
+
+
+def test_sudo_can_be_switched_off():
+    _files, user = account_seed(user_sudo=False)
+    assert "sudo" not in user["users"][0] and "groups" not in user["users"][0]
+
+
+def test_without_an_account_the_images_default_user_is_kept():
+    files = flasher.render_seed("module-02", {"authorized_keys": [GOOD_KEY]}, now=1_800_000_000, hasher=fake_hasher)
+    user = yaml.safe_load(files["user-data"])
+    assert "users" not in user and "ssh_pwauth" not in user and user["ssh_authorized_keys"] == [GOOD_KEY]
+
+
+@pytest.mark.parametrize("name", ["root", "Root", "1abc", "a b", "x" * 40, "é", "a;b", "-x", "a/b"])
+def test_invalid_account_names_are_refused(name):
+    with pytest.raises(flasher.FlashError, match="utilisateur"):
+        flasher.check_settings({"user_name": name})
+
+
+@pytest.mark.parametrize("settings", [{"user_password": "motdepasse1"}, {"user_name": "expo", "user_password": "court"},
+                                     {"user_name": "expo", "user_password": "a\nb" + "c" * 10}])
+def test_invalid_account_passwords_are_refused(settings):
+    with pytest.raises(flasher.FlashError):
+        flasher.check_settings(settings)
+
+
+def test_the_password_goes_through_stdin_not_the_command_line():
+    seen = {}
+
+    class Done:
+        returncode, stdout = 0, FAKE_HASH + "\n"
+
+    def run(cmd, **kwargs):
+        seen["cmd"], seen["input"] = cmd, kwargs.get("input")
+        return Done()
+
+    assert flasher.hash_password("motdepasse-secret", run=run) == FAKE_HASH
+    assert "motdepasse-secret" not in " ".join(seen["cmd"]) and "motdepasse-secret" in seen["input"]
+
+
+def test_hashing_failures_are_clear_errors():
+    class Failed:
+        returncode, stdout = 1, ""
+
+    with pytest.raises(flasher.FlashError, match="hacher"):
+        flasher.hash_password("motdepasse1", run=lambda *a, **k: Failed())
+
+    def missing(*a, **k):
+        raise FileNotFoundError("openssl")
+
+    with pytest.raises(flasher.FlashError, match="openssl"):
+        flasher.hash_password("motdepasse1", run=missing)
+
+
+@needs_openssl
+def test_openssl_hash_is_salted_and_verifiable():
+    import subprocess
+
+    first, second = flasher.hash_password("motdepasse1"), flasher.hash_password("motdepasse1")
+    assert first.startswith("$6$") and first != second  # sel aleatoire
+    salt = first.split("$")[2]
+    again = subprocess.run(["openssl", "passwd", "-6", "-salt", salt, "-stdin"], input="motdepasse1\n", capture_output=True, text=True)
+    assert again.stdout.strip() == first                 # le hache correspond bien au mot de passe
+
+
+# --- compte utilisateur : API ---------------------------------------------------------------------------
+
+def test_account_settings_never_leak_the_password(api):
+    res = api.client.put("/api/settings", json={"user_name": "expo", "user_password": "motdepasse-secret"})
+    data = res.get_json()
+    assert res.status_code == 200 and data["user_name"] == "expo" and data["has_user_password"] is True
+    for url in ("/api/settings", "/api/preview?hostname=module-02", "/api/status", "/api/audit"):
+        assert "motdepasse-secret" not in api.client.get(url).get_data(as_text=True), url
+    if os.name != "nt":
+        assert (api.DATA_DIR / "settings.json").stat().st_mode & 0o777 == 0o600
+    api.client.put("/api/settings", json={"user_name": "expo", "user_password": ""})   # champ vide : on garde
+    assert json.loads((api.DATA_DIR / "settings.json").read_text())["user_password"] == "motdepasse-secret"
+
+
+def test_account_password_can_be_removed_and_follows_the_account(api):
+    api.client.put("/api/settings", json={"user_name": "expo", "user_password": "motdepasse-secret"})
+    assert api.client.put("/api/settings", json={"clear_user_password": True}).get_json()["has_user_password"] is False
+    api.client.put("/api/settings", json={"user_password": "motdepasse-secret"})
+    assert api.client.put("/api/settings", json={"user_name": ""}).get_json()["has_user_password"] is False  # plus de compte : plus de mot de passe
+
+
+def test_invalid_account_settings_are_rejected(api):
+    assert api.client.put("/api/settings", json={"user_name": "root"}).status_code == 400
+    assert api.client.put("/api/settings", json={"user_name": "expo", "user_password": "court"}).status_code == 400
+    assert api.client.get("/api/settings").get_json()["user_name"] == ""   # rien d'enregistre
+
+
+def test_preview_warns_when_nobody_could_log_in(api):
+    api.client.put("/api/settings", json={"use_automation_key": False})
+    data = api.client.get("/api/preview?hostname=module-02").get_json()
+    assert data["user"] is None and any("Aucun compte" in w for w in data["warnings"])
+    api.client.put("/api/settings", json={"user_name": "expo"})
+    assert any("Ni mot de passe" in w for w in api.client.get("/api/preview?hostname=module-02").get_json()["warnings"])
+    api.client.put("/api/settings", json={"user_password": "motdepasse-secret"})
+    data = api.client.get("/api/preview?hostname=module-02").get_json()
+    assert data["warnings"] == [] and data["user"] == "expo" and data["password"] is True and data["sudo"] is True
+
+
+@needs_openssl
+def test_a_flash_writes_the_account_to_the_card(api):
+    api.client.put("/api/settings", json={"user_name": "expo", "user_password": "motdepasse-secret"})
+    assert flash(api).status_code == 202
+    assert wait_done(api)["state"] == "done"
+    text = (api.tmp / "sim" / "module-02-boot" / "user-data").read_text()
+    entry = yaml.safe_load(text)["users"][0]
+    assert entry["name"] == "expo" and entry["passwd"].startswith("$6$")
+    assert "motdepasse-secret" not in text

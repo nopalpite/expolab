@@ -555,15 +555,18 @@ master commune, puis la personnalise.
 
 Le master est un **Ubuntu Server** : la personnalisation passe par **cloud-init**,
 sans script maison dans le master. Ecrit **avant** le premier demarrage :
-une graine cloud-init sur la partition `system-boot` (`user-data` : hostname, cles
-SSH autorisees ; `network-config` : DHCP et Wi-Fi ; `meta-data` : un `instance-id`
+une graine cloud-init sur la partition `system-boot` (`user-data` : hostname,
+**compte utilisateur** - nom, mot de passe hache, sudo sans mot de passe, cles SSH ;
+`network-config` : DHCP et Wi-Fi ; `meta-data` : un `instance-id`
 neuf a chaque flash, pour que cloud-init rejoue tout), puis sur la racine
 `/etc/hostname` (le nom est annonce des la premiere requete DHCP, or les
 reservations sont par nom), `/etc/machine-id` vide (sinon toutes les machines ont
 le meme identifiant) et cles SSH d'hote supprimees (cloud-init en genere de
 neuves). L'agrandissement du systeme de fichiers au premier demarrage est fait par
-cloud-init (`growpart`/`resizefs`). Reglages Wi-Fi et cles dans la page (la cle
-d'automatisation Ansible est injectee par defaut) ; le mot de passe Wi-Fi reste sur
+cloud-init (`growpart`/`resizefs`). Reglages dans la page : compte (a definir : le
+`user-data` par defaut de l'image Ubuntu, qui creait le compte et son mot de passe,
+est remplace - sans compte, personne ne peut se connecter ; la page avertit),
+Wi-Fi et cles (la cle d'automatisation Ansible est injectee par defaut) ; le mot de passe Wi-Fi reste sur
 le serveur (`data/settings.json`, mode 600), jamais renvoye au navigateur.
 
 **Garde-fous** (verifies a chaque flash, pas seulement a l'affichage) : seuls les

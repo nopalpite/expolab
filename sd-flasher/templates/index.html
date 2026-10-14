@@ -104,7 +104,19 @@
 
         <section class="panel">
             <h2>Réglages écrits sur chaque carte</h2>
-            <p class="subtitle">Appliqués à chaque flash. Le mot de passe Wi-Fi reste sur le serveur : il n'est jamais renvoyé à cette page.</p>
+            <p class="subtitle">Appliqués à chaque flash. Les mots de passe restent sur le serveur : ils ne sont jamais renvoyés à cette page, et seul le mot de passe du compte, haché, est écrit sur la carte.</p>
+
+            <h3 class="sub">Compte utilisateur</h3>
+            <p class="hint">Sans compte défini ici, l'image Ubuntu n'a aucun moyen de connexion : son compte par défaut est créé sans mot de passe.</p>
+            <div class="grid">
+                <div class="field"><label for="user-name">Nom du compte</label><input type="text" id="user-name" placeholder="ubuntu" autocomplete="off" spellcheck="false"></div>
+                <div class="field"><label for="user-password">Mot de passe</label><input type="password" id="user-password" autocomplete="new-password" placeholder="(inchangé)"></div>
+            </div>
+            <label class="check"><input type="checkbox" id="user-sudo"> sudo sans mot de passe (nécessaire pour Ansible)</label>
+            <label class="check"><input type="checkbox" id="user-pwauth"> connexion SSH par mot de passe autorisée</label>
+            <div class="actions"><button id="user-password-clear" type="button" class="secondary small">Retirer le mot de passe</button></div>
+
+            <h3 class="sub">Réseau</h3>
             <div class="grid">
                 <div class="field"><label for="wifi-ssid">Wi-Fi (SSID)</label><input type="text" id="wifi-ssid" autocomplete="off"></div>
                 <div class="field"><label for="wifi-psk">Mot de passe Wi-Fi</label><input type="password" id="wifi-psk" autocomplete="new-password" placeholder="(inchangé)"></div>

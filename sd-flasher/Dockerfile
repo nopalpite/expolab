@@ -4,7 +4,7 @@
 FROM debian:trixie-slim
 
 RUN apt-get update -qq && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-flask util-linux zstd && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-flask util-linux zstd openssl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

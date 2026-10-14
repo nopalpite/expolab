@@ -35,6 +35,8 @@ DEFAULT_MAX_DEVICE_BYTES = 256 * 1000**3
 HOSTNAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 IMAGE_SUFFIXES = (".img", ".img.gz", ".img.xz", ".img.zst")
 SYSTEM_MOUNTPOINTS = ("/", "/boot", "/boot/firmware", "/var/lib/docker", "/home", "/var", "/usr", "/etc")
+USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")  # noms de comptes Linux usuels
+RESERVED_USERS = {"root"}
 SSH_KEY_RE = re.compile(r"^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp\d+|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/=]+( .*)?$")
 SEED_FILES = ("user-data", "network-config", "meta-data")  # graine cloud-init (NoCloud) sur la partition de demarrage
 
@@ -274,12 +276,36 @@ def check_settings(settings: dict) -> None:
     for key in settings.get("authorized_keys") or []:
         if not SSH_KEY_RE.match(key.strip()):
             raise FlashError(f"Cle SSH invalide : {key[:40]}...")
+    user, password = settings.get("user_name") or "", settings.get("user_password") or ""
+    if user and (not USER_RE.match(user) or user in RESERVED_USERS):
+        raise FlashError("Nom d'utilisateur invalide (minuscules, chiffres, - et _ ; commence par une lettre ; 32 caracteres maximum ; pas root).")
+    if password and not user:
+        raise FlashError("Un mot de passe demande un nom d'utilisateur.")
+    if password and (not 8 <= len(password) <= 128 or "\n" in password or "\r" in password):
+        raise FlashError("Mot de passe utilisateur invalide (8 a 128 caracteres, une seule ligne).")
 
 
-def render_seed(hostname: str, settings: dict, now: int | None = None) -> dict[str, str]:
+def hash_password(password: str, run=subprocess.run) -> str:
+    """Hache le mot de passe en SHA-512 crypt ($6$...) avec un sel aleatoire, par
+    `openssl passwd -6`. Le mot de passe passe par l'entree standard (jamais en argument,
+    visible dans la liste des processus). Seul le hache est ecrit sur la carte."""
+    try:
+        done = run(["openssl", "passwd", "-6", "-stdin"], input=password + "\n", capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise FlashError(f"Impossible de hacher le mot de passe (openssl) : {exc}") from exc
+    digest = done.stdout.strip()
+    if done.returncode != 0 or not digest.startswith("$6$"):
+        raise FlashError("Impossible de hacher le mot de passe (openssl a echoue).")
+    return digest
+
+
+def render_seed(hostname: str, settings: dict, now: int | None = None, hasher=hash_password) -> dict[str, str]:
     """Graine cloud-init (source NoCloud) a poser sur la partition de demarrage
     (`system-boot`, FAT) d'Ubuntu Server : {nom de fichier: contenu}.
-      user-data      hostname, cles SSH autorisees, regeneration des cles d'hote
+      user-data      hostname, compte utilisateur (nom, mot de passe HACHE, sudo), cles SSH
+                     autorisees, regeneration des cles d'hote. Remplace le user-data par defaut
+                     de l'image Ubuntu, qui definissait le compte et son mot de passe : sans
+                     compte ici, personne ne pourrait se connecter.
       network-config  DHCP sur l'Ethernet, Wi-Fi si configure (netplan)
       meta-data       instance-id UNIQUE a chaque flash : cloud-init traite donc la carte
                       comme une nouvelle instance et rejoue ses modules (utilisateur,
@@ -294,8 +320,24 @@ def render_seed(hostname: str, settings: dict, now: int | None = None) -> dict[s
 
     user = {"hostname": hostname, "preserve_hostname": False, "manage_etc_hosts": True, "ssh_deletekeys": True}
     keys = [k.strip() for k in (settings.get("authorized_keys") or []) if k.strip()]
-    if keys:
-        user["ssh_authorized_keys"] = keys
+    account = (settings.get("user_name") or "").strip()
+    if account:
+        # `users` sans "default" : seul ce compte est cree (pas le compte "ubuntu" par defaut)
+        entry = {"name": account, "gecos": account, "shell": "/bin/bash", "lock_passwd": True}
+        if settings.get("user_sudo", True):
+            entry["groups"] = ["sudo"]
+            entry["sudo"] = "ALL=(ALL) NOPASSWD:ALL"  # Ansible a besoin d'elever ses droits sans mot de passe
+        if keys:
+            entry["ssh_authorized_keys"] = keys
+        password = settings.get("user_password") or ""
+        if password:
+            entry["passwd"] = hasher(password)
+            entry["lock_passwd"] = False
+        user["users"] = [entry]
+        user["ssh_pwauth"] = bool(password and settings.get("user_pwauth", True))
+        user["chpasswd"] = {"expire": False}  # pas de changement force au premier login (machines sans clavier)
+    elif keys:
+        user["ssh_authorized_keys"] = keys  # pas de compte defini : cles pour le compte par defaut de l'image
 
     network = {"version": 2, "ethernets": {"all-eth": {"match": {"name": "e*"}, "dhcp4": True, "optional": True}}}
     if settings.get("wifi_ssid"):
