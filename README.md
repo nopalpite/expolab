@@ -777,6 +777,7 @@ server/
   lib/                           # une fonction par responsabilite, sources par deploy-server.sh :
                                  #   preflight, tls, secrets (+ basic auth), credentials, automation-key, ansible-web, apt-cache, sd-flasher, ntp, dashboard, dnsmasq, stacks, summary
   apt-cache-mode.sh             # bascule le cache apt en ligne / hors ligne (ou le redemarre) en ligne de commande
+  docker-cleanup.sh             # libere la place de Docker (cache de construction au-dela de 2 Go, images sans nom) ; appele en fin d'installation
   teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), reactive le DHCP integre d'Incus, desinstalle Docker
   docker-compose.yml            # bootstrap UNIQUEMENT : Dockhand (ne peut pas se creer via sa propre API)
   dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack (appelle dockhand_stack.py)

@@ -49,4 +49,5 @@ mkdir -p "$SCRIPT_DIR/stacks/git-mirror/data"
 deploy_stacks
 switch_dhcp_to_dnsmasq
 isolate_lan
+bash "$SCRIPT_DIR/docker-cleanup.sh"
 print_summary

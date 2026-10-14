@@ -44,6 +44,9 @@ echo
 echo "=== 5/5 : VPN (WireGuard) ==="
 "$SCRIPT_DIR/vpn/install.sh"
 
+echo
+bash "$SCRIPT_DIR/server/docker-cleanup.sh"
+
 cat <<'EOF'
 
 [+] Installation terminee.
