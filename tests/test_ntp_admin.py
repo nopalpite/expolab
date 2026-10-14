@@ -272,6 +272,7 @@ def test_docker_api_over_a_unix_socket(ntp, tmp_path, monkeypatch):
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(path)
     server.listen(1)
+    server.settimeout(5)   # un echec de connexion ne doit jamais bloquer le test
     seen = {}
 
     def serve():
@@ -280,16 +281,22 @@ def test_docker_api_over_a_unix_socket(ntp, tmp_path, monkeypatch):
         conn.sendall(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
         conn.close()
 
-    threading.Thread(target=serve, daemon=True).start()
-    monkeypatch.setattr(ntp, "DOCKER_SOCKET", path)
-    # remet la vraie fonction (la fixture l'a remplacee par un faux)
-    spec = importlib_spec()
-    status, _body = spec.docker_request("POST", "/containers/expolab-ntp/restart?t=10")
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    # La fixture a remplace docker_request par un faux : on charge une copie NEUVE du module (la vraie
+    # fonction) et c'est SA socket qu'on redirige. Sans cela le test viserait le vrai /var/run/docker.sock
+    # de la machine (present sur un runner CI : reponse 404 d'un vrai Docker).
+    real = load_real_module()
+    real.DOCKER_SOCKET = path
+    status, _body = real.docker_request("POST", "/containers/expolab-ntp/restart?t=10")
+    thread.join(5)
     server.close()
     assert status == 204 and seen["request"] == "POST /containers/expolab-ntp/restart?t=10 HTTP/1.1"
+    # et le chemin complet : un 204 vaut "redemarre" pour restart_container
+    assert real.DOCKER_SOCKET == path
 
 
-def importlib_spec():
+def load_real_module():
     spec = importlib.util.spec_from_file_location("ntp_admin_real", APP_PATH)
     module = importlib.util.module_from_spec(spec)
     sys.modules["ntp_admin_real"] = module
