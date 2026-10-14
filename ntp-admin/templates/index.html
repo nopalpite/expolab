@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>expolab · Heure</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Serveur de temps</h1>
+        <p class="subtitle">Une machine qui démarre a une horloge fausse (pas de pile) et sans internet rien ne la remet à l'heure : ce serveur la corrige. Sans heure juste, <code>apt</code> refuse les paquets.</p>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>État</h2>
+            <div class="cards">
+                <div class="card">
+                    <span class="label">Synchronisation</span>
+                    <strong id="sync-value">…</strong>
+                    <span class="hint" id="sync-hint"></span>
+                </div>
+                <div class="card">
+                    <span class="label">Service</span>
+                    <strong id="running-value">…</strong>
+                    <span class="hint">Redémarrage : quelques secondes.</span>
+                    <button id="restart-btn" type="button" class="secondary">Redémarrer</button>
+                </div>
+                <div class="card">
+                    <span class="label">Heure du serveur</span>
+                    <strong id="clock-value">…</strong>
+                    <span class="hint" id="clock-hint"></span>
+                </div>
+                <div class="card">
+                    <span class="label">Précision</span>
+                    <strong id="offset-value">…</strong>
+                    <span class="hint" id="offset-hint"></span>
+                    <button id="makestep-btn" type="button" class="secondary">Remettre à l'heure maintenant</button>
+                </div>
+            </div>
+            <p id="action-status" class="status" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Réglages</h2>
+            <div class="field">
+                <span class="label">Mode</span>
+                <label class="check"><input type="radio" name="mode" value="online" id="mode-online"> En ligne : synchronisé sur des serveurs d'internet</label>
+                <label class="check"><input type="radio" name="mode" value="offline" id="mode-offline"> Hors ligne : sert l'horloge du serveur, ne contacte aucun serveur</label>
+            </div>
+            <div class="field stacked">
+                <label for="upstream">Serveurs amont (un par ligne)</label>
+                <textarea id="upstream" rows="4" spellcheck="false"></textarea>
+                <span class="hint">Utilisés en mode « en ligne ». Le serveur choisit tout seul le meilleur.</span>
+            </div>
+            <div class="field stacked">
+                <label for="allow">Réseaux autorisés à demander l'heure (un par ligne)</label>
+                <textarea id="allow" rows="2" spellcheck="false"></textarea>
+                <span class="hint">Par défaut uniquement <code>10.42.0.0/24</code> (le réseau de l'expo), jamais le réseau de la maison.</span>
+            </div>
+            <label class="check"><input type="checkbox" id="fallback"> Servir l'horloge du serveur quand aucun serveur amont n'est joignable (recommandé : sans cela, les machines ne reçoivent plus d'heure)</label>
+            <div class="actions">
+                <button id="save-btn" type="button" class="secondary">Enregistrer</button>
+                <button id="apply-btn" type="button">Enregistrer et appliquer</button>
+                <span class="hint">Appliquer redémarre le serveur de temps.</span>
+            </div>
+            <p id="config-status" class="status" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Sources</h2>
+            <table>
+                <thead><tr><th>Serveur</th><th>État</th><th class="num">Strate</th><th class="num">Dernière réponse</th><th class="num">Écart</th></tr></thead>
+                <tbody id="sources-body"><tr><td colspan="5" class="empty">Chargement…</td></tr></tbody>
+            </table>
+        </section>
+
+        <section class="panel">
+            <h2>Machines</h2>
+            <p class="subtitle">Celles qui ont demandé l'heure à ce serveur.</p>
+            <table>
+                <thead><tr><th>Machine</th><th>Adresse</th><th class="num">Requêtes</th><th class="num">Dernière requête</th></tr></thead>
+                <tbody id="clients-body"><tr><td colspan="4" class="empty">Chargement…</td></tr></tbody>
+            </table>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

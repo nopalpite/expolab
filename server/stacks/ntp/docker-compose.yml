@@ -1,0 +1,27 @@
+# Stack Dockhand "ntp" - serveur de temps (chrony) pour les machines d'expo, voir
+# Dockerfile. Pas de vhost Caddy : c'est un service UDP, pas une interface web
+# (l'interface d'administration est la stack ntp-admin).
+#
+# network_mode: host : les machines joignent l'UDP 123 de l'hote sur expo-lan
+# (comme dnsmasq et le cache apt). Qui peut demander l'heure est limite par
+# allow.conf (defaut : expo-lan seulement), jamais le reseau physique.
+#
+# cap_add SYS_TIME : chrony regle l'horloge de l'HOTE (noyau partage). Il remplace le
+# chrony installe sur l'hote par server/lib/ntp.sh, desactive au deploiement.
+services:
+  ntp:
+    build: ${REPO_ROOT}/server/stacks/ntp
+    container_name: expolab-ntp
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - SYS_TIME
+    volumes:
+      # Configuration : un DOSSIER (jamais un fichier seul), modifie par ntp-admin
+      # puis relu au redemarrage du conteneur. Non versionne.
+      - ${REPO_ROOT}/server/stacks/ntp/config:/etc/ntp-expolab:ro
+      # Derive de l'horloge du serveur, apprise au fil du temps : evite de la
+      # reapprendre a chaque redemarrage.
+      - ${REPO_ROOT}/server/stacks/ntp/data:/var/lib/chrony
+      # Socket de commande de chronyd, partagee avec ntp-admin (lecture de l'etat).
+      - ${REPO_ROOT}/server/stacks/ntp/run:/run/chrony

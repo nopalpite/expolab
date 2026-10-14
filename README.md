@@ -525,7 +525,7 @@ la carte modele - preparation complete : `image/README-master.md`). Il pose :
   `sudo` sans mot de passe (`--stage access`) ;
 - le proxy apt (`--stage network`) : `http://10.42.0.1:3142`, sans repli
   direct (la machine n'a pas internet) ;
-- le serveur de temps `10.42.0.1` (chrony sur l'hote, aussi annonce par DHCP
+- le serveur de temps `10.42.0.1` (stack `ntp`, voir plus bas ; aussi annonce par DHCP
   - option 42) : une carte neuve a l'horloge fausse, et apt refuse un
   `Release` « pas encore valide ».
 
@@ -595,6 +595,31 @@ touche) - c'est comme ca que les tests tournent, sans materiel.
 carte, ejection, et le premier demarrage d'une vraie carte (cloud-init
 applique la graine, agrandissement de la racine, cles d'hote differentes) - liste
 de verification dans `image/README-master.md`.
+
+### Heure : le serveur de temps
+
+Une carte de remplacement demarre avec une horloge fausse (pas de pile RTC), et sans
+internet rien ne la remet a l'heure : `apt` refuse alors un fichier `Release` « pas
+encore valide », et les journaux deviennent incoherents. Le serveur sert l'heure au lab.
+
+**Interface "Heure"** (portail > Reseau > Heure, `ntp-admin/`) :
+- **Etat** : synchronise sur internet, ou « horloge locale » (aucun serveur amont : les
+  machines recoivent l'heure du serveur, qui peut deriver) ; precision, derniere mise a
+  l'heure, heure du serveur comparee a celle de ton navigateur ; bouton « Remettre a
+  l'heure maintenant » (saut d'horloge, pour une heure tres fausse).
+- **Reglages** : mode en ligne / hors ligne (hors ligne : aucun serveur amont contacte),
+  serveurs amont, reseaux autorises a demander l'heure (par defaut `10.42.0.0/24`
+  seulement, jamais le reseau de la maison ; un reseau plus large que /8 est refuse),
+  repli sur l'horloge du serveur quand aucun amont n'est joignable (recommande).
+- **Sources** et **machines** qui ont demande l'heure (avec leur nom).
+
+Le service est **chrony dans un conteneur** (`server/stacks/ntp/`, image maison, `network_mode:
+host`, capacite `SYS_TIME` : il regle aussi l'horloge de l'hote). Il remplace le chrony
+installe sur l'hote par les versions precedentes : `deploy-server.sh` l'arrete et le
+desactive (meme port UDP 123). Les reglages sont des fichiers dans
+`server/stacks/ntp/config/` (non versionnes), relus au redemarrage du conteneur ; une ligne
+invalide est ignoree avec un message plutot que d'empecher le demarrage. Les machines
+l'utilisent par l'option DHCP NTP de dnsmasq (`dhcp-option=option:ntp-server`).
 
 ### Paquets sans internet : le cache apt
 
@@ -799,6 +824,8 @@ server/
     git-mirror/{docker-compose.yml, data/}                            # data/ non versionne (clones bare + mirrors.yaml)
     apt-cache/{docker-compose.yml, Dockerfile, entrypoint.sh, apt-cache.env, config/, logs/, data/}  # apt-cacher-ng ; apt-cache.env (secret admin), config/ (mode, miroirs HTTPS), logs/ et data/ non versionnes
     apt-cache-admin/docker-compose.yml                                # build context = ../../apt-cache-admin
+    ntp/{docker-compose.yml, Dockerfile, entrypoint.sh, config/, data/, run/}  # serveur de temps (chrony) ; config/ (reglages), data/ (derive), run/ (socket) non versionnes
+    ntp-admin/docker-compose.yml                                       # build context = ../../ntp-admin
     sd-flasher/{docker-compose.yml, images/, data/, keys/}            # conteneur privilegie ; images/ (master), data/ (reglages, audit), keys/ non versionnes
     ansible-web/{docker-compose.yml, ansible-web.env, automation_key/, config.yaml, repo/, runs/}  # tout sauf docker-compose.yml non versionne ; execute bastion-ansible (depot separe, clone depuis git-mirror)
 webui/
@@ -812,6 +839,7 @@ caddy-admin/                     # idem - edite server/services.yaml, recharge C
 vpn-admin/                       # idem - appelle vpn/add-peer.sh et vpn/remove-peer.sh
 git-mirror/                      # idem, mais fait lui-meme le travail git (clone/fetch), rien a piloter
 ansible-web/                     # idem, mais fait lui-meme le travail ansible-playbook (clone/pull depuis git-mirror, execute)
+ntp-admin/                       # idem - interface du serveur de temps : etat, reglages, sources, machines
 sd-flasher/                      # flasheur de cartes SD : flasher.py (logique, garde-fous), app.py (API), templates/, static/
 vpn/
   install.sh                  # genere wg0.conf, cree/redeploie les stacks Dockhand "wireguard" et "vpn-admin"

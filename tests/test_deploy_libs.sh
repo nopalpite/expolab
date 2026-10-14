@@ -26,12 +26,9 @@ printf '#!/usr/bin/env bash\necho "1.1.1.1 via 192.168.1.1 dev eth0 src 192.168.
 if ! python3 -c 'pass' 2>/dev/null; then
     printf '#!/usr/bin/env bash\nexec python "$@"\n' > "$WORK/bin/python3"
 fi
-# chronyd/systemctl factices : setup_ntp ne doit rien installer ni redemarrer ici
+# systemctl factice : setup_ntp ne doit rien arreter ni redemarrer ici
 printf '#!/usr/bin/env bash
-exit 0
-' > "$WORK/bin/chronyd"
-printf '#!/usr/bin/env bash
-exit 0
+exit 1
 ' > "$WORK/bin/systemctl"
 chmod +x "$WORK/bin/"*
 export PATH="$WORK/bin:$PATH"
@@ -41,7 +38,6 @@ REPO_ROOT="$WORK"
 SERVICES="$SCRIPT_DIR/services.yaml"
 export REPO_ROOT SCRIPT_DIR SERVICES
 
-export CHRONY_CONF_DIR="$WORK/chrony"
 for lib in tls secrets credentials automation-key ansible-web sd-flasher apt-cache ntp lan-isolation dashboard dnsmasq stacks summary; do
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/lib/$lib.sh"
@@ -107,9 +103,15 @@ contains "$SCRIPT_DIR/stacks/ansible-web/ansible-web.env" "ansible_ssh_pass=rasp
 [ -f "$SCRIPT_DIR/stacks/ansible-web/automation_key/automation_ed25519" ] || fail "cle SSH non generee"
 
 setup_ntp
-contains "$CHRONY_CONF_DIR/expolab.conf" "allow 10.42.0.0/24"
-contains "$CHRONY_CONF_DIR/expolab.conf" "local stratum 10"
-setup_ntp  # idempotent : un second passage ne reecrit rien
+NTP="$SCRIPT_DIR/stacks/ntp/config"
+contains "$NTP/allow.conf" "10.42.0.0/24"
+contains "$NTP/mode" "online"
+contains "$NTP/local-fallback" "on"
+contains "$NTP/upstream.conf" "pool.ntp.org"
+printf 'offline
+' > "$NTP/mode"
+setup_ntp  # idempotent : un second passage n'ecrase jamais un choix de l'operateur
+contains "$NTP/mode" "offline"
 
 # isolate_lan : coupe le NAT d'expo-lan, sauf EXPOLAB_LAN_INTERNET=1
 cat > "$WORK/bin/incus" <<'EOT'
@@ -199,6 +201,8 @@ case "$DEPLOYED" in *" vpn-admin"*) fail "vpn-admin deploye alors que le VPN n'e
 case "$DEPLOYED" in *" ansible-web"*) ;; *) fail "ansible-web absent des stacks deployees" ;; esac
 case "$DEPLOYED" in *" apt-cache"*) ;; *) fail "apt-cache absent des stacks deployees" ;; esac
 case "$DEPLOYED" in *" apt-cache-admin"*) ;; *) fail "apt-cache-admin absent des stacks deployees" ;; esac
+case "$DEPLOYED" in *" ntp "*) ;; *) fail "ntp absent des stacks deployees" ;; esac
+case "$DEPLOYED" in *" ntp-admin"*) ;; *) fail "ntp-admin absent des stacks deployees" ;; esac
 case "$DEPLOYED" in *" sd-flasher"*) ;; *) fail "sd-flasher absent des stacks deployees" ;; esac
 mkdir -p "$WORK/vpn/wireguard/config" && touch "$WORK/vpn/wireguard/config/wg0.conf"
 DEPLOYED="" && deploy_stacks > /dev/null

@@ -1,0 +1,20 @@
+# Stack Dockhand "ntp-admin" - etat et reglages du serveur de temps (stack ntp).
+# Publie sur 127.0.0.1 : joignable uniquement via Caddy (https://ntp.<domaine>,
+# derriere le portail).
+services:
+  ntp-admin:
+    build: ${REPO_ROOT}/ntp-admin
+    container_name: expolab-ntp-admin
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5058:5058"
+    volumes:
+      # Reglages : le meme dossier que celui monte en lecture seule dans le conteneur ntp.
+      - ${REPO_ROOT}/server/stacks/ntp/config:/config
+      # Socket de commande de chronyd (etat, sources, machines clientes).
+      - ${REPO_ROOT}/server/stacks/ntp/run:/run/chrony
+      # Baux dnsmasq (lecture seule) : afficher le NOM des machines.
+      - ${REPO_ROOT}/server/stacks/dnsmasq/data:/leases:ro
+      # Uniquement pour redemarrer le conteneur ntp (API Docker) - meme precedent
+      # accepte pour dnsmasq-admin, vpn-admin et apt-cache-admin.
+      - /var/run/docker.sock:/var/run/docker.sock

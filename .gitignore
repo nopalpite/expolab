@@ -81,3 +81,9 @@ server/stacks/apt-cache/apt-cache.env
 server/stacks/sd-flasher/images/
 server/stacks/sd-flasher/data/
 server/stacks/sd-flasher/keys/
+
+# Serveur de temps : reglages (ntp-admin), derive de l'horloge et socket de chronyd -
+# etat runtime propre a chaque lab.
+server/stacks/ntp/config/
+server/stacks/ntp/data/
+server/stacks/ntp/run/

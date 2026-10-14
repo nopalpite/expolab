@@ -19,7 +19,7 @@
 #                    auth: true (ex: protocole git HTTP de git-mirror)
 # - title, group, icon, description : (optionnels) affichage dans le portail
 #                    (tiroir et accueil). icon : box, server, network, globe,
-#                    shield, terminal, git, play, download. Sans titre, le nom sert.
+#                    shield, terminal, git, play, download, clock. Sans titre, le nom sert.
 # - framed        : (optionnel, defaut true) false = le portail ouvre ce
 #                    service dans un nouvel onglet du navigateur au lieu de
 #                    l'afficher dans un cadre.
@@ -78,6 +78,13 @@ services:
     group: Infrastructure
     icon: box
     description: Flasher les cartes des machines
+  - name: ntp
+    auth: true
+    backend_port: 5058
+    title: Heure
+    group: Réseau
+    icon: clock
+    description: Serveur de temps
   - name: bastion
     backend_port: 5000
     title: Bastion

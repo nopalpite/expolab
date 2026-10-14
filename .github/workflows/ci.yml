@@ -65,6 +65,9 @@ jobs:
       - name: Test de l'adresse publique du VPN (Endpoint)
         run: bash tests/test_vpn_endpoint.sh
 
+      - name: Test de la stack ntp (serveur de temps)
+        run: bash tests/test_ntp.sh
+
       - name: Test du nettoyage de Docker (cache de construction)
         run: bash tests/test_docker_cleanup.sh
 
