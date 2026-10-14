@@ -4,36 +4,45 @@ L'image master est **commune à toutes les machines** : le flasheur (`sd-flasher
 
 Image utilisée : **Ubuntu Server 26.04 LTS pour Raspberry Pi** (`ubuntu-26.04.1-preinstalled-server-arm64+raspi.img.xz`, image arm64 préinstallée). Elle s'appuie sur **cloud-init** : c'est lui qui applique la personnalisation au premier démarrage, il n'y a aucun script maison à installer dans le master.
 
-## Ce que le flasheur fait à chaque carte
+## Faut-il capturer un master ?
 
-| Où | Quoi | Pourquoi |
-|---|---|---|
-| partition `system-boot` (FAT) | `user-data`, `network-config`, `meta-data` | graine cloud-init (source NoCloud) : hostname, clés SSH autorisées, Wi-Fi, DHCP |
-| `user-data` | compte utilisateur : nom, mot de passe **haché** (SHA-512, `openssl passwd -6`), `sudo` sans mot de passe, clés SSH | l'image Ubuntu livre un `user-data` par défaut (compte `ubuntu`, mot de passe `ubuntu`) que celui du flasheur remplace : sans compte défini dans l'interface, personne ne pourrait se connecter |
-| `meta-data` | `instance-id` **nouveau à chaque flash** | sans ça, cloud-init croit avoir déjà configuré cette carte (copie du master) et ne rejoue rien |
-| partition `writable` (ext4) | `/etc/hostname`, `/etc/hosts` | le nom doit être le bon dès la première requête DHCP : les réservations de dnsmasq sont **par nom**, et cloud-init n'applique le hostname qu'après le réseau |
-| partition `writable` | `/etc/machine-id` vidé | sinon toutes les machines ont le même identifiant machine (journal, certains clients DHCP) |
-| partition `writable` | `/etc/ssh/ssh_host_*` supprimés | sinon toutes les machines ont la même identité SSH ; cloud-init en génère de neuves (`ssh_deletekeys`) |
+**Pas forcément** : l'image officielle, telle quelle, fonctionne déjà. Tout ce qui est propre à l'expo vit dans le flasheur (donc dans le dépôt, versionné, modifiable sans recapturer) :
 
-## Préparer le master
+| Écrit par le flasheur sur chaque carte | Où |
+|---|---|
+| hostname, compte (mot de passe **haché**, sudo), clés SSH, Wi-Fi | `user-data`, `network-config` |
+| **serveur de temps du lab** (`10.42.0.1`) | `/etc/chrony/sources.d/expolab.sources` — Ubuntu 26.04 synchronise avec **chrony** (pas timesyncd) sur des serveurs d'internet ; le serveur du lab est *ajouté*, préféré dès qu'il répond |
+| **proxy apt** (cache du serveur), si renseigné | `/etc/apt/apt.conf.d/01expolab-proxy` — vide par défaut : injoignable hors de l'expo, il casserait `apt` ailleurs |
+| mises à jour automatiques **désactivées** | `/etc/apt/apt.conf.d/99-expolab-no-auto-upgrade` — sinon `unattended-upgrades` garde le verrou `dpkg` au premier démarrage et bloque `apt` et Ansible |
+| `instance-id` **nouveau à chaque flash** | `meta-data` — sans ça, cloud-init croit avoir déjà configuré la carte et ne rejoue rien |
+| `/etc/hostname`, `/etc/hosts` | partition racine : le nom doit être le bon dès la première requête DHCP (les réservations de dnsmasq sont **par nom**) |
+| `/etc/machine-id` vidé, clés SSH d'hôte supprimées | partition racine : sinon toutes les machines partagent la même identité (cloud-init en génère de neuves) |
 
-1. Installer Ubuntu Server sur une carte, la démarrer, créer l'environnement commun (paquets), et lancer `image/machine-setup.sh --user NOM` (proxy apt vers le cache du serveur, serveur de temps, clé d'automatisation et `sudo` sans mot de passe) avec **le même nom de compte** que celui défini dans l'interface du flasheur : cloud-init le crée au premier démarrage de chaque carte. Si ce compte existe déjà dans le master, à valider sur une vraie carte : que son mot de passe et ses clés soient bien réappliqués (sinon, laisser le compte être créé par cloud-init et ne pas le créer dans le master).
-   Toujours dans le master, avant la capture :
+**Capturer un master n'est utile que pour** :
+- **embarquer les mises à jour** (130 paquets au premier `apt upgrade`) : indispensable si les machines n'ont pas internet et que le cache apt du serveur n'est pas amorcé ;
+- **`avahi-daemon`** : Bastion trouve le nom d'une machine par mDNS, puis par DNS inverse. Ubuntu Server ne répond pas en mDNS de lui-même, donc un scan Bastion n'affiche aucun nom (et la box peut renvoyer un faux nom, hérité d'un ancien appareil à la même adresse). Les faux Pi de `fleet/` ont déjà `avahi-daemon`. Alternative sans capture : un rôle Ansible commun.
+
+Tout le reste (logiciels propres à un rôle : GPIO, affichage, applications) relève d'Ansible : versionné, rejouable, et ça ne fige rien dans une image.
+
+## Préparer et capturer un master
+
+1. **Flasher une carte de travail** avec le flasheur, mais avec un **compte temporaire** (par exemple `master`), pas celui des machines de l'expo. Le Wi-Fi de la maison donne internet ; laisser le **proxy apt vide**.
+2. Se connecter, puis :
    ```
-   sudo apt install avahi-daemon                      # la machine répond à Bastion avec son vrai nom (mDNS)
+   sudo apt update && sudo apt full-upgrade -y
+   sudo apt install -y avahi-daemon
+   sudo reboot
    ```
-   - **`avahi-daemon`** : Bastion trouve le nom d'une machine par mDNS, puis par DNS inverse. Ubuntu Server ne répond pas en mDNS de lui-même, donc un scan Bastion n'affichait aucun nom (et la box peut renvoyer un faux nom, hérité d'un ancien appareil à la même adresse). Les faux Pi de `fleet/` ont déjà `avahi-daemon`.
-   - **Mises à jour automatiques** : rien à faire dans le master, le flasheur les désactive dès le premier démarrage (sans internet elles échouent et gardent le verrou `dpkg`, ce qui bloque `apt` et Ansible). Les mises à jour passent par le cache apt du serveur, au moment choisi.
-2. **Remettre la carte « à neuf » avant de la capturer**, puis l'éteindre **sans la redémarrer** :
+   Après le redémarrage, vérifier que tout va bien : `systemctl status avahi-daemon`, `chronyc sources`, `cloud-init status --long`.
+3. **Remettre la carte à neuf**, depuis ce compte temporaire. Copier le script depuis le serveur (`scp pi@<serveur>:~/expolab/image/prepare-master.sh .`), puis :
    ```
-   sudo cloud-init clean --logs --seed --machine-id --configs all   # options à confirmer avec `cloud-init clean --help`
-   sudo truncate -s 0 /etc/machine-id
-   sudo rm -f /etc/ssh/ssh_host_*
-   sudo apt-get clean && history -c
-   sudo poweroff
+   sudo bash prepare-master.sh
    ```
-3. Capturer la carte en image (`dd`, Win32DiskImager…), puis la **réduire** (PiShrink avec `-s` : sans son propre agrandissement automatique, c'est cloud-init qui agrandit au premier démarrage), et la compresser (`.xz` ou `.zst`).
-4. Déposer l'image dans `server/stacks/sd-flasher/images/` sur le serveur (la plus récente est utilisée par défaut).
+   Il demande de taper `MASTER`, puis : remplace la graine du flasheur par des fichiers **neutres**, remet cloud-init à neuf, vide `machine-id`, supprime les clés SSH d'hôte, vide les caches, journaux et historiques, **supprime le compte temporaire** et éteint la machine. Ne pas la redémarrer ensuite.
+   - **La graine** contient le mot de passe Wi-Fi en clair et le hache du mot de passe : sans ce nettoyage, l'image les embarquerait. Le flasheur réécrit les trois fichiers à chaque flash.
+   - **Le compte temporaire** doit disparaître : si un compte du même nom que celui de l'expo restait dans l'image, cloud-init verrait un compte déjà présent sur chaque carte, et je ne garantis pas qu'il lui remette son mot de passe et ses clés.
+4. **Capturer** la carte en image (`dd`, Win32DiskImager…), la **réduire** (PiShrink avec `-s` : sans son propre agrandissement, c'est cloud-init qui agrandit au premier démarrage), la compresser (`.xz` ou `.zst`).
+5. Envoyer l'image dans le flasheur (section « Image master »).
 
 **Agrandissement au premier démarrage** : les modules `growpart` et `resizefs` de cloud-init agrandissent la partition racine puis son système de fichiers jusqu'à la taille de la carte. Ils tournent à chaque démarrage, donc même sur une copie du master.
 
@@ -47,12 +56,14 @@ Conséquence : au premier démarrage, l'écran s'arrête sur les clés SSH, puis
 
 - l'image réduite redémarre et la racine occupe bien toute la carte (`df -h /`) ;
 - `cloud-init status --long` termine en `done`, sans erreur ;
-- le hostname, la clé SSH et le Wi-Fi demandés sont appliqués ;
+- le hostname, la clé SSH et le Wi-Fi demandés sont appliqués, sans verrou `apt` (`sudo apt upgrade` ne doit pas attendre) ;
 - `/etc/machine-id` et les clés SSH d'hôte diffèrent d'une carte à l'autre ;
-- dnsmasq voit le nom dans la requête DHCP (réservation par nom → bonne adresse).
+- `chronyc sources` liste `10.42.0.1` (préféré sur le réseau de l'expo) et la machine apparaît dans l'interface « Heure » du portail ;
+- dnsmasq voit le nom dans la requête DHCP (réservation par nom → bonne adresse) ;
+- le nom apparaît dans un scan Bastion (avec `avahi-daemon`).
 
 ## Bon à savoir
 
-- `user-data` et `network-config` **restent** sur la partition FAT après le démarrage, mot de passe Wi-Fi compris, en clair (comme avec Raspberry Pi Imager). Garder la carte avec la machine.
+- `user-data` et `network-config` **restent** sur la partition FAT après le démarrage, mot de passe Wi-Fi compris, en clair (comme avec Raspberry Pi Imager). Garder la carte avec la machine, et ne jamais partager une image capturée sans avoir lancé `prepare-master.sh`.
 - Ne pas supprimer la configuration NoCloud d'Ubuntu (`/etc/cloud/cloud.cfg.d/`) : c'est elle qui fait lire `system-boot`.
-- La clé d'automatisation est déjà dans le master si `machine-setup.sh` y est passé ; l'injecter aussi depuis le flasheur est inoffensif (la même clé n'est pas dupliquée).
+- La clé d'automatisation est injectée par le flasheur (case cochée par défaut dans les réglages) : le master n'a pas besoin de `image/machine-setup.sh`, qui reste utilisé par les faux Pi de `fleet/`.

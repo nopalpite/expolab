@@ -566,7 +566,8 @@ neuves). L'agrandissement du systeme de fichiers au premier demarrage est fait p
 cloud-init (`growpart`/`resizefs`). Reglages dans la page : compte (a definir : le
 `user-data` par defaut de l'image Ubuntu, qui creait le compte et son mot de passe,
 est remplace - sans compte, personne ne peut se connecter ; la page avertit),
-Wi-Fi et cles (la cle d'automatisation Ansible est injectee par defaut) ; le mot de passe Wi-Fi reste sur
+Wi-Fi, **serveur de temps du lab** (chrony, ajoute aux sources d'Ubuntu), **proxy apt** (vide par
+defaut : injoignable hors expo) et cles (la cle d'automatisation Ansible est injectee par defaut) ; le mot de passe Wi-Fi reste sur
 le serveur (`data/settings.json`, mode 600), jamais renvoye au navigateur.
 
 **Garde-fous** (verifies a chaque flash, pas seulement a l'affichage) : seuls les
@@ -796,6 +797,7 @@ fleet/
   offline-rehearsal.sh        # repetition du remplacement d'une machine isolee d'internet (voir plus haut)
 image/
   machine-setup.sh            # preparation de l'image type (cle d'automatisation, sudo, proxy apt, NTP)
+  prepare-master.sh           # remet une machine a neuf avant de la capturer comme master (graine, identite, menage, compte temporaire)
   README-master.md            # preparer l'image master Ubuntu (cloud-init) - contrat avec sd-flasher
 server/
   deploy-server.sh             # orchestration : installe Docker, demarre Dockhand, cree/redeploie les stacks via son API

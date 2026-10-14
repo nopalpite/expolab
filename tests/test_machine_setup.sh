@@ -20,6 +20,12 @@ echo "ssh-ed25519 AAAATESTKEY expolab-test" > "$WORK/key.pub"
 bash "$SETUP" --stage network --server-ip 10.42.0.1 > /dev/null
 contains "$WORK/root/etc/apt/apt.conf.d/01expolab-proxy" 'Acquire::http::Proxy "http://10.42.0.1:3142";'
 contains "$WORK/root/etc/systemd/timesyncd.conf.d/expolab.conf" "NTP=10.42.0.1"
+# Systeme avec chrony (Ubuntu 26.04) : le serveur du lab est AJOUTE aux sources, jamais substitue.
+[ ! -e "$WORK/root/etc/chrony/sources.d/expolab.sources" ] || fail "source chrony ecrite sur un systeme sans chrony"
+mkdir -p "$WORK/root/etc/chrony"
+bash "$SETUP" --stage network --server-ip 10.42.0.1 > /dev/null
+contains "$WORK/root/etc/chrony/sources.d/expolab.sources" "server 10.42.0.1 iburst prefer"
+[ ! -e "$WORK/root/etc/chrony/chrony.conf" ] || fail "chrony.conf modifie : le serveur du lab doit s'ajouter, pas remplacer"
 
 # Les machines n'ont pas internet : pas de repli en connexion directe, et
 # l'ancien mecanisme de detection (version precedente) est retire.

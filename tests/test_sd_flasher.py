@@ -914,3 +914,92 @@ def test_apt_config_survives_the_yaml_round_trip():
     content = user["write_files"][0]["content"]
     assert content.count("\n") == 5 and content.startswith("//")   # 1 commentaire + 4 reglages, un par ligne
 
+
+
+# --- serveur de temps et proxy apt -----------------------------------------------------------------------
+
+def files_by_path(user):
+    return {f["path"]: f for f in user["write_files"]}
+
+
+def test_time_server_is_added_to_chrony_not_substituted():
+    # Ubuntu 26.04 utilise chrony : on AJOUTE le serveur du lab (prefere), les sources d'Ubuntu restent
+    _files, user, _net = seed(settings={"time_server": "10.42.0.1"})
+    src = files_by_path(user)["/etc/chrony/sources.d/expolab.sources"]
+    assert "server 10.42.0.1 iburst prefer" in src["content"] and src["permissions"] == "0644"
+    assert ["systemctl", "restart", "chrony"] in user["runcmd"]
+
+
+def test_no_time_server_means_no_chrony_file():
+    _files, user, _net = seed()
+    assert "/etc/chrony/sources.d/expolab.sources" not in files_by_path(user)
+    assert ["systemctl", "restart", "chrony"] not in user["runcmd"]
+
+
+def test_apt_proxy_is_written_only_when_configured():
+    _files, user, _net = seed(settings={"apt_proxy": "http://10.42.0.1:3142"})
+    assert files_by_path(user)["/etc/apt/apt.conf.d/01expolab-proxy"]["content"] == 'Acquire::http::Proxy "http://10.42.0.1:3142";\n'
+    _files, user, _net = seed()
+    assert "/etc/apt/apt.conf.d/01expolab-proxy" not in files_by_path(user)   # injoignable hors expo : casserait apt
+
+
+def test_the_other_files_are_kept_when_adding_the_expo_servers():
+    _files, user, _net = seed(settings={"time_server": "10.42.0.1", "apt_proxy": "http://10.42.0.1:3142"})
+    assert "/etc/apt/apt.conf.d/99-expolab-no-auto-upgrade" in files_by_path(user)
+    assert len(user["write_files"]) == 3
+
+
+@pytest.mark.parametrize("value", ["10.42.0.1", "ntp.interne", "time.example.org", "a"])
+def test_valid_time_servers(value):
+    flasher.check_settings({"time_server": value})
+
+
+@pytest.mark.parametrize("value", ["mauvais nom", "evil;rm -rf /", "10.42.0.1\nserver evil", "-x.fr", "x.fr-", "http://10.42.0.1", "é.fr", "a" * 300])
+def test_invalid_time_servers_are_refused(value):
+    # le nom finit dans un fichier de configuration de chrony : aucune injection de directive possible
+    with pytest.raises(flasher.FlashError, match="temps"):
+        flasher.check_settings({"time_server": value})
+
+
+@pytest.mark.parametrize("value", ["http://10.42.0.1:3142", "http://cache.interne", "http://10.42.0.1", "http://a.b:80"])
+def test_valid_apt_proxies(value):
+    flasher.check_settings({"apt_proxy": value})
+
+
+@pytest.mark.parametrize("value", ["10.42.0.1:3142", "https://10.42.0.1:3142", "http://10.42.0.1:3142/", 'http://x"; evil "', "http://", "ftp://x", "http://x y", "http://10.42.0.1:99999999", "http://a:b"])
+def test_invalid_apt_proxies_are_refused(value):
+    with pytest.raises(flasher.FlashError, match="Proxy apt"):
+        flasher.check_settings({"apt_proxy": value})
+
+
+def test_api_defaults_to_the_lab_time_server_and_no_proxy(api):
+    s = api.client.get("/api/settings").get_json()
+    assert s["time_server"] == "10.42.0.1" and s["apt_proxy"] == ""
+    p = api.client.get("/api/preview?hostname=module-02").get_json()
+    assert p["time_server"] == "10.42.0.1" and p["apt_proxy"] is None
+
+
+def test_api_saves_and_clears_both(api):
+    res = api.client.put("/api/settings", json={"time_server": "ntp.interne", "apt_proxy": "http://10.42.0.1:3142"})
+    assert res.status_code == 200 and res.get_json()["apt_proxy"] == "http://10.42.0.1:3142"
+    assert api.client.get("/api/preview?hostname=module-02").get_json()["apt_proxy"] == "http://10.42.0.1:3142"
+    res = api.client.put("/api/settings", json={"time_server": "", "apt_proxy": ""})
+    assert res.get_json()["time_server"] == "" and res.get_json()["apt_proxy"] == ""
+    assert api.client.get("/api/preview?hostname=module-02").get_json()["time_server"] is None
+
+
+def test_api_refuses_invalid_values_and_keeps_the_previous_ones(api):
+    assert api.client.put("/api/settings", json={"time_server": "mauvais nom"}).status_code == 400
+    assert api.client.put("/api/settings", json={"apt_proxy": "10.42.0.1:3142"}).status_code == 400
+    s = api.client.get("/api/settings").get_json()
+    assert s["time_server"] == "10.42.0.1" and s["apt_proxy"] == ""
+
+
+@needs_openssl
+def test_a_flash_writes_the_expo_servers_to_the_card(api):
+    api.client.put("/api/settings", json={"apt_proxy": "http://10.42.0.1:3142"})
+    assert flash(api).status_code == 202
+    assert wait_done(api)["state"] == "done"
+    user = yaml.safe_load((api.tmp / "sim" / "module-02-boot" / "user-data").read_text())
+    paths = {f["path"] for f in user["write_files"]}
+    assert {"/etc/chrony/sources.d/expolab.sources", "/etc/apt/apt.conf.d/01expolab-proxy"} <= paths

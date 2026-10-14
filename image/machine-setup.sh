@@ -58,6 +58,12 @@ EOF
         install -d "$ROOT/etc/systemd/timesyncd.conf.d"
         printf '[Time]\nNTP=%s\n' "$SERVER_IP" > "$ROOT/etc/systemd/timesyncd.conf.d/expolab.conf"
     fi
+    # Ubuntu 26.04 utilise chrony (pas timesyncd) : on y AJOUTE le serveur du lab, prefere des
+    # qu'il repond ; les sources d'Ubuntu restent (injoignables en expo, sans importance).
+    if [ -d "$ROOT/etc/chrony" ]; then
+        install -d "$ROOT/etc/chrony/sources.d"
+        printf '# Ecrit par image/machine-setup.sh : serveur de temps du lab\nserver %s iburst prefer\n' "$SERVER_IP" > "$ROOT/etc/chrony/sources.d/expolab.sources"
+    fi
     echo "[+] Reseau : proxy apt (cache du serveur, sans repli direct) et serveur de temps -> $SERVER_IP"
 }
 

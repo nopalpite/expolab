@@ -254,6 +254,8 @@ async function refreshSummary() {
         list.appendChild(el("li", { text: `${data.keys} clé(s) SSH autorisée(s)` }));
         data.warnings.forEach((w) => list.appendChild(el("li", { class: "warn", text: "Attention : " + w })));
         list.appendChild(el("li", { text: "Identité unique : machine-id vidé, clés SSH d'hôte supprimées" }));
+        list.appendChild(el("li", { text: data.time_server ? `Serveur de temps : ${data.time_server}` : "Pas de serveur de temps du lab" }));
+        list.appendChild(el("li", { text: data.apt_proxy ? `Proxy apt : ${data.apt_proxy}` : "Pas de proxy apt (apt direct sur internet)" }));
         list.appendChild(el("li", { text: "Mises à jour automatiques désactivées (elles bloquent apt au premier démarrage)" }));
         list.appendChild(el("li", { text: "Éjection de la carte à la fin" }));
         box.hidden = false;
@@ -348,6 +350,8 @@ async function loadSettings() {
     $("wifi-psk").value = "";
     $("wifi-psk").placeholder = s.has_wifi_psk ? "(inchangé)" : "";
     $("extra-keys").value = s.extra_keys.join("\n");
+    $("time-server").value = s.time_server;
+    $("apt-proxy").value = s.apt_proxy;
     $("user-name").value = s.user_name;
     $("user-password").value = "";
     $("user-password").placeholder = s.has_user_password ? "(inchangé)" : "";
@@ -368,6 +372,7 @@ async function saveSettings(extra = {}) {
             body: JSON.stringify({
                 wifi_ssid: $("wifi-ssid").value, wifi_psk: $("wifi-psk").value, wifi_country: $("wifi-country").value,
                 use_automation_key: $("use-automation").checked,
+                time_server: $("time-server").value, apt_proxy: $("apt-proxy").value,
                 user_name: $("user-name").value, user_password: $("user-password").value,
                 user_sudo: $("user-sudo").checked, user_pwauth: $("user-pwauth").checked,
                 extra_keys: $("extra-keys").value.split("\n"), ...extra,

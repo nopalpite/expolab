@@ -42,6 +42,8 @@ NO_AUTO_UPGRADE_CONF = (
     'APT::Periodic::Unattended-Upgrade "0";\n'
     'APT::Periodic::AutocleanInterval "0";\n'
 )
+HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")   # nom d'hote ou adresse IPv4
+APT_PROXY_RE = re.compile(r"^http://[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:[0-9]{1,5})?$")
 USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")  # noms de comptes Linux usuels
 RESERVED_USERS = {"root"}
 SSH_KEY_RE = re.compile(r"^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp\d+|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/=]+( .*)?$")
@@ -290,6 +292,12 @@ def check_settings(settings: dict) -> None:
         raise FlashError("Un mot de passe demande un nom d'utilisateur.")
     if password and (not 8 <= len(password) <= 128 or "\n" in password or "\r" in password):
         raise FlashError("Mot de passe utilisateur invalide (8 a 128 caracteres, une seule ligne).")
+    time_server = settings.get("time_server") or ""
+    if time_server and not HOST_RE.match(time_server):
+        raise FlashError("Serveur de temps invalide (nom ou adresse, sans espace ni caractere special).")
+    apt_proxy = settings.get("apt_proxy") or ""
+    if apt_proxy and not APT_PROXY_RE.match(apt_proxy):
+        raise FlashError("Proxy apt invalide (attendu : http://10.42.0.1:3142).")
 
 
 def hash_password(password: str, run=subprocess.run) -> str:
@@ -357,6 +365,28 @@ def render_seed(hostname: str, settings: dict, now: int | None = None, hasher=ha
         "content": NO_AUTO_UPGRADE_CONF,
     }]
     user["runcmd"] = [["systemctl", "disable", "--now", "apt-daily.timer", "apt-daily-upgrade.timer", "unattended-upgrades.service"]]
+
+    # Serveur de temps du lab (stack ntp). Ubuntu 26.04 synchronise avec chrony (pas timesyncd) sur des
+    # serveurs d'internet, injoignables en expo : on AJOUTE le serveur du lab, prefere des qu'il repond.
+    # Les autres sources restent (sur un autre reseau, le serveur du lab est simplement injoignable).
+    time_server = (settings.get("time_server") or "").strip()
+    if time_server:
+        user["write_files"].append({
+            "path": "/etc/chrony/sources.d/expolab.sources",
+            "permissions": "0644",
+            "content": f"# Ecrit par sd-flasher : serveur de temps du lab\nserver {time_server} iburst prefer\n",
+        })
+        user["runcmd"].append(["systemctl", "restart", "chrony"])   # prise en compte immediate (sans effet si chrony est absent)
+
+    # Proxy apt (cache du serveur) : vide par defaut - injoignable hors du reseau de l'expo, il
+    # casserait apt sur un autre reseau.
+    apt_proxy = (settings.get("apt_proxy") or "").strip()
+    if apt_proxy:
+        user["write_files"].append({
+            "path": "/etc/apt/apt.conf.d/01expolab-proxy",
+            "permissions": "0644",
+            "content": f'Acquire::http::Proxy "{apt_proxy}";\n',
+        })
 
     if settings.get("wifi_ssid"):
         # Le Wi-Fi decrit dans network-config est ecrit mais PAS active au premier demarrage

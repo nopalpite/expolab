@@ -43,6 +43,7 @@ IMAGE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+=@,-]{0,120}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 MAGIC = {".gz": b"\x1f\x8b", ".xz": b"\xfd7zXZ\x00", ".zst": b"\x28\xb5\x2f\xfd"}  # debut des archives reconnues
 UPLOAD_CHUNK = 4 * 1024 * 1024
+DEFAULT_TIME_SERVER = "10.42.0.1"   # serveur de temps du lab (stack ntp) : sans danger ailleurs, chrony garde ses autres sources
 
 _job_lock = threading.Lock()
 _job: dict = {"state": "idle"}  # idle | running | done | error
@@ -77,6 +78,8 @@ def load_settings() -> dict:
         "user_password": data.get("user_password", ""),
         "user_sudo": data.get("user_sudo", True),
         "user_pwauth": data.get("user_pwauth", True),
+        "time_server": data.get("time_server", DEFAULT_TIME_SERVER),
+        "apt_proxy": data.get("apt_proxy", ""),
     }
 
 
@@ -95,7 +98,8 @@ def effective_settings() -> dict:
     if s["use_automation_key"] and key:
         keys.insert(0, key)
     return {"wifi_ssid": s["wifi_ssid"], "wifi_psk": s["wifi_psk"], "wifi_country": s["wifi_country"], "authorized_keys": keys,
-            "user_name": s["user_name"], "user_password": s["user_password"], "user_sudo": s["user_sudo"], "user_pwauth": s["user_pwauth"]}
+            "user_name": s["user_name"], "user_password": s["user_password"], "user_sudo": s["user_sudo"], "user_pwauth": s["user_pwauth"],
+            "time_server": s["time_server"], "apt_proxy": s["apt_proxy"]}
 
 
 def save_settings(data: dict) -> None:
@@ -117,6 +121,8 @@ def public_settings() -> dict:
         "has_user_password": bool(s["user_password"]),  # idem
         "user_sudo": s["user_sudo"],
         "user_pwauth": s["user_pwauth"],
+        "time_server": s["time_server"],
+        "apt_proxy": s["apt_proxy"],
         "extra_keys": s["extra_keys"],
         "use_automation_key": s["use_automation_key"],
         "automation_key_available": bool(automation_key()),
@@ -325,6 +331,8 @@ def api_settings_put():
         "user_sudo": bool(body.get("user_sudo", current["user_sudo"])),
         "user_pwauth": bool(body.get("user_pwauth", current["user_pwauth"])),
         "user_password": current["user_password"],
+        "time_server": str(body.get("time_server", current["time_server"])).strip(),
+        "apt_proxy": str(body.get("apt_proxy", current["apt_proxy"])).strip(),
     }
     if body.get("wifi_psk"):  # vide = on garde l'actuel
         new["wifi_psk"] = str(body["wifi_psk"])
@@ -337,7 +345,8 @@ def api_settings_put():
     try:
         flasher.check_settings({"wifi_ssid": new["wifi_ssid"], "wifi_psk": new["wifi_psk"], "wifi_country": new["wifi_country"],
                                 "authorized_keys": new["extra_keys"], "user_name": new["user_name"],
-                                "user_password": new["user_password"]})
+                                "user_password": new["user_password"], "time_server": new["time_server"],
+                                "apt_proxy": new["apt_proxy"]})
     except flasher.FlashError as exc:
         return jsonify({"error": str(exc)}), 400
     save_settings(new)
@@ -368,6 +377,8 @@ def api_preview():
             "user": eff["user_name"] or None,
             "password": bool(eff["user_password"]),
             "sudo": bool(eff["user_name"] and eff["user_sudo"]),
+            "time_server": eff["time_server"] or None,
+            "apt_proxy": eff["apt_proxy"] or None,
             "reboot": bool(eff["wifi_ssid"]),  # redemarrage unique au premier demarrage (active le Wi-Fi)
             "warnings": warnings,
             "keys": len(eff["authorized_keys"]),
