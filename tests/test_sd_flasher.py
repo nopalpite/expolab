@@ -894,3 +894,23 @@ def test_a_flash_with_wifi_writes_the_reboot_to_the_card(api):
     user = yaml.safe_load((api.tmp / "sim" / "module-02-boot" / "user-data").read_text())
     assert user["power_state"]["mode"] == "reboot"
 
+
+# --- pas de mises a jour automatiques ---------------------------------------------------------------------
+
+def test_automatic_upgrades_are_switched_off_from_the_first_boot():
+    # sinon unattended-upgrades garde le verrou dpkg pendant des minutes (apt et Ansible attendent)
+    _files, user, _net = seed()
+    conf = next(f for f in user["write_files"] if f["path"].startswith("/etc/apt/apt.conf.d/"))
+    assert 'APT::Periodic::Unattended-Upgrade "0";' in conf["content"]
+    assert 'APT::Periodic::Update-Package-Lists "0";' in conf["content"]
+    assert conf["permissions"] == "0644"
+    assert conf["path"] > "/etc/apt/apt.conf.d/20auto-upgrades"   # lu apres celui d'Ubuntu, donc prioritaire
+    assert user["runcmd"][0][:3] == ["systemctl", "disable", "--now"]
+    assert {"apt-daily.timer", "apt-daily-upgrade.timer", "unattended-upgrades.service"} <= set(user["runcmd"][0])
+
+
+def test_apt_config_survives_the_yaml_round_trip():
+    _files, user, _net = seed()
+    content = user["write_files"][0]["content"]
+    assert content.count("\n") == 5 and content.startswith("//")   # 1 commentaire + 4 reglages, un par ligne
+

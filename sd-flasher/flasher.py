@@ -35,6 +35,13 @@ DEFAULT_MAX_DEVICE_BYTES = 256 * 1000**3
 HOSTNAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 IMAGE_SUFFIXES = (".img", ".img.gz", ".img.xz", ".img.zst")
 SYSTEM_MOUNTPOINTS = ("/", "/boot", "/boot/firmware", "/var/lib/docker", "/home", "/var", "/usr", "/etc")
+NO_AUTO_UPGRADE_CONF = (
+    '// Ecrit par sd-flasher : pas de mises a jour automatiques (voir render_seed).\n'
+    'APT::Periodic::Update-Package-Lists "0";\n'
+    'APT::Periodic::Download-Upgradeable-Packages "0";\n'
+    'APT::Periodic::Unattended-Upgrade "0";\n'
+    'APT::Periodic::AutocleanInterval "0";\n'
+)
 USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")  # noms de comptes Linux usuels
 RESERVED_USERS = {"root"}
 SSH_KEY_RE = re.compile(r"^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp\d+|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/=]+( .*)?$")
@@ -338,6 +345,18 @@ def render_seed(hostname: str, settings: dict, now: int | None = None, hasher=ha
         user["chpasswd"] = {"expire": False}  # pas de changement force au premier login (machines sans clavier)
     elif keys:
         user["ssh_authorized_keys"] = keys  # pas de compte defini : cles pour le compte par defaut de l'image
+
+    # Pas de mises a jour automatiques : au premier demarrage Ubuntu lance unattended-upgrades, qui
+    # garde le verrou dpkg pendant des minutes (apt et Ansible attendent) et, sans internet, echoue.
+    # Les mises a jour passent par le cache apt du serveur, au moment choisi. La configuration est
+    # ecrite des l'etape d'initialisation (avant que le minuteur d'Ubuntu ne declenche la mise a jour) ;
+    # runcmd coupe en plus les minuteurs pour les demarrages suivants.
+    user["write_files"] = [{
+        "path": "/etc/apt/apt.conf.d/99-expolab-no-auto-upgrade",
+        "permissions": "0644",
+        "content": NO_AUTO_UPGRADE_CONF,
+    }]
+    user["runcmd"] = [["systemctl", "disable", "--now", "apt-daily.timer", "apt-daily-upgrade.timer", "unattended-upgrades.service"]]
 
     if settings.get("wifi_ssid"):
         # Le Wi-Fi decrit dans network-config est ecrit mais PAS active au premier demarrage

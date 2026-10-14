@@ -254,6 +254,7 @@ async function refreshSummary() {
         list.appendChild(el("li", { text: `${data.keys} clé(s) SSH autorisée(s)` }));
         data.warnings.forEach((w) => list.appendChild(el("li", { class: "warn", text: "Attention : " + w })));
         list.appendChild(el("li", { text: "Identité unique : machine-id vidé, clés SSH d'hôte supprimées" }));
+        list.appendChild(el("li", { text: "Mises à jour automatiques désactivées (elles bloquent apt au premier démarrage)" }));
         list.appendChild(el("li", { text: "Éjection de la carte à la fin" }));
         box.hidden = false;
         state.previewFor = hostname;

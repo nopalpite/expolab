@@ -21,10 +21,9 @@ Image utilisée : **Ubuntu Server 26.04 LTS pour Raspberry Pi** (`ubuntu-26.04.1
    Toujours dans le master, avant la capture :
    ```
    sudo apt install avahi-daemon                      # la machine répond à Bastion avec son vrai nom (mDNS)
-   sudo systemctl disable --now unattended-upgrades apt-daily.timer apt-daily-upgrade.timer
    ```
    - **`avahi-daemon`** : Bastion trouve le nom d'une machine par mDNS, puis par DNS inverse. Ubuntu Server ne répond pas en mDNS de lui-même, donc un scan Bastion n'affichait aucun nom (et la box peut renvoyer un faux nom, hérité d'un ancien appareil à la même adresse). Les faux Pi de `fleet/` ont déjà `avahi-daemon`.
-   - **Mises à jour automatiques** : sans internet elles échouent et, en attendant, gardent le verrou `dpkg` pendant des minutes, ce qui bloque `apt` et Ansible. Les mises à jour passent par le cache apt du serveur, au moment choisi.
+   - **Mises à jour automatiques** : rien à faire dans le master, le flasheur les désactive dès le premier démarrage (sans internet elles échouent et gardent le verrou `dpkg`, ce qui bloque `apt` et Ansible). Les mises à jour passent par le cache apt du serveur, au moment choisi.
 2. **Remettre la carte « à neuf » avant de la capturer**, puis l'éteindre **sans la redémarrer** :
    ```
    sudo cloud-init clean --logs --seed --machine-id --configs all   # options à confirmer avec `cloud-init clean --help`
