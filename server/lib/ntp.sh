@@ -20,6 +20,10 @@ setup_ntp() {
     local dir="$SCRIPT_DIR/stacks/ntp" cfg
     cfg="$dir/config"
     mkdir -p "$dir/data" "$dir/run" "$cfg"
+    # chrony ouvre sa socket de commande (lue par ntp-admin) dans ce dossier et exige qu'il ne
+    # soit pas plus ouvert que 750 : sinon "Wrong permissions on /run/chrony" et socket desactivee
+    # (constate au premier deploiement), donc aucun etat dans l'interface.
+    chmod 750 "$dir/run"
 
     [ -f "$cfg/mode" ] || echo "online" > "$cfg/mode"
     if [ ! -f "$cfg/upstream.conf" ]; then

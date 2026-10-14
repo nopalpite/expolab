@@ -95,5 +95,8 @@ fi
 [ -z "${NTP_RENDER_ONLY:-}" ] || exit 0
 
 mkdir -p /run/chrony /var/lib/chrony
+# Dossier de la socket de commande (monte depuis l'hote) : chrony refuse ("Wrong permissions")
+# et desactive la socket s'il est plus ouvert que 750 - ntp-admin n'aurait alors aucun etat.
+chmod 750 /run/chrony
 # root : le conteneur garde SYS_TIME et la socket de commande reste lisible par ntp-admin.
 exec chronyd -d -u root

@@ -102,6 +102,11 @@ setup_ntp
 [ "$(cat "$STACK/config/local-fallback")" = "on" ] || fail "repli local par defaut incorrect"
 grep -q "pool.ntp.org" "$STACK/config/upstream.conf" || fail "serveurs amont par defaut absents"
 [ -d "$STACK/data" ] && [ -d "$STACK/run" ] || fail "dossiers data/run absents"
+# chrony desactive sa socket de commande si ce dossier est plus ouvert que 750 (invisible sous Windows)
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *) [ "$(stat -c %a "$STACK/run")" = "750" ] || fail "dossier run en mode $(stat -c %a "$STACK/run") au lieu de 750" ;;
+esac
 ! grep -q "disable" "$FAKE_SYSTEMCTL_LOG" || fail "chrony de l'hote desactive alors qu'il n'est pas actif"
 
 # Les choix de l'operateur ne sont jamais ecrases.
