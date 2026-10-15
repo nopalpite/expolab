@@ -377,6 +377,9 @@ def _fetch_update(**fields) -> None:
 
 def _run_fetch(url: str, name: str, expected: str) -> None:
     target, part = IMAGES_DIR / name, IMAGES_DIR / (name + ".part")
+    # L'etat final n'est publie QU'APRES le nettoyage et la liberation du verrou : sinon l'interface (ou un
+    # test) voit "termine/erreur" alors que le .part existe encore et qu'un nouvel envoi serait refuse.
+    outcome = {"state": "error", "error": "Telechargement interrompu de facon inattendue."}
     try:
         request_ = urllib.request.Request(url, headers={"User-Agent": "expolab-sd-flasher"})
         with _opener().open(request_, timeout=FETCH_TIMEOUT) as resp:
@@ -413,17 +416,18 @@ def _run_fetch(url: str, name: str, expected: str) -> None:
         os.replace(part, target)
         sha_path(name).write_text(digest.hexdigest() + "\n")
         audit("image-fetch", image=name, url=url, bytes=received, sha256=digest.hexdigest())
-        _fetch_update(state="done", sha256=digest.hexdigest())
+        outcome = {"state": "done", "sha256": digest.hexdigest()}
     except flasher.FlashError as exc:
-        _fetch_update(state="error", error=str(exc))
+        outcome = {"state": "error", "error": str(exc)}
     except urllib.error.HTTPError as exc:
-        _fetch_update(state="error", error=f"Le serveur distant a repondu {exc.code} ({exc.reason}).")
+        outcome = {"state": "error", "error": f"Le serveur distant a repondu {exc.code} ({exc.reason})."}
     except (urllib.error.URLError, OSError, ValueError) as exc:
         reason = getattr(exc, "reason", exc)
-        _fetch_update(state="error", error=f"Telechargement impossible : {reason} (le serveur a-t-il acces a internet ?)")
+        outcome = {"state": "error", "error": f"Telechargement impossible : {reason} (le serveur a-t-il acces a internet ?)"}
     finally:
         part.unlink(missing_ok=True)
         _upload_lock.release()
+        _fetch_update(**outcome)
 
 
 @app.route("/api/images/fetch", methods=["POST"])

@@ -402,3 +402,5 @@ def test_fetch_can_be_cancelled(api, monkeypatch):
     wait(lambda: api._fetch["state"] != "running")
     assert api._fetch["state"] == "error" and "annule" in api._fetch["error"]
     assert not (api.IMAGES_DIR / "a.img.part").exists()
+    # l'etat final n'est visible qu'APRES le nettoyage : le verrou est libre, un nouvel envoi est possible tout de suite
+    assert not api._upload_lock.locked()
