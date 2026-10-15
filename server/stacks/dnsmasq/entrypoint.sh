@@ -3,9 +3,9 @@
 #
 # L'interface et l'adresse sont LUES dans dnsmasq.conf (lignes `interface=` et
 # `dhcp-option=option:router,`) : ce script suit la configuration, il ne depend ni
-# d'Incus ni d'un nom en dur. Aujourd'hui expo-lan est un pont cree par Incus et il
-# peut ne pas exister encore au demarrage de l'hote ; avec un vrai reseau, ce sera
-# une carte reseau qui monte plus ou moins vite - meme attente.
+# de la carte reseau ni d'un nom en dur. expo-lan est un pont NetworkManager
+# (network/setup.sh) qui peut ne pas exister encore au demarrage de l'hote quand
+# Docker relance les conteneurs - d'ou l'attente.
 #
 # Sans cette attente, dnsmasq ("bind-interfaces") s'arrete aussitot et le conteneur
 # boucle en erreur - or le DNS du VPN est cette adresse. Au bout de MAX attentes

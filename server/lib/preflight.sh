@@ -8,19 +8,18 @@ preflight_checks() {
         exit 1
     fi
 
-    if ! command -v incus &>/dev/null; then
-        echo "incus introuvable. Lancer d'abord ../incus/install.sh" >&2
+    if ! ip link show expo-lan &>/dev/null; then
+        echo "Le reseau expo-lan n'existe pas. Lancer d'abord ../network/setup.sh <carte_reseau>" >&2
         exit 1
     fi
 
-    if ! incus network show expo-lan &>/dev/null; then
-        echo "Le reseau expo-lan n'existe pas. Lancer d'abord ../incus/network-setup.sh" >&2
-        exit 1
+    # curl (installation de Docker), python3-yaml (render-caddyfile.py) :
+    # absents d'une installation minimale.
+    if ! command -v curl &>/dev/null || ! python3 -c 'import yaml' &>/dev/null; then
+        echo "[+] Installation des prerequis (curl, python3-yaml)..."
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates python3-yaml
     fi
-
-    # Installations existantes : Incus doit demarrer avec l'hote (pont expo-lan,
-    # dont dnsmasq et le DNS du VPN dependent) - voir incus/enable-at-boot.sh.
-    bash "$REPO_ROOT/incus/enable-at-boot.sh"
 
     if ! command -v docker &>/dev/null; then
         echo "[+] Installation de Docker (script officiel get.docker.com)..."

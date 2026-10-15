@@ -35,7 +35,7 @@ jobs:
           files = (
               glob.glob("server/**/docker-compose.yml", recursive=True)
               + glob.glob("vpn/**/docker-compose.yml", recursive=True)
-              + ["server/services.yaml", "fleet/inventory.yaml"]
+              + ["server/services.yaml"]
           )
           bad = 0
           for f in files:
@@ -74,8 +74,11 @@ jobs:
       - name: Test du nettoyage de Docker (cache de construction)
         run: bash tests/test_docker_cleanup.sh
 
-      - name: Test de la tenue au redemarrage (Incus au boot, dnsmasq attend le pont)
+      - name: Test de la tenue au redemarrage (dnsmasq attend le pont)
         run: bash tests/test_boot_order.sh
+
+      - name: Test du reseau de l'expo (pont expo-lan, NAT)
+        run: bash tests/test_network.sh
 
       # Le Caddyfile genere (forward_auth, en-tetes de cadre...) est valide par
       # Caddy lui-meme : une erreur de syntaxe ici couperait tous les services.

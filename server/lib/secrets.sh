@@ -5,11 +5,6 @@
 # Les identifiants d'administration (Bastion, basic auth) sont ceux choisis
 # par l'utilisateur : voir credentials.sh (setup_admin_credentials d'abord).
 
-# Mot de passe "pi" par defaut des faux Pi (fleet/provision-fakepi.sh) :
-# valeur de lab connue, pas un secret - utilisee comme filet de secours
-# par ansible-web (voir ansible-web.sh). Surchargeable via l'environnement.
-LAB_FAKEPI_PASSWORD="${LAB_FAKEPI_PASSWORD:-raspberry}"
-
 # _env_value <fichier> <CLE> : valeur apres le premier "=" (pas de `source` :
 # les hash bcrypt contiennent des "$" que le shell interpreterait).
 _env_value() {

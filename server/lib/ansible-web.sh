@@ -1,6 +1,6 @@
 # Fichiers de la stack ansible-web (cle SSH, config, env) - source par
-# deploy-server.sh. Necessite BASTION_API_TOKEN et LAB_FAKEPI_PASSWORD
-# (secrets.sh) et ensure_automation_key (automation-key.sh).
+# deploy-server.sh. Necessite BASTION_API_TOKEN (secrets.sh) et
+# ensure_automation_key (automation-key.sh).
 
 setup_ansible_web() {
     local dir="$SCRIPT_DIR/stacks/ansible-web"
@@ -8,9 +8,8 @@ setup_ansible_web() {
 
     # Cle SSH dediee automatisation - montee directement dans le conteneur
     # (voir son docker-compose.yml et ANSIBLE_PRIVATE_KEY_FILE ci-dessous),
-    # jamais dans le contenu clone depuis git-mirror. Generee en general
-    # AVANT, par fleet/deploy-fleet.sh (qui en injecte la partie publique
-    # dans les faux Pi) - ici seulement si la flotte n'a pas ete deployee.
+    # jamais dans le contenu clone depuis git-mirror. Sa partie publique est
+    # injectee dans les machines par le flasheur de cartes SD.
     ensure_automation_key "$REPO_ROOT"
 
     # Bind-mount d'un FICHIER (config.yaml) : doit exister avant le
@@ -24,16 +23,11 @@ BASTION_URL=http://127.0.0.1:5000
 BASTION_API_TOKEN=$BASTION_API_TOKEN
 ANSIBLE_PRIVATE_KEY_FILE=/keys/automation_ed25519
 # Bastion n'expose pas de nom d'utilisateur SSH dans /api/machines - Ansible
-# se rabat sinon sur root, inexistant sur les faux Pi (utilisateur "pi", voir
-# fleet/provision-fakepi.sh). Fige pour ce lab ou tout le monde est "pi".
-ANSIBLE_REMOTE_USER=pi
-# Mot de passe des faux Pi (LAB_FAKEPI_PASSWORD, secrets.sh). ansible_ssh_pass :
-# la cle ci-dessus n'est jamais injectee dans authorized_keys des faux Pi
-# (configures en mot de passe uniquement) - filet de secours pour CE lab.
-# Un vrai parc utiliserait Ansible Vault ou du sudo NOPASSWD sur la cle.
-ANSIBLE_WEB_EXTRA_ARGS=--extra-vars ansible_become_pass=$LAB_FAKEPI_PASSWORD --extra-vars ansible_ssh_pass=$LAB_FAKEPI_PASSWORD
-# Les faux Pi sont recrees souvent (nouvelle cle hote a chaque fois) : la
-# verification stricte d'ansible.cfg y serait une nuisance permanente.
+# se rabat sinon sur root. Compte cree sur les machines par le flasheur
+# (cle d'automatisation, sudo sans mot de passe) : EXPOLAB_ANSIBLE_USER.
+ANSIBLE_REMOTE_USER=${EXPOLAB_ANSIBLE_USER:-pi}
+# Une carte remplacee garde son nom et son IP mais a une nouvelle cle d'hote :
+# la verification stricte d'ansible.cfg bloquerait chaque remplacement.
 ANSIBLE_HOST_KEY_CHECKING=false
 EOT
     chmod 600 "$dir/ansible-web.env"

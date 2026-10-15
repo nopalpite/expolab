@@ -8,11 +8,9 @@
 # app.py, sync_repo()).
 FROM python:3.12-slim
 
-# sshpass : necessaire pour l'authentification SSH par mot de passe
-# (ansible_ssh_pass) - la cle dediee automatisation est la methode
-# "vraie prod", mais les faux Pi de ce lab (fleet/provision-fakepi.sh)
-# n'acceptent que le mot de passe par defaut ("pi"/"raspberry"), aucune
-# cle n'y est injectee automatiquement.
+# sshpass : authentification SSH par mot de passe (ansible_ssh_pass), si
+# on la passe dans ANSIBLE_WEB_EXTRA_ARGS. Par defaut : la cle dediee
+# automatisation, injectee par le flasheur de cartes SD.
 RUN apt-get update -qq && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-client git sshpass && \
     rm -rf /var/lib/apt/lists/* && \

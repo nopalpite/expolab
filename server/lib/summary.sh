@@ -26,7 +26,7 @@ print_summary() {
 
 Identifiants d'administration (ceux que tu as choisis a l'installation, les
 memes partout, conserves dans server/stacks/caddy/auth.env) : $ADMIN_USER
-    Dockhand, UIs d'administration (flotte, dnsmasq, caddy, vpn, git-mirror,
+    Dockhand, UIs d'administration (dnsmasq, caddy, vpn, git-mirror,
     ansible-web) derriere le basic auth Caddy, Bastion.
 $(legacy_bastion_note)
 Certificat TLS (actuellement $TLS_MODE) : modifiable a tout moment sur

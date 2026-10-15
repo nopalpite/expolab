@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 # Deploie le "serveur d'expo" : Dockhand est lance seul (il ne peut pas se
 # creer via sa propre API), puis chaque service (dnsmasq, dnsmasq-admin,
-# caddy, caddy-admin, webui, bastion, dashboard, git-mirror, ansible-web)
+# caddy, caddy-admin, bastion, dashboard, git-mirror, ansible-web)
 # est cree/redeploye comme stack Dockhand independante via son API REST -
-# voir server/dockhand-api.sh. C'est ce qui, en vraie vie, tournerait sur
-# le vrai serveur de l'exposition (Incus n'existe pas la-bas, il ne sert
-# qu'a simuler la flotte ici dans le lab).
+# voir server/dockhand-api.sh. Le reseau de l'expo (pont expo-lan sur une
+# vraie carte reseau) doit exister avant : network/setup.sh.
 #
 # Ce fichier ne contient que l'orchestration : la logique de chaque
 # etape vit dans server/lib/*.sh (une fonction par responsabilite).
 #
 # Idempotent : relancer ce script (apres avoir modifie server/services.yaml
 # ou le code d'une app par exemple) regenere le Caddyfile et redeploie les
-# stacks sans repeter la bascule DHCP si elle a deja eu lieu.
+# stacks.
 #
 # Usage: sudo ./deploy-server.sh [chemin_services.yaml]
 set -euo pipefail
@@ -47,7 +46,6 @@ setup_dashboard
 mkdir -p "$SCRIPT_DIR/stacks/git-mirror/data"
 
 deploy_stacks
-switch_dhcp_to_dnsmasq
 isolate_lan
 bash "$SCRIPT_DIR/docker-cleanup.sh"
 print_summary

@@ -17,7 +17,7 @@
 # Le nom public (vhost, ce que le client demande) reste distinct du
 # backend meme si le backend par defaut est desormais "localhost" (tous
 # les services de ce stack Docker tournent sur l'hote) : ca laisse la
-# possibilite d'exposer un jour un service ailleurs (ex: un faux Pi via
+# possibilite d'exposer un jour un service ailleurs (ex: une machine de l'expo via
 # <nom>.expolab.lan) sans changer le format.
 #
 # extra_routes (optionnel) : un service peut avoir besoin de faire

@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Configuration commune a toute machine de l'expo - vraie (a lancer une
-# fois sur la carte "modele", voir README, section "Remplacer une machine")
-# ou simulee (pousse et lance par fleet/deploy-fleet.sh dans chaque faux Pi).
-# Une seule implementation pour les deux : ce que le lab valide est
-# exactement ce que porte l'image de la vraie vie.
+# Configuration commune a toute machine de l'expo (a lancer une fois sur
+# une machine deja installee, voir README, section "Remplacer une machine").
 #
 # Deux etapes, idempotentes, a lancer en root :
 #   --stage network : proxy apt vers le cache du serveur et serveur de temps

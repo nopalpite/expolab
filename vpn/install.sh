@@ -10,7 +10,7 @@
 # wireguard-tools du tout - toutes les commandes `wg` passent par `docker
 # exec wireguard`.
 #
-# Usage: sudo ./install.sh [nom_interface_bridge_expo-lan]
+# Usage: sudo ./install.sh [nom_du_pont_expo-lan]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,7 +32,7 @@ WG_SERVER_IP="10.66.66.1/24"
 WG_DIR="$SCRIPT_DIR/wireguard/config"
 
 if ! ip link show "$BRIDGE_IFACE" &>/dev/null; then
-    echo "Interface '$BRIDGE_IFACE' introuvable. Lancer d'abord incus/network-setup.sh" >&2
+    echo "Interface '$BRIDGE_IFACE' introuvable. Lancer d'abord network/setup.sh" >&2
     exit 1
 fi
 

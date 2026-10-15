@@ -6,7 +6,7 @@
 #                    ou une publication de port - donc toujours localhost)
 # - backend_host  : (optionnel, defaut "localhost") a ne renseigner que
 #                    pour un service qui vivrait ailleurs (ex: un futur
-#                    faux Pi si jamais besoin, via <nom>.expolab.lan)
+#                    machine de l'expo si besoin, via <nom>.expolab.lan)
 # - extra_routes  : (optionnel) chemins a faire suivre vers un port
 #                    different AVANT la route principale - voir
 #                    render-caddyfile.py
@@ -36,13 +36,6 @@ services:
     group: Infrastructure
     icon: box
     description: Conteneurs et stacks
-  - name: fleet
-    auth: true
-    backend_port: 5050
-    title: Flotte
-    group: Infrastructure
-    icon: server
-    description: Faux Raspberry Pi
   - name: dnsmasq
     auth: true
     backend_port: 5051

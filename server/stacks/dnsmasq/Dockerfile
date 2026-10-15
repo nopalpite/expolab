@@ -5,7 +5,7 @@
 FROM debian:trixie-slim
 
 # iproute2 : l'entrypoint attend que l'interface expo-lan porte son adresse
-# (cree par Incus) avant de lancer dnsmasq.
+# (pont cree par network/setup.sh) avant de lancer dnsmasq.
 # dnsmasq-utils : dhcp_release, utilise par dnsmasq-admin pour liberer le
 # bail d'une machine morte sans redemarrer dnsmasq (voir son app.py).
 # iputils-arping : savoir si une machine repond encore (ARP sur expo-lan)

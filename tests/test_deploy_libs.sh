@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test de fumee des modules server/lib/*.sh : execute les fonctions de
-# generation de fichiers (aucun Docker/Incus reel) dans une copie
+# generation de fichiers (aucun Docker reel) dans une copie
 # temporaire de server/, avec des faux `docker`/`ip` en tete du PATH, et
 # verifie le contenu produit. Lance en CI (.github/workflows/ci.yml) et
 # a la main : ./tests/test_deploy_libs.sh
@@ -99,7 +99,7 @@ setup_public_domain_dns
 
 setup_ansible_web
 contains "$SCRIPT_DIR/stacks/ansible-web/ansible-web.env" "ANSIBLE_REMOTE_USER=pi"
-contains "$SCRIPT_DIR/stacks/ansible-web/ansible-web.env" "ansible_ssh_pass=raspberry"
+! grep -q "ansible_ssh_pass" "$SCRIPT_DIR/stacks/ansible-web/ansible-web.env" || fail "mot de passe de lab encore passe a ansible"
 [ -f "$SCRIPT_DIR/stacks/ansible-web/automation_key/automation_ed25519" ] || fail "cle SSH non generee"
 
 setup_ntp
@@ -113,22 +113,39 @@ printf 'offline
 setup_ntp  # idempotent : un second passage n'ecrase jamais un choix de l'operateur
 contains "$NTP/mode" "offline"
 
-# isolate_lan : coupe le NAT d'expo-lan, sauf EXPOLAB_LAN_INTERNET=1
-cat > "$WORK/bin/incus" <<'EOT'
+# isolate_lan : coupe le NAT d'expo-lan (network/lan-internet.sh), sauf EXPOLAB_LAN_INTERNET=1
+cp -r "$REPO/network" "$WORK/network"
+cat > "$WORK/bin/iptables" <<'EOT'
 #!/usr/bin/env bash
-case "$*" in
-    "network get expo-lan ipv4.nat") cat "$NAT_STATE" ;;
-    "network set expo-lan ipv4.nat=false") echo false > "$NAT_STATE" ;;
+# Faux iptables : une regle par ligne dans $IPT_STATE ("table chaine regle...").
+table=filter
+[ "$1" = "-t" ] && { table="$2"; shift 2; }
+op="$1"; chain="$2"; shift 2
+[ "$op" = "-I" ] && [[ "$1" =~ ^[0-9]+$ ]] && shift
+rule="$table $chain $*"
+touch "$IPT_STATE"
+case "$op" in
+    -C) grep -qxF -- "$rule" "$IPT_STATE" ;;
+    -A|-I) echo "$rule" >> "$IPT_STATE" ;;
+    -D) grep -vxF -- "$rule" "$IPT_STATE" > "$IPT_STATE.tmp" || true; mv "$IPT_STATE.tmp" "$IPT_STATE" ;;
 esac
 EOT
-chmod +x "$WORK/bin/incus"
-export NAT_STATE="$WORK/nat"
-echo true > "$NAT_STATE"
+printf '#!/usr/bin/env bash
+exit 0
+' > "$WORK/bin/sysctl"
+chmod +x "$WORK/bin/iptables" "$WORK/bin/sysctl"
+export IPT_STATE="$WORK/iptables.rules"
+bash "$WORK/network/lan-internet.sh" on > /dev/null
+[ "$(wc -l < "$IPT_STATE")" -eq 3 ] || fail "lan-internet.sh on : 3 regles attendues"
+bash "$WORK/network/lan-internet.sh" on > /dev/null
+[ "$(wc -l < "$IPT_STATE")" -eq 3 ] || fail "lan-internet.sh on n'est pas idempotent"
+bash "$WORK/network/lan-internet.sh" status | grep -q "NAT actif" || fail "status : NAT actif attendu"
 EXPOLAB_LAN_INTERNET=1 isolate_lan > /dev/null
-[ "$(cat "$NAT_STATE")" = "true" ] || fail "EXPOLAB_LAN_INTERNET=1 doit laisser le NAT"
+[ -s "$IPT_STATE" ] || fail "EXPOLAB_LAN_INTERNET=1 doit laisser le NAT"
 isolate_lan > /dev/null
-[ "$(cat "$NAT_STATE")" = "false" ] || fail "le NAT d'expo-lan aurait du etre coupe"
+[ ! -s "$IPT_STATE" ] || fail "le NAT d'expo-lan aurait du etre coupe"
 isolate_lan > /dev/null  # idempotent : deja isole
+bash "$WORK/network/lan-internet.sh" status | grep -q "isolees" || fail "status : machines isolees attendu"
 
 setup_apt_cache
 APT="$SCRIPT_DIR/stacks/apt-cache"

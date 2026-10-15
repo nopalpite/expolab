@@ -1,7 +1,7 @@
 # Bootstrap UNIQUEMENT : Dockhand lui-meme, lance directement par
 # deploy-server.sh via `docker compose up -d` (il ne peut pas se creer
 # via sa propre API - probleme de l'oeuf et la poule). Tous les autres
-# services (dnsmasq, caddy, webui, bastion, et vpn/wireguard a part) sont
+# services (dnsmasq, caddy, bastion, et vpn/wireguard a part) sont
 # des stacks Dockhand independantes, creees/deployees via son API REST -
 # voir server/stacks/*/docker-compose.yml et server/dockhand-api.sh.
 services:
@@ -23,7 +23,7 @@ services:
       # "Matching paths" (recommande par le manuel Dockhand) : Dockhand
       # execute `docker compose build` depuis SON PROPRE conteneur, pas
       # depuis l'hote - sans ce montage au MEME chemin absolu, les stacks
-      # avec un `build:` (dnsmasq, webui, vpn/wireguard) echouent avec
+      # avec un `build:` (dnsmasq, vpn/wireguard) echouent avec
       # "unable to prepare context: path ... not found", meme si les
       # binds de volumes en runtime (geres par le demon Docker, pas par
       # ce conteneur) fonctionnent deja correctement sans ca.

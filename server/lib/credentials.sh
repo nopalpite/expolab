@@ -107,7 +107,7 @@ EOT
 
 [+] Identifiants d'administration : ce couple identifiant / mot de passe sera
     utilise pour TOUTES les interfaces (Dockhand, Bastion, dnsmasq, Caddy,
-    git-mirror, ansible-web, VPN, flotte). A choisir maintenant, une seule fois.
+    git-mirror, ansible-web, VPN, cartes SD). A choisir maintenant, une seule fois.
 EOT
     _read_admin_credentials admin
     echo "[+] Identifiants enregistres (utilisateur : $ADMIN_USER)."

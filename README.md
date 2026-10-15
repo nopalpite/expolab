@@ -1,18 +1,13 @@
 # expolab
 
-Lab de simulation d'infra d'exposition sur un Raspberry Pi 5 physique.
+Infra d'exposition : un serveur (Raspberry Pi 5) et les vraies machines de
+l'expo (Raspberry Pi), reliees au serveur par un switch.
 
-Deux couches bien separees :
-
-- **La flotte de faux Raspberry Pi** (`incus/`, `fleet/`) - simulee via
-  Incus, parce qu'en vraie vie ce sont de vrais boitiers separes qu'on ne
-  peut evidemment pas dupliquer sur une seule machine de lab. C'est un
-  artifice propre au lab.
-- **Le serveur d'expo** (`server/`, `vpn/`, `webui/`) - DHCP/DNS,
-  reverse-proxy, et les services applicatifs (webui, Bastion, plus tard
-  Gitea) tournent en Docker **directement sur l'hote**, pas dans Incus.
-  C'est exactement ce qui sera deploye sur le vrai serveur de
-  l'exposition, qui n'aura pas besoin d'Incus du tout. **Dockhand est le
+- **Le reseau de l'expo** (`network/`) - un pont `expo-lan` sur une vraie
+  carte reseau du serveur, reliee au switch des machines.
+- **Le serveur d'expo** (`server/`, `vpn/`) - DHCP/DNS, reverse-proxy, et
+  les services applicatifs (Bastion, ansible-web, plus tard Gitea) tournent
+  en Docker **directement sur l'hote**. **Dockhand est le
   point d'entree de gestion de tout le stack** : chaque service (y
   compris le VPN WireGuard) est une stack Dockhand independante,
   creee/redeployee via son API plutot qu'un unique `docker-compose.yml`
@@ -20,13 +15,23 @@ Deux couches bien separees :
 
 ## Architecture reseau
 
-Le reseau `expo-lan` cree par `incus/network-setup.sh` est un **bridge
-Incus purement virtuel**, independant de l'interface physique de l'hote
-(fonctionne identiquement en Wi-Fi ou en Ethernet). Objectif : simuler un
-reseau local pour la flotte, pas rendre les faux Pi visibles/joignables
-depuis le reseau physique ou Internet. L'hote porte lui-meme l'adresse
-`10.42.0.1` sur ce bridge (c'est Incus qui la lui donne a la creation du
-reseau).
+Le serveur a **deux cartes reseau** :
+- celle qui lui donne internet (ex: `eth0`, route par defaut) ;
+- celle du **reseau de l'expo** (ex: `eth1` ou un adaptateur USB-Ethernet),
+  reliee au switch ou sont branchees les machines.
+
+`network/setup.sh <carte>` cree sur la seconde un **pont NetworkManager
+`expo-lan`** (la carte en est le seul port) qui porte `10.42.0.1/24`, sans
+passerelle ni IPv6. Un pont plutot que l'adresse posee sur la carte : le nom
+`expo-lan` ne depend pas de la carte (dnsmasq, le VPN et les pages
+d'administration n'ont rien a savoir), et un pont garde son adresse **meme
+cable debranche** - dnsmasq demarre et le DNS des clients VPN reste joignable,
+switch eteint. Le script refuse une carte Wi-Fi, la carte qui porte la route
+par defaut (ce serait couper l'acces du serveur), et une carte deja utilisee
+par une autre connexion (sauf `--force`).
+
+Les machines de l'expo n'ont **pas acces a internet** : pas de NAT sur
+`expo-lan`, seul le serveur sort (voir "Paquets sans internet").
 
 `server/deploy-server.sh` demarre **Dockhand seul** (`server/docker-compose.yml`
 - il ne peut pas se creer lui-meme via sa propre API), puis cree/redeploie
@@ -68,7 +73,6 @@ chaque service comme **stack Dockhand independante** via son API REST
     ca). `deploy-server.sh`
     relit ce meme fichier a chaque deploiement, donc un choix fait depuis
     l'UI survit a un redeploiement.
-- **webui** expolab (creation/suppression de faux Pi), publication de port
 - **Bastion** (https://github.com/nopalpite/bastion, dashboard +
   SSH/VNC web) en `network_mode: host` - image prete a l'emploi publiee
   sur GHCR (`ghcr.io/nopalpite/bastion`), avec les **identifiants
@@ -113,7 +117,7 @@ chaque service comme **stack Dockhand independante** via son API REST
   identifiant / mot de passe choisi a l'installation), puis une interface a
   **tiroir et onglets** qui affiche chaque service dans un cadre, sans ouvrir de
   nouvelle fenetre (onglets conserves en arriere-plan, liens directs
-  `#fleet`, point vert / rouge selon l'etat du service, bouton "ouvrir a part").
+  `#dnsmasq`, point vert / rouge selon l'etat du service, bouton "ouvrir a part").
   Il remplace Homepage et le basic auth Caddy par le **cookie de session
   partage** `*.<domaine>` : Caddy demande au portail (`forward_auth`,
   `/auth/verify`) si la requete est autorisee, et le portail accepte aussi un
@@ -130,9 +134,8 @@ chaque service comme **stack Dockhand independante** via son API REST
   (`frame-ancestors 'self' https://dashboard.<domaine>` : le portail, et le service
   lui-meme pour ses propres sous-cadres, comme la session SSH de Bastion).
 - **dnsmasq-admin**, **caddy-admin**, **vpn-admin** - pages minimales
-  (Flask, meme style que la webui) pour piloter dnsmasq/Caddy/WireGuard
-  sans repasser par la ligne de commande, sur le meme principe que la
-  webui : editer/lire un fichier de config existant et reutiliser les
+  (Flask) pour piloter dnsmasq/Caddy/WireGuard sans repasser par la ligne
+  de commande : editer/lire un fichier de config existant et reutiliser les
   scripts/mecanismes deja en place, sans rien reimplementer.
   - `dnsmasq-admin` (https://dnsmasq.web.expolab.lan) : baux DHCP actifs
     (lecture seule) + **reservations DHCP** (MAC -> IP fixe), ecrites
@@ -140,7 +143,7 @@ chaque service comme **stack Dockhand independante** via son API REST
     versionne) que dnsmasq relit **a chaud sur SIGHUP**
     (`--dhcp-hostsfile`, voir `dnsmasq.conf`) via
     `docker kill --signal=HUP expolab-dnsmasq` - pas de redemarrage du
-    conteneur, pas de coupure DHCP/DNS pour le reste de la flotte. Pas
+    conteneur, pas de coupure DHCP/DNS pour le reste des machines. Pas
     d'enregistrements DNS statiques independants : tous les services
     vivent sous *.web.expolab.lan, un unique wildcard dans dnsmasq.conf
     (le tri par service se fait cote Caddy via le Host: HTTP, pas via
@@ -224,22 +227,9 @@ Idempotent : un jeton valide => rien n'est refait. Si la creation de
 l'environnement echouait (version de Dockhand differente), le script
 retombe sur l'ancienne etape manuelle et patiente.
 
-Le reverse-proxy n'expose PAS les faux Pi (ils n'ont pas vocation a etre
-joignables en HTTPS individuellement) : il sert a exposer les services
-applicatifs du serveur d'expo lui-meme, declares dans
+Le reverse-proxy n'expose PAS les machines de l'expo : il sert a exposer
+les services applicatifs du serveur d'expo lui-meme, declares dans
 `server/services.yaml`.
-
-La **webui** (`webui/`, https://fleet.web.expolab.lan) est une petite app
-Flask pour creer/supprimer des faux Pi depuis un navigateur (hostname,
-role, identifiants SSH pre-remplis `pi`/`raspberry`) sans avoir a toucher
-`fleet/inventory.yaml` a la main. Elle pilote Incus directement (le socket
-Incus de l'hote est monte dans son conteneur Docker) et reutilise
-`fleet/deploy-fleet.sh` comme unique source de verite (elle edite
-l'inventaire puis declenche le meme script que la ligne de commande) -
-`fleet/` est monte en direct (pas copie) pour que les deux facons de gerer
-la flotte restent sur le meme fichier. **A savoir** : ca donne au conteneur
-Docker de la webui un controle total sur Incus, pas seulement sur la
-flotte. Compromis assume pour ce lab.
 
 La patte WAN/VPN (`vpn/`) est desormais **conteneurisee** elle aussi (stack
 Dockhand `wireguard`, `vpn/wireguard/`), pour la meme coherence que le
@@ -251,8 +241,8 @@ L'hote lui-meme n'a plus besoin du paquet `wireguard-tools` : `vpn/add-peer.sh`/
 `remove-peer.sh` passent par `docker exec wireguard wg ...`.
 
 **Pourquoi le VPN, meme en local** : `dnsmasq` ne repond qu'a la resolution
-DNS sur `expo-lan` (par design - reseau simule, pas question de repondre
-au DHCP/DNS de la vraie infra reseau de l'hote). Un poste sur le meme
+DNS sur `expo-lan` (par design - pas question de repondre au DHCP/DNS du
+reseau auquel le serveur est relie pour internet). Un poste sur le meme
 Wi-Fi physique que le Pi ne peut donc pas resoudre `*.web.expolab.lan`
 sans configuration DNS locale manuelle. Plutot que de demander a
 l'utilisateur final (visiteur/exposant) de toucher son fichier hosts,
@@ -307,43 +297,30 @@ Derriere un routeur qui fait de la redirection de port :
 
 Deux domaines DNS distincts, resolus par `dnsmasq` :
 - `<nom>.expolab.lan` — enregistrement DHCP automatique, pointe vers la
-  **vraie IP** de chaque faux Pi - acces direct (SSH)
+  **vraie IP** de chaque machine - acces direct (SSH)
 - `<nom>.web.expolab.lan` — wildcard fixe vers l'hote (`10.42.0.1`, ou
   tourne Caddy), c'est le nom que doit utiliser un client HTTPS pour
   passer par le reverse-proxy
 
-Ne pas les confondre : les faux Pi n'ecoutent qu'en SSH, jamais en HTTPS -
-il n'y a d'ailleurs aucun vhost `<nom-de-pi>.web.expolab.lan` genere pour
-eux (voir plus haut, le reverse-proxy ne les concerne pas).
+Ne pas les confondre : aucun vhost `<nom-de-machine>.web.expolab.lan` n'est
+genere pour les machines (voir plus haut, le reverse-proxy ne les concerne pas).
 
 ## Prerequis
 
-- Raspberry Pi 5 avec Raspberry Pi OS (ou Debian/Ubuntu Server 64-bit) a
-  jour
-- Une connexion reseau sur l'hote (Wi-Fi ou Ethernet, peu importe :
-  `expo-lan` n'en depend pas) pour qu'Incus/Docker puissent telecharger
-  leurs images et que les conteneurs fassent leurs `apt-get install`
-  pendant le provisioning
-- Budget RAM a garder en tete sur un Pi 5 8 Go : 512 Mo par faux Pi
-  (2,5 Go pour 5 faux Pi, ajustable dans `incus/profiles/fake-pi.yaml`) +
-  le stack Docker (leger : dnsmasq/Caddy/webui sont de petites images,
-  Dockhand un peu plus)
-- Budget disque : la flotte vit sur un pool Incus dedie en
-  copie-sur-ecriture (`fake-pi-pool`, driver btrfs, cree par
-  `network-setup.sh` sur un fichier loop de 9 Gio - pas de
-  repartitionnement de la carte SD), ~250-300 Mio par faux Pi supplementaire
-  au lieu de dupliquer l'image de base a chaque fois. Incident reel sur ce
-  lab : le pool "default" (driver "dir", cree par `install.sh` pour
-  l'initialisation d'Incus) ne partage rien entre instances et sature une
-  carte SD de 15 Gio des 7-8 faux Pi, cassant silencieusement le
-  provisioning en cours - d'ou ce pool separe pour la flotte
+- Raspberry Pi 5 avec Raspberry Pi OS (ou Debian 64-bit) a jour, reseau gere
+  par **NetworkManager** (defaut de Raspberry Pi OS)
+- **Deux cartes reseau** : une pour internet (Wi-Fi ou Ethernet), une
+  Ethernet pour le reseau de l'expo (`eth1`, adaptateur USB-Ethernet...),
+  reliee au switch des machines
+- Une connexion internet sur l'hote pour que Docker telecharge ses images
+  et que le cache apt serve les machines
 
 ## Mise en route (a executer directement sur le Pi 5)
 
 Point d'entree unique - installe tout dans l'ordre :
 
 ```bash
-sudo ./install.sh
+sudo ./install.sh eth1    # eth1 = la carte reliee au switch des machines
 # Demande, a la premiere installation, l'identifiant et le mot de passe
 # d'administration (UN couple pour toutes les interfaces, voir plus bas) ;
 # Dockhand est ensuite configure tout seul. Sans terminal : definir
@@ -358,13 +335,9 @@ Detail de chaque etape (`install.sh` n'est qu'un enchainement de
 celles-ci - utile pour n'en relancer qu'une seule) :
 
 ```bash
-sudo ./incus/install.sh
-# se deconnecter/reconnecter pour prendre en compte le groupe incus-admin
-# (install.sh contourne ca avec `sg incus-admin`, pas besoin en isole)
-
-sudo ./incus/network-setup.sh
-
-./fleet/deploy-fleet.sh
+sudo ./network/setup.sh eth1
+# Carte deja utilisee par une autre connexion (ex: "Wired connection 2",
+# creee par NetworkManager au branchement) : ajouter --force.
 
 sudo ./server/deploy-server.sh
 # 1ere fois : demande les identifiants d'administration, puis configure
@@ -375,12 +348,11 @@ sudo ./vpn/install.sh
 sudo ./vpn/add-peer.sh mon-laptop   # optionnel : un pair nommement identifie en plus
 ```
 
-`deploy-fleet.sh` est idempotent : relancez-le apres avoir modifie
-`fleet/inventory.yaml` pour ajouter/retirer des faux Pi, seules les
-entrees manquantes sont creees. `deploy-server.sh` est idempotent aussi :
-relancez-le apres avoir modifie `server/services.yaml` ou le code de
-`webui/` pour regenerer le Caddyfile et redeployer les stacks concernees
-via l'API Dockhand, sans repeter la bascule DHCP.
+`network/setup.sh` est idempotent : relance sans argument, il garde la carte
+deja choisie ; avec un autre nom, le pont change de carte. `deploy-server.sh`
+est idempotent aussi : relancez-le apres avoir modifie `server/services.yaml`
+ou le code d'une application pour regenerer le Caddyfile et redeployer les
+stacks concernees via l'API Dockhand.
 
 ## Securite des UIs d'administration
 
@@ -408,7 +380,7 @@ via l'API Dockhand, sans repeter la bascule DHCP.
   s'il refuse, rien d'autre n'a bouge. Pour retrouver le couple actuel :
   `sudo grep -E '^BASIC_AUTH_(USER|PASSWORD)=' server/stacks/caddy/auth.env`.
 - **Basic auth Caddy** devant les vhosts marques `auth: true` dans
-  `server/services.yaml` (dockhand, fleet, dnsmasq, caddy, vpn, git-mirror,
+  `server/services.yaml` (dockhand, dnsmasq, caddy, vpn, git-mirror,
   ansible-web). Identifiants = ceux choisis a l'installation
   (`server/stacks/caddy/auth.env`, non versionne, hash bcrypt calcule avec
   le binaire `caddy`). Pas de basic auth sur
@@ -418,26 +390,26 @@ via l'API Dockhand, sans repeter la bascule DHCP.
   si un service demande l'auth sans identifiants disponibles (jamais de
   vhost silencieusement ouvert). Reglable par service depuis caddy-admin.
 - **Les backends ne sont joignables que via Caddy** : leurs ports sont
-  publies sur `127.0.0.1` (dashboard, dnsmasq-admin, git-mirror, webui) ou
+  publies sur `127.0.0.1` (dashboard, dnsmasq-admin, git-mirror) ou
   leur serveur Flask ecoute sur `127.0.0.1` (caddy-admin, vpn-admin,
   ansible-web) - sans ca, le basic auth serait contournable en visant
   directement `<ip-du-pi>:<port>` depuis le LAN. **Exceptions assumees** :
   Dockhand (`:3000`, joignable avant que Caddy existe) et Bastion (`:5000`),
   tous deux proteges par leur propre authentification, avec les memes
   identifiants d'administration.
-- Les mots de passe par defaut des **faux Pi** (`pi`/`raspberry`,
-  `fleet/provision-fakepi.sh`) restent une constante de lab connue,
-  reutilisee par ansible-web (`LAB_FAKEPI_PASSWORD` dans
-  `server/lib/secrets.sh`) - a changer pour toute vraie machine.
+- **Acces aux machines** : ansible-web se connecte par la **cle
+  d'automatisation** (injectee par le flasheur de cartes SD, sudo sans mot de
+  passe), jamais par mot de passe. Compte utilise : `EXPOLAB_ANSIBLE_USER`
+  au deploiement (defaut `pi`), le meme que celui cree par le flasheur.
 
 ## Verifier / se connecter
 
 ```bash
-incus list                       # etat + IP de chaque faux Pi
-incus exec pi-01 -- bash         # shell direct dans le conteneur
-ssh pi@<ip-de-pi-01>             # mot de passe: raspberry (a changer si besoin)
+ip -br addr show expo-lan        # 10.42.0.1/24 sur le pont de l'expo
+docker exec expolab-dnsmasq cat /var/lib/misc/dnsmasq.leases   # machines et leurs IP
+ssh pi@<ip-d-une-machine>
 
-# http://<ip-du-pi>:3000 - toutes les stacks (dnsmasq, caddy, webui,
+# http://<ip-du-pi>:3000 - toutes les stacks (dnsmasq, caddy,
 # bastion, wireguard, dashboard) y sont visibles/pilotables
 
 # Reverse proxy HTTPS (TLS auto-signe, cert "not trusted" attendu sans
@@ -445,7 +417,6 @@ ssh pi@<ip-de-pi-01>             # mot de passe: raspberry (a changer si besoin)
 curl -k https://dashboard.web.expolab.lan  # point d'entree, liens vers tout le reste
 # Les UIs d'administration ci-dessous demandent le basic auth Caddy
 # (curl -k -u <identifiant>:<mot de passe choisi a l'installation>) :
-curl -k https://fleet.web.expolab.lan      # webui flotte
 curl -k https://dockhand.web.expolab.lan   # Dockhand
 curl -k https://bastion.web.expolab.lan    # Bastion (memes identifiants)
 curl -k https://dnsmasq.web.expolab.lan    # baux DHCP actifs
@@ -454,7 +425,7 @@ curl -k https://vpn.web.expolab.lan        # pairs WireGuard (QR code, trafic)
 
 # VPN : importer vpn/wireguard/config/peers/default.conf (ou mon-laptop.conf)
 # sur le poste client (WireGuard app ou wg-quick), puis une fois connecte, les memes URLs
-# https://*.web.expolab.lan et un acces SSH direct aux faux Pi
+# https://*.web.expolab.lan et un acces SSH direct aux machines
 # fonctionnent depuis ce poste.
 ```
 
@@ -464,10 +435,9 @@ Scenario : pendant l'exposition, un Raspberry Pi meurt. On le change, on
 insere une carte SD flashee avec l'image type, on lance le playbook Ansible
 - **sans internet**. La carte neuve reprend le **meme nom et la meme IP**
 que la morte : son entree Bastion (identifiants, tags) reste valable.
-L'installation du *serveur* est un autre sujet (connecte) ; `fleet/` ne
-sert qu'a simuler de vraies machines.
+L'installation du *serveur* est un autre sujet (connecte).
 
-### Ce qui a ete verifie (experience dans le lab)
+### Ce qui a ete verifie (experience dans le lab, sur des machines simulees)
 
 | Cas | Resultat |
 |---|---|
@@ -507,9 +477,8 @@ Si la carte neuve est branchee **avant** (moins d'une minute apres la mort),
 elle recoit d'abord une IP de repli ; dnsmasq-admin libere alors les deux
 baux et dnsmasq refuse (NAK) tout renouvellement de l'IP de repli. Le
 **redemarrage de la carte** la remet sur l'IP reservee (verifie dans le lab ;
-le client `systemd-networkd` du lab ne repart pas seul apres le NAK, le
-comportement de NetworkManager sur Raspberry Pi OS reste a verifier sur
-materiel). Le bouton **Liberer** reste disponible pour forcer a la main, et
+le client `systemd-networkd` des machines simulees ne repartait pas seul
+apres le NAK, le comportement sur les vraies machines reste a verifier). Le bouton **Liberer** reste disponible pour forcer a la main, et
 `DNSMASQ_AUTO_RELEASE=0` coupe l'automatisme.
 
 Dans Bastion, referencer les machines par **IP** (pas `*.expolab.lan` :
@@ -529,11 +498,6 @@ la carte modele - preparation complete : `image/README-master.md`). Il pose :
   - option 42) : une carte neuve a l'horloge fausse, et apt refuse un
   `Release` « pas encore valide ».
 
-`fleet/` utilise le **meme script** pour ses faux Pi
-(`fleet/apply-machine-setup.sh` pour mettre a niveau des instances
-existantes) : le lab reste fidele a l'image reelle. Le secours par mot de
-passe d'`ansible-web` (`ansible_ssh_pass`) pourra etre retire une fois la
-cle partout.
 
 ### Flasher les cartes SD
 
@@ -642,13 +606,12 @@ connexion directe) : si le paquet est dans le cache il est servi, sinon le
 cache le telecharge sur internet, le garde, puis le sert.
 
 ```bash
-incus/lan-internet.sh status|on|off     # NAT des machines (depannage : on, puis off)
+sudo ./network/lan-internet.sh status|on|off   # NAT des machines (depannage : on, puis off ; un redemarrage le coupe)
 sudo ./server/apt-cache-mode.sh status|online|offline   # offline = SERVEUR sans internet
 ```
 
 `deploy-server.sh` isole le reseau en fin d'installation
-(`EXPOLAB_LAN_INTERNET=1` pour laisser le NAT) ; `install.sh` deploie le
-serveur AVANT la flotte, pour que les faux Pi se provisionnent par le cache.
+(`EXPOLAB_LAN_INTERNET=1` pour laisser le NAT tel quel).
 
 **Depots en HTTPS (Docker, un editeur...).** Les depots Debian et Raspberry Pi OS
 sont en HTTP et passent tels quels. Pour un depot tiers en HTTPS, on le declare
@@ -672,8 +635,8 @@ signature lui-meme. Verifie dans le lab sur Docker : cle, `apt update` signe et
 telechargement de `docker-compose-plugin` depuis une machine sans internet.
 
 Limites assumees : cela ne couvre que les depots `apt` - un `pip`, un `curl`
-ou un telechargement GitHub dans un role echoue sur une machine isolee (on le
-decouvre avec la repetition ci-dessous ; `git-mirror` couvre les depots git).
+ou un telechargement GitHub dans un role echoue sur une machine isolee
+(`git-mirror` couvre les depots git).
 Le cache relaie aussi de l'HTTP vers des hotes non declares pour les fichiers de
 type paquet (constate : une requete vers un hote quelconque atteint l'amont) :
 l'isolement est celui du NAT, pas celui du cache. Pas de gel de version (deux
@@ -681,44 +644,19 @@ jours differents peuvent donner des versions differentes). Le cache est ecrit
 souvent (a deplacer sur SSD plutot que la carte SD si possible). Le serveur
 reste un point unique de defaillance : **cloner sa carte SD** avant l'expo.
 
-### Repeter le scenario avant l'expo
-
-```bash
-./fleet/offline-rehearsal.sh
-```
-
-Le script coupe le NAT d'`expo-lan` (s'il etait actif), cree de zero un faux Pi
-(nom et MAC inedits), verifie qu'il n'a aucun acces a internet, applique **tous
-les roles** depuis le conteneur ansible-web **par cle SSH et sudo sans mot de
-passe**, rapporte le resultat, puis restaure le NAT et supprime la machine de
-test (meme en cas d'echec). Aucun amorcage prealable : le cache telecharge a la
-demande. Hors CI GitHub (necessite Incus).
-
-Non couvert par la repetition : le materiel reel (firmware, GPIO, Raspberry
-Pi OS Trixie/cloud-init a verifier sur une vraie carte), et l'heure (les
-conteneurs partagent l'horloge de l'hote - NTP est non verifiable dans le lab).
-
 ## Redemarrage de l'hote (coupure de courant)
 
 Apres un redemarrage, tout doit revenir **sans relancer `install.sh`** : c'est ce
-qui garde l'acces distant. Ce qui s'y passe, dans l'ordre :
+qui garde l'acces distant. Ce qui s'y passe :
 
-1. **Incus demarre avec l'hote** (`incus/enable-at-boot.sh`, appele par
-   `incus/install.sh` et par `server/deploy-server.sh`). Le paquet Incus ne le
-   fait pas : sans ca, le demon ne se lance que quand un client ouvre sa socket -
-   donc jamais, apres une coupure - et le pont `expo-lan` (`10.42.0.1`) n'existe
-   pas. Constate une fois : dnsmasq en boucle d'erreur, plus de DNS pour le VPN.
+1. **NetworkManager remonte le pont `expo-lan`** (`10.42.0.1`), meme cable
+   debranche (connexions `expo-lan` et `expo-lan-port`, demarrage automatique).
 2. **Docker relance les conteneurs** (`restart: unless-stopped`). dnsmasq
    **attend** que son interface porte son adresse (`server/stacks/dnsmasq/entrypoint.sh`)
-   au lieu de s'arreter : si Incus est plus lent que Docker, il demarre des que le
-   pont apparait. L'interface et l'adresse sont lues dans `dnsmasq.conf` (pas de nom
-   en dur : avec un vrai reseau, ce sera sa carte reseau) ; sans elle apres 10 min,
-   le conteneur s'arrete en erreur plutot que de rester "en marche" sans servir.
-3. **La flotte repart** (`boot.autostart` dans `incus/profiles/fake-pi.yaml`).
-
-Point de fragilite restant : le DNS des clients VPN (`10.42.0.1`) vit sur un pont
-gere par Incus. Si Incus lui-meme ne demarre pas, les noms ne se resolvent plus a
-distance (WireGuard, lui, reste joignable) - `journalctl -u incus` sur le Pi.
+   au lieu de s'arreter : si le reseau est plus lent que Docker, il demarre des
+   que le pont apparait. L'interface et l'adresse sont lues dans `dnsmasq.conf` ;
+   sans elle apres 10 min, le conteneur s'arrete en erreur plutot que de rester
+   "en marche" sans servir.
 
 Pour verifier apres un changement : `sudo reboot`, puis, une minute plus tard,
 `ip -br addr show expo-lan` (adresse `10.42.0.1/24`) et `docker ps` (tout `Up`,
@@ -736,34 +674,27 @@ prise avant `install.sh` (Raspberry Pi Imager -> "Sauvegarder", ou
 poste). Restaurer cette image = retour exact a l'etat d'avant, quoi qu'il
 se soit passe entre-temps.
 
-**2. Rollback scripte (rapide, pour un usage courant sur le lab) :**
+**2. Rollback scripte (rapide, pour un usage courant) :**
 
 ```bash
 sudo ./rollback.sh          # demande confirmation avant chaque suppression
 sudo ./rollback.sh --yes    # sans confirmation
 ```
 
-Ce script defait dans l'ordre exactement ce que `install.sh` /
-`network-setup.sh` / `deploy-fleet.sh` / `deploy-server.sh` /
-`vpn/install.sh` ont mis en place :
+Ce script defait dans l'ordre ce que `install.sh` a mis en place :
 
 1. `vpn/uninstall.sh` — arrete les stacks Docker `wireguard` et
    `vpn-admin`, supprime tous les pairs et la config generee
 2. `server/teardown-server.sh` — arrete Dockhand et les stacks Docker
-   (dnsmasq, dnsmasq-admin, caddy, caddy-admin, webui, bastion,
-   dashboard, git-mirror, apt-cache, ansible-web), reactive le DHCP integre
-   d'Incus sur `expo-lan` (secours), desinstalle Docker
-3. `fleet/teardown-fleet.sh` — supprime les instances de la flotte
-4. `incus/network-teardown.sh` — supprime le profil `fake-pi` et le
-   reseau `expo-lan`
-5. `incus/uninstall.sh` — desinstalle Incus, retire le depot Zabbly et
-   `/var/lib/incus`
+   (dnsmasq, dnsmasq-admin, caddy, caddy-admin, bastion, dashboard,
+   git-mirror, apt-cache, ansible-web...), desinstalle Docker
+3. `network/teardown.sh` — supprime le pont `expo-lan` ; la carte redevient
+   une carte ordinaire
 
-Chaque etape est aussi utilisable seule (ex: `./fleet/teardown-fleet.sh`
-pour ne reinitialiser que la flotte sans desinstaller Incus). Limite
-connue : un `apt purge` ne garantit jamais un retrait 100% parfait
-(fichiers de config residuels, etc.) — d'ou la recommandation de l'image
-disque si un retour a l'etat initial *exact* est requis.
+Chaque etape est aussi utilisable seule. Limite connue : un `apt purge` ne
+garantit jamais un retrait 100% parfait (fichiers de config residuels, etc.) —
+d'ou la recommandation de l'image disque si un retour a l'etat initial
+*exact* est requis.
 
 ## Tests et CI
 
@@ -771,8 +702,9 @@ disque si un retour a l'etat initial *exact* est requis.
 indefinis), `bash -n` sur tous les scripts, validation YAML des
 `docker-compose.yml`/`services.yaml`, `pytest tests` (rendu du Caddyfile :
 modes TLS, basic auth, echec ferme ; `dockhand_stack.py` contre un faux Dockhand local) et `tests/test_deploy_libs.sh` (test de
-fumee des modules `server/lib/*.sh` avec de faux `docker`/`ip`, sans Docker
-ni Incus reels) et `tests/test_machine_setup.sh` (script d'image
+fumee des modules `server/lib/*.sh` avec de faux `docker`/`ip`/`iptables`,
+sans Docker reel), `tests/test_network.sh` (pont `expo-lan` avec un faux
+`nmcli`) et `tests/test_machine_setup.sh` (script d'image
 `image/machine-setup.sh` sur un faux systeme de fichiers). Tout se lance aussi
 en local : `pytest tests && bash tests/test_deploy_libs.sh && bash tests/test_machine_setup.sh`.
 
@@ -780,21 +712,10 @@ en local : `pytest tests && bash tests/test_deploy_libs.sh && bash tests/test_ma
 
 ```
 install.sh                    # point d'entree unique, enchaine tout ce qui suit
-incus/
-  install.sh                # installe Incus sur l'hote
-  uninstall.sh               # desinstalle Incus (symetrique de install.sh)
-  network-setup.sh           # cree le reseau expo-lan (bridge isole, sans NAT) + profil fake-pi
+network/
+  setup.sh                   # pont expo-lan (10.42.0.1/24, sans NAT) sur la carte reseau de l'expo
   lan-internet.sh            # NAT des machines : on / off / status (normalement off)
-  enable-at-boot.sh          # fait demarrer Incus avec l'hote (sinon pas de pont expo-lan apres une coupure)
-  network-teardown.sh        # defait network-setup.sh
-  profiles/fake-pi.yaml      # profil Incus flotte (reseau + limites CPU/RAM + pool disque)
-fleet/
-  inventory.yaml             # liste declarative des faux Pi (nom, MAC, role, identifiants)
-  deploy-fleet.sh             # cree/provisionne les faux Pi manquants
-  teardown-fleet.sh           # supprime les faux Pi de l'inventaire
-  provision-fakepi.sh         # script de premier boot execute dans chaque conteneur
-  apply-machine-setup.sh      # remet a niveau des faux Pi existants (cle, sudo, proxy apt, NTP)
-  offline-rehearsal.sh        # repetition du remplacement d'une machine isolee d'internet (voir plus haut)
+  teardown.sh                # defait setup.sh
 image/
   machine-setup.sh            # preparation de l'image type (cle d'automatisation, sudo, proxy apt, NTP)
   prepare-master.sh           # remet une machine a neuf avant de la capturer comme master (graine, identite, menage, compte temporaire)
@@ -805,21 +726,20 @@ server/
                                  #   preflight, tls, secrets (+ basic auth), credentials, automation-key, ansible-web, apt-cache, sd-flasher, ntp, dashboard, dnsmasq, stacks, summary
   apt-cache-mode.sh             # bascule le cache apt en ligne / hors ligne (ou le redemarre) en ligne de commande
   docker-cleanup.sh             # libere la place de Docker (cache de construction au-dela de 2 Go, images sans nom) ; appele en fin d'installation
-  teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), reactive le DHCP integre d'Incus, desinstalle Docker
+  teardown-server.sh            # arrete Dockhand + les stacks (docker compose direct), desinstalle Docker
   docker-compose.yml            # bootstrap UNIQUEMENT : Dockhand (ne peut pas se creer via sa propre API)
   dockhand-api.sh                # helpers partages : attente sante, upsert d'une stack (appelle dockhand_stack.py)
   dockhand_stack.py              # implementation unique de "supprimer + recreer une stack Dockhand" (bash ET caddy-admin)
   dockhand_setup.py              # configuration initiale de Dockhand par son API : environnement local, utilisateur admin, authentification, jeton
   set-credentials.sh             # change le couple identifiant / mot de passe d'administration partout (Dockhand, portail, Bastion)
   admin_credentials.py           # meme logique en Python, utilisee par caddy-admin (formulaire "Identifiants")
-  services.yaml                  # services applicatifs exposes au reverse-proxy (dashboard, dockhand, fleet, bastion, dnsmasq/caddy/vpn-admin, git-mirror)
+  services.yaml                  # services applicatifs exposes au reverse-proxy (dashboard, dockhand, bastion, dnsmasq/caddy/vpn-admin, git-mirror)
   render-caddyfile.py             # genere le Caddyfile a partir de server/services.yaml
   stacks/
     dnsmasq/{docker-compose.yml, Dockerfile, dnsmasq.conf, data/, admin-config/}   # data/ et admin-config/ non versionnes (baux, reservations, enregistrements DNS)
     dnsmasq-admin/docker-compose.yml                                  # build context = ../../dnsmasq-admin
     caddy/{docker-compose.yml, Caddyfile}                            # Caddyfile genere, non versionne
     caddy-admin/docker-compose.yml                                    # build context = ../../caddy-admin
-    webui/docker-compose.yml                                          # build context = ../../webui
     bastion/{docker-compose.yml, bastion.env, config/, maps/}        # ces 3 derniers non versionnes
     dashboard/{docker-compose.yml, dashboard.env, portal.env, services.yaml}   # le portail (code : portal/) ; les 3 fichiers .env/.yaml sont generes et non versionnes
     vpn-admin/docker-compose.yml                                      # build context = ../../vpn-admin
@@ -830,11 +750,7 @@ server/
     ntp-admin/docker-compose.yml                                       # build context = ../../ntp-admin
     sd-flasher/{docker-compose.yml, images/, data/, keys/}            # conteneur privilegie ; images/ (master), data/ (reglages, audit), keys/ non versionnes
     ansible-web/{docker-compose.yml, ansible-web.env, automation_key/, config.yaml, repo/, runs/}  # tout sauf docker-compose.yml non versionne ; execute bastion-ansible (depot separe, clone depuis git-mirror)
-webui/
-  app.py                        # backend Flask : edite inventory.yaml, pilote deploy-fleet.sh
-  Dockerfile                     # image (Flask + client Incus)
-  templates/, static/            # page unique HTML/JS/CSS
-dnsmasq-admin/                  # meme forme que webui/ : app.py, Dockerfile, templates/, static/
+dnsmasq-admin/                  # app Flask : app.py, Dockerfile, templates/, static/
 apt-cache-admin/                 # idem - interface du cache apt : etat, efficacite, journal, mode, miroirs HTTPS
 portal/                         # le portail (stack dashboard) : connexion unique, tiroir et onglets, verification de session pour Caddy
 caddy-admin/                     # idem - edite server/services.yaml, recharge Caddy via son admin API
@@ -849,17 +765,15 @@ vpn/
   add-peer.sh                  # ajoute un pair VPN (docker exec wireguard wg ...) + config client
   remove-peer.sh                # retire un pair VPN
   wireguard/{docker-compose.yml, Dockerfile, entrypoint.sh, config/}   # config/ non versionne (cles, pairs)
-rollback.sh                   # orchestre les 5 teardown dans le bon ordre
+rollback.sh                   # orchestre les 3 teardown dans le bon ordre
 ```
 
 ## A venir
 
 - Deploiement effectif de Gitea (conteneur Docker sur l'hote, gere depuis
   Dockhand), puis entree correspondante dans `server/services.yaml`
-- Authentification sur la webui (aucune pour l'instant - protegee
-  uniquement par l'isolation reseau d'`expo-lan`)
-- Authentification Dockhand (desactivee par defaut, protegee comme la
-  webui par l'isolation reseau pour l'instant) - l'activer cree un premier
+- Authentification Dockhand (desactivee par defaut, protegee par
+  l'isolation reseau pour l'instant) - l'activer cree un premier
   compte admin dans son UI ; deposer ensuite un token dans
   `server/dockhand.env` (non versionne) pour que `deploy-server.sh` et
   `vpn/install.sh` continuent de fonctionner (voir `server/dockhand-api.sh`)
@@ -868,12 +782,3 @@ rollback.sh                   # orchestre les 5 teardown dans le bon ordre
 - Redirection de port sur le routeur du reseau reel pour un acces VPN
   depuis l'exterieur (specifique a la box de l'utilisateur, hors perimetre
   scriptable)
-- Le role `avec-ecran`/`sans-ecran` (`fleet/inventory.yaml`) reste pour
-  l'instant une simple etiquette (ecrite dans `/etc/expolab-role` et le
-  motd par `provision-fakepi.sh`, affichee dans la webui) - aucun paquet
-  ni service ne differe encore selon sa valeur. Volontaire : dans la
-  vraie vie, ce type de configuration (desktop, VNC...) sera gere par un
-  playbook Ansible, pas par ce script de provisioning du lab. Setup
-  manuel deja valide en attendant sur un faux Pi (sway en mode headless +
-  wayvnc, teste via Bastion) : voir l'historique du projet, pas encore
-  scripte.

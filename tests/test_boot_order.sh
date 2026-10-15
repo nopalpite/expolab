@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # Test de la tenue au redemarrage de l'hote (coupure de courant) :
-#  - incus/enable-at-boot.sh : Incus (donc le pont expo-lan) demarre avec l'hote ;
-#  - server/stacks/dnsmasq/entrypoint.sh : dnsmasq attend le pont au lieu de
-#    planter en boucle.
-# Faux systemctl/ip/dnsmasq, aucun service reel. Lance en CI et a la main.
+# server/stacks/dnsmasq/entrypoint.sh attend le pont expo-lan au lieu de
+# planter en boucle. Faux ip/dnsmasq, aucun service reel. Lance en CI et a la main.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,35 +9,8 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 fail() { echo "ECHEC : $*" >&2; exit 1; }
 
-mkdir -p "$WORK/bin" "$WORK/systemd/multi-user.target.wants"
+mkdir -p "$WORK/bin"
 export PATH="$WORK/bin:$PATH"
-
-# --- enable-at-boot.sh ---------------------------------------------------------
-cat > "$WORK/bin/systemctl" <<'EOT'
-#!/usr/bin/env bash
-echo "$*" >> "$FAKE_SYSTEMCTL_LOG"
-case "$1" in
-    cat) [ -z "${FAKE_NO_INCUS:-}" ] ;;
-    add-wants) : > "$SYSTEMD_DIR/multi-user.target.wants/incus.service" ;;
-esac
-EOT
-chmod +x "$WORK/bin/systemctl"
-export FAKE_SYSTEMCTL_LOG="$WORK/systemctl.log" SYSTEMD_DIR="$WORK/systemd"
-
-bash "$REPO/incus/enable-at-boot.sh" > "$WORK/out.log"
-grep -q "^add-wants multi-user.target incus.service$" "$FAKE_SYSTEMCTL_LOG" || fail "Incus n'est pas rattache au demarrage de l'hote"
-[ -e "$SYSTEMD_DIR/multi-user.target.wants/incus.service" ] || fail "lien de demarrage absent"
-
-: > "$FAKE_SYSTEMCTL_LOG"
-bash "$REPO/incus/enable-at-boot.sh" > "$WORK/out.log"
-! grep -q "add-wants" "$FAKE_SYSTEMCTL_LOG" || fail "pas idempotent : add-wants rappele"
-grep -q "deja" "$WORK/out.log" || fail "message 'deja' absent a la 2e execution"
-
-rm -f "$SYSTEMD_DIR/multi-user.target.wants/incus.service"
-if FAKE_NO_INCUS=1 bash "$REPO/incus/enable-at-boot.sh" > "$WORK/out.log" 2> "$WORK/err.log"; then
-    fail "doit echouer quand Incus n'est pas installe"
-fi
-grep -q "introuvable" "$WORK/err.log" || fail "message d'erreur 'introuvable' absent"
 
 # --- entrypoint dnsmasq -----------------------------------------------------------
 # Faux `ip` : l'interface n'a pas d'adresse aux 3 premiers appels, puis l'obtient
@@ -73,7 +44,7 @@ FAKE_IP_READY_AFTER=0 sh "$REPO/server/stacks/dnsmasq/entrypoint.sh" > "$WORK/ou
 ! grep -q "en attente" "$WORK/out.log" || fail "attente inutile alors que l'interface est prete"
 [ -s "$FAKE_DNSMASQ_LOG" ] || fail "dnsmasq pas lance"
 
-# L'interface et l'adresse suivent dnsmasq.conf (pas de nom en dur : un vrai reseau, plus tard).
+# L'interface et l'adresse suivent dnsmasq.conf (pas de nom en dur).
 printf 'interface=eth9
 dhcp-option=option:router,192.168.50.1
 ' > "$WORK/other.conf"
@@ -89,4 +60,4 @@ fi
 grep -q "n'est pas apparue" "$WORK/err.log" || fail "message d'erreur absent"
 [ ! -s "$FAKE_DNSMASQ_LOG" ] || fail "dnsmasq lance alors que l'interface n'existe pas"
 
-echo "OK : tenue au redemarrage (Incus au boot, dnsmasq attend le pont)"
+echo "OK : tenue au redemarrage (dnsmasq attend le pont)"

@@ -20,7 +20,7 @@ Image utilisée : **Ubuntu Server 26.04 LTS pour Raspberry Pi** (`ubuntu-26.04.1
 
 **Capturer un master n'est utile que pour** :
 - **embarquer les mises à jour** (130 paquets au premier `apt upgrade`) : indispensable si les machines n'ont pas internet et que le cache apt du serveur n'est pas amorcé ;
-- **`avahi-daemon`** : Bastion trouve le nom d'une machine par mDNS, puis par DNS inverse. Ubuntu Server ne répond pas en mDNS de lui-même, donc un scan Bastion n'affiche aucun nom (et la box peut renvoyer un faux nom, hérité d'un ancien appareil à la même adresse). Les faux Pi de `fleet/` ont déjà `avahi-daemon`. Alternative sans capture : un rôle Ansible commun.
+- **`avahi-daemon`** : Bastion trouve le nom d'une machine par mDNS, puis par DNS inverse. Ubuntu Server ne répond pas en mDNS de lui-même, donc un scan Bastion n'affiche aucun nom (et la box peut renvoyer un faux nom, hérité d'un ancien appareil à la même adresse). Alternative sans capture : un rôle Ansible commun.
 
 Tout le reste (logiciels propres à un rôle : GPIO, affichage, applications) relève d'Ansible : versionné, rejouable, et ça ne fige rien dans une image.
 
@@ -66,4 +66,4 @@ Conséquence : au premier démarrage, l'écran s'arrête sur les clés SSH, puis
 
 - `user-data` et `network-config` **restent** sur la partition FAT après le démarrage, mot de passe Wi-Fi compris, en clair (comme avec Raspberry Pi Imager). Garder la carte avec la machine, et ne jamais partager une image capturée sans avoir lancé `prepare-master.sh`.
 - Ne pas supprimer la configuration NoCloud d'Ubuntu (`/etc/cloud/cloud.cfg.d/`) : c'est elle qui fait lire `system-boot`.
-- La clé d'automatisation est injectée par le flasheur (case cochée par défaut dans les réglages) : le master n'a pas besoin de `image/machine-setup.sh`, qui reste utilisé par les faux Pi de `fleet/`.
+- La clé d'automatisation est injectée par le flasheur (case cochée par défaut dans les réglages) : le master n'a pas besoin de `image/machine-setup.sh`, qui reste disponible pour une machine installée autrement.

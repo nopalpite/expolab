@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Arrete/supprime le serveur d'expo (Dockhand + toutes les stacks
-# applicatives) et reactive le DHCP integre d'Incus sur expo-lan
-# (secours). Symetrique de deploy-server.sh.
+# applicatives). Symetrique de deploy-server.sh. Le reseau expo-lan reste :
+# voir network/teardown.sh.
 #
 # Contourne volontairement l'API Dockhand (contrairement au deploiement) :
 # `docker compose down` directement sur chaque stack, plus simple et plus
@@ -29,14 +29,14 @@ fi
 
 if command -v docker &>/dev/null; then
     if [ "$ASSUME_YES" -ne 1 ]; then
-        read -r -p "Arreter/supprimer le serveur d'expo (dockhand, dnsmasq, dnsmasq-admin, caddy, caddy-admin, webui, bastion, dashboard, git-mirror, apt-cache, apt-cache-admin, ntp, ntp-admin, ansible-web, sd-flasher) ? [y/N] " ans
+        read -r -p "Arreter/supprimer le serveur d'expo (dockhand, dnsmasq, dnsmasq-admin, caddy, caddy-admin, bastion, dashboard, git-mirror, apt-cache, apt-cache-admin, ntp, ntp-admin, ansible-web, sd-flasher) ? [y/N] " ans
         [[ "$ans" =~ ^[yY]$ ]] || { echo "Annule."; exit 0; }
     fi
 
     TMP_COMPOSE="$(mktemp)"
     trap 'rm -f "$TMP_COMPOSE"' EXIT
 
-    for stack in dnsmasq dnsmasq-admin caddy caddy-admin webui bastion dashboard git-mirror apt-cache apt-cache-admin ntp ntp-admin ansible-web sd-flasher; do
+    for stack in dnsmasq dnsmasq-admin caddy caddy-admin bastion dashboard git-mirror apt-cache apt-cache-admin ntp ntp-admin ansible-web sd-flasher; do
         compose_file="$SCRIPT_DIR/stacks/$stack/docker-compose.yml"
         if [ -f "$compose_file" ]; then
             echo "[+] Arret de la stack '$stack'..."
@@ -55,19 +55,6 @@ if command -v docker &>/dev/null; then
     echo "[-] Serveur d'expo arrete."
 else
     echo "[=] Docker absent, rien a arreter."
-fi
-
-if incus network show expo-lan &>/dev/null; then
-    echo "[+] Reactivation du DHCP/DNS integre d'Incus sur expo-lan..."
-    incus network set expo-lan ipv4.dhcp=true
-    incus network unset expo-lan dns.mode
-
-    echo "[+] Redemarrage de la flotte pour reprendre un bail Incus..."
-    for pi in $(incus list --format csv -c n 2>/dev/null | grep '^pi-' || true); do
-        incus restart "$pi" < /dev/null || true
-    done
-else
-    echo "[=] Reseau expo-lan absent, rien a faire."
 fi
 
 rm -f "$SCRIPT_DIR/stacks/caddy/Caddyfile"

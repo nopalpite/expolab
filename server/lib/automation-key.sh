@@ -1,7 +1,6 @@
-# Cle SSH dediee a l'automatisation (Ansible) - partagee par
-# fleet/deploy-fleet.sh (qui en injecte la partie publique dans les faux Pi,
-# des leur creation) et server/lib/ansible-web.sh (qui monte la partie
-# privee dans le conteneur ansible-web). Source, jamais execute seul.
+# Cle SSH dediee a l'automatisation (Ansible) - partie publique injectee
+# dans les machines par le flasheur de cartes SD (sd-flasher.sh), partie
+# privee montee dans le conteneur ansible-web (ansible-web.sh). Source, jamais execute seul.
 # Idempotent : ne regenere jamais une cle existante.
 
 # Chemin unique de la cle, relatif a la racine du depot.
