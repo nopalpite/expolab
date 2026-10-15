@@ -20,6 +20,8 @@ services:
     ports:
       - "127.0.0.1:5057:5057"
     volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
       - /dev:/dev
       # Images master : envoyees depuis la page (ou copiees a la main dans ce dossier).
       - ${REPO_ROOT}/server/stacks/sd-flasher/images:/images

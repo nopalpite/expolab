@@ -9,6 +9,8 @@ services:
     ports:
       - "127.0.0.1:5051:5051"
     volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
       - ${REPO_ROOT}/server/stacks/dnsmasq/data:/dnsmasq-data:ro
       - ${REPO_ROOT}/server/stacks/dnsmasq/admin-config:/dnsmasq-admin-config
       # Necessaire pour `docker kill --signal=HUP expolab-dnsmasq` -

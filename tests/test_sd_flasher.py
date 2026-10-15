@@ -985,11 +985,14 @@ def test_keyboard_and_locale_go_to_cloud_init():
     assert user["keyboard"] == {"layout": "fr", "model": "pc105"}
     assert user["locale"] == "fr_FR.UTF-8"
     _files, user, _net = seed()
-    assert "keyboard" not in user and "locale" not in user   # vide : reglages de l'image
+    assert "keyboard" not in user and "locale" not in user and "timezone" not in user   # vide : reglages de l'image
+    _files, user, _net = seed(settings={"timezone": "Europe/Paris"})
+    assert user["timezone"] == "Europe/Paris"
 
 
 @pytest.mark.parametrize("settings", [{"keyboard_layout": "FR"}, {"keyboard_layout": "fr; rm"}, {"locale": "fr_FR"},
-                                      {"locale": "fr_FR.UTF-8\nruncmd"}])
+                                      {"locale": "fr_FR.UTF-8\nruncmd"}, {"timezone": "paris"},
+                                      {"timezone": "Europe/Paris; rm"}, {"timezone": "../../etc/passwd"}])
 def test_invalid_keyboard_or_locale_is_refused(settings):
     with pytest.raises(flasher.FlashError):
         flasher.check_settings(settings)
@@ -999,7 +1002,8 @@ def test_api_defaults_to_french_keyboard_and_locale(api):
     s = api.client.get("/api/settings").get_json()
     assert s["keyboard_layout"] == "fr" and s["locale"] == "fr_FR.UTF-8"
     p = api.client.get("/api/preview?hostname=module-02").get_json()
-    assert p["keyboard_layout"] == "fr" and p["locale"] == "fr_FR.UTF-8"
+    assert p["keyboard_layout"] == "fr" and p["locale"] == "fr_FR.UTF-8" and p["timezone"] == "Europe/Paris"
+    assert s["timezone"] == "Europe/Paris"
     res = api.client.put("/api/settings", json={"keyboard_layout": "BE", "locale": ""})
     assert res.status_code == 200 and res.get_json()["keyboard_layout"] == "be" and res.get_json()["locale"] == ""
     assert api.client.put("/api/settings", json={"locale": "francais"}).status_code == 400

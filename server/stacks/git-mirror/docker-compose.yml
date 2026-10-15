@@ -12,6 +12,8 @@ services:
     ports:
       - "127.0.0.1:5054:5054"
     volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
       # Clones bare + mirrors.yaml (etat runtime, pas de l'infra-as-code -
       # voir .gitignore).
       - ${REPO_ROOT}/server/stacks/git-mirror/data:/data

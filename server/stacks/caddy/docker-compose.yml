@@ -19,6 +19,8 @@ services:
       # deploy-server.sh), jamais commite (secrets).
       - ${REPO_ROOT}/server/stacks/caddy/tls.env
     volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
       - ${REPO_ROOT}/server/stacks/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       # Bind-mounts (pas de volumes Docker nommes) : meme convention que
       # toutes les autres stacks de ce projet (data/config visibles et

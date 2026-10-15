@@ -25,4 +25,6 @@ services:
     # full-tunnel (fwmark) - pas notre cas ici, le serveur route juste via
     # AllowedIPs + PostUp/PostDown iptables.
     volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
       - ${REPO_ROOT}/vpn/wireguard/config:/etc/wireguard

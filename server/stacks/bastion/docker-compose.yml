@@ -28,6 +28,8 @@ services:
       - BASTION_VNC_WS_PATH=/vnc-ws/
       - BASTION_HISTORY_RETENTION_DAYS=30
     volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
       - ${REPO_ROOT}/server/stacks/bastion/config:/app/config
       - ${REPO_ROOT}/server/stacks/bastion/maps:/app/static/uploads/maps
       # DNS = dnsmasq de l'expo (voir resolv.conf) : le DNS inverse nomme les

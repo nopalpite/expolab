@@ -9,6 +9,8 @@ services:
     ports:
       - "127.0.0.1:5056:5056"
     volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
       # Mode et miroirs HTTPS : le cache les relit a son demarrage. Un dossier
       # (pas un fichier) : meme dossier que celui monte en lecture seule dans
       # le conteneur du cache.

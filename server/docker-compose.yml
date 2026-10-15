@@ -9,15 +9,11 @@ services:
     image: fnsys/dockhand:latest
     container_name: dockhand
     restart: unless-stopped
-    environment:
-      # Par defaut un conteneur demarre en UTC quel que soit le fuseau
-      # de l'hote (meme si celui-ci est deja configure correctement,
-      # comme c'est le cas ici) - explicite plutot que de dependre du
-      # fuseau systeme de l'hote de deploiement.
-      - TZ=Europe/Paris
     ports:
       - "3000:3000"
     volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - dockhand_data:/app/data
       # "Matching paths" (recommande par le manuel Dockhand) : Dockhand

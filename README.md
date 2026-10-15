@@ -324,6 +324,8 @@ genere pour les machines (voir plus haut, le reverse-proxy ne les concerne pas).
   reliee au switch des machines
 - Une connexion internet sur l'hote pour que Docker telecharge ses images
   et que le cache apt serve les machines
+- Le **fuseau horaire de l'hote** (`timedatectl set-timezone Europe/Paris`) : chaque
+  conteneur monte `/etc/localtime` de l'hote, toutes les pages affichent donc la meme heure
 
 ## Mise en route (a executer directement sur le Pi 5)
 
@@ -541,8 +543,9 @@ cloud-init (`growpart`/`resizefs`). Reglages dans la page : compte (a definir : 
 `user-data` par defaut de l'image Ubuntu, qui creait le compte et son mot de passe,
 est remplace - sans compte, personne ne peut se connecter ; la page avertit),
 Wi-Fi, **serveur de temps du lab** (chrony, ajoute aux sources d'Ubuntu), **proxy apt** (vide par
-defaut : injoignable hors expo), **clavier et langue** (azerty `fr` et `fr_FR.UTF-8` par defaut, modules
-`keyboard` et `locale` de cloud-init ; l'image Ubuntu est en qwerty) et cles (la cle d'automatisation Ansible est injectee par defaut) ; le mot de passe Wi-Fi reste sur
+defaut : injoignable hors expo), **clavier, langue et fuseau horaire** (azerty `fr`, `fr_FR.UTF-8` et `Europe/Paris`
+par defaut, modules `keyboard`, `locale` et `timezone` de cloud-init ; l'image Ubuntu
+est en qwerty et en UTC) et cles (la cle d'automatisation Ansible est injectee par defaut) ; le mot de passe Wi-Fi reste sur
 le serveur (`data/settings.json`, mode 600), jamais renvoye au navigateur.
 
 **Garde-fous** (verifies a chaque flash, pas seulement a l'affichage) : seuls les

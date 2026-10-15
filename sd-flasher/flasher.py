@@ -56,6 +56,7 @@ HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")   # nom
 APT_PROXY_RE = re.compile(r"^http://[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:[0-9]{1,5})?$")
 KEYBOARD_RE = re.compile(r"^[a-z]{2,8}$")   # disposition XKB (fr, us, be, ch...)
 LOCALE_RE = re.compile(r"^[a-z]{2,3}_[A-Z]{2}\.UTF-8$")   # fr_FR.UTF-8
+TIMEZONE_RE = re.compile(r"^(UTC|[A-Z][A-Za-z_]+(/[A-Z][A-Za-z0-9_+-]+){1,2})$")   # Europe/Paris
 USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")  # noms de comptes Linux usuels
 RESERVED_USERS = {"root"}
 SSH_KEY_RE = re.compile(r"^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp\d+|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/=]+( .*)?$")
@@ -316,6 +317,9 @@ def check_settings(settings: dict) -> None:
     locale = settings.get("locale") or ""
     if locale and not LOCALE_RE.match(locale):
         raise FlashError("Langue invalide (attendu : fr_FR.UTF-8).")
+    timezone = settings.get("timezone") or ""
+    if timezone and not TIMEZONE_RE.match(timezone):
+        raise FlashError("Fuseau horaire invalide (attendu : Europe/Paris).")
 
 
 def hash_password(password: str, run=subprocess.run) -> str:
@@ -419,6 +423,10 @@ def render_seed(hostname: str, settings: dict, now: int | None = None, hasher=ha
     locale = (settings.get("locale") or "").strip()
     if locale:
         user["locale"] = locale
+    # Fuseau horaire : l'image est en UTC, le serveur et ses pages a l'heure locale.
+    timezone = (settings.get("timezone") or "").strip()
+    if timezone:
+        user["timezone"] = timezone
 
     if settings.get("wifi_ssid"):
         # Le Wi-Fi decrit dans network-config est ecrit mais PAS active au premier demarrage

@@ -17,6 +17,8 @@ services:
     cap_add:
       - SYS_TIME
     volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
       # Configuration : un DOSSIER (jamais un fichier seul), modifie par ntp-admin
       # puis relu au redemarrage du conteneur. Non versionne.
       - ${REPO_ROOT}/server/stacks/ntp/config:/etc/ntp-expolab:ro

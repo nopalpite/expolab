@@ -9,6 +9,8 @@ services:
     ports:
       - "127.0.0.1:5058:5058"
     volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
       # Reglages : le meme dossier que celui monte en lecture seule dans le conteneur ntp.
       - ${REPO_ROOT}/server/stacks/ntp/config:/config
       # Socket de commande de chronyd (etat, sources, machines clientes).

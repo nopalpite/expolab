@@ -46,6 +46,7 @@ UPLOAD_CHUNK = 4 * 1024 * 1024
 DEFAULT_TIME_SERVER = "10.42.0.1"   # serveur de temps du lab (stack ntp) : sans danger ailleurs, chrony garde ses autres sources
 DEFAULT_KEYBOARD = "fr"   # azerty
 DEFAULT_LOCALE = "fr_FR.UTF-8"
+DEFAULT_TIMEZONE = "Europe/Paris"
 
 _job_lock = threading.Lock()
 _job: dict = {"state": "idle"}  # idle | running | done | error
@@ -84,6 +85,7 @@ def load_settings() -> dict:
         "apt_proxy": data.get("apt_proxy", ""),
         "keyboard_layout": data.get("keyboard_layout", DEFAULT_KEYBOARD),
         "locale": data.get("locale", DEFAULT_LOCALE),
+        "timezone": data.get("timezone", DEFAULT_TIMEZONE),
     }
 
 
@@ -104,7 +106,7 @@ def effective_settings() -> dict:
     return {"wifi_ssid": s["wifi_ssid"], "wifi_psk": s["wifi_psk"], "wifi_country": s["wifi_country"], "authorized_keys": keys,
             "user_name": s["user_name"], "user_password": s["user_password"], "user_sudo": s["user_sudo"], "user_pwauth": s["user_pwauth"],
             "time_server": s["time_server"], "apt_proxy": s["apt_proxy"],
-            "keyboard_layout": s["keyboard_layout"], "locale": s["locale"]}
+            "keyboard_layout": s["keyboard_layout"], "locale": s["locale"], "timezone": s["timezone"]}
 
 
 def save_settings(data: dict) -> None:
@@ -130,6 +132,7 @@ def public_settings() -> dict:
         "apt_proxy": s["apt_proxy"],
         "keyboard_layout": s["keyboard_layout"],
         "locale": s["locale"],
+        "timezone": s["timezone"],
         "extra_keys": s["extra_keys"],
         "use_automation_key": s["use_automation_key"],
         "automation_key_available": bool(automation_key()),
@@ -342,6 +345,7 @@ def api_settings_put():
         "apt_proxy": str(body.get("apt_proxy", current["apt_proxy"])).strip(),
         "keyboard_layout": str(body.get("keyboard_layout", current["keyboard_layout"])).strip().lower(),
         "locale": str(body.get("locale", current["locale"])).strip(),
+        "timezone": str(body.get("timezone", current["timezone"])).strip(),
     }
     if body.get("wifi_psk"):  # vide = on garde l'actuel
         new["wifi_psk"] = str(body["wifi_psk"])
@@ -356,7 +360,7 @@ def api_settings_put():
                                 "authorized_keys": new["extra_keys"], "user_name": new["user_name"],
                                 "user_password": new["user_password"], "time_server": new["time_server"],
                                 "apt_proxy": new["apt_proxy"], "keyboard_layout": new["keyboard_layout"],
-                                "locale": new["locale"]})
+                                "locale": new["locale"], "timezone": new["timezone"]})
     except flasher.FlashError as exc:
         return jsonify({"error": str(exc)}), 400
     save_settings(new)
@@ -391,6 +395,7 @@ def api_preview():
             "apt_proxy": eff["apt_proxy"] or None,
             "keyboard_layout": eff["keyboard_layout"] or None,
             "locale": eff["locale"] or None,
+            "timezone": eff["timezone"] or None,
             "reboot": bool(eff["wifi_ssid"]),  # redemarrage unique au premier demarrage (active le Wi-Fi)
             "warnings": warnings,
             "keys": len(eff["authorized_keys"]),

@@ -16,6 +16,8 @@ services:
       # integree d'apt-cacher-ng, genere une fois par deploy-server.sh.
       - ${REPO_ROOT}/server/stacks/apt-cache/apt-cache.env
     volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
       # Mode (en ligne / hors ligne) et miroirs HTTPS : un DOSSIER (jamais un
       # fichier seul, qu'un remplacement par renommage laisserait perime),
       # modifie par apt-cache-admin / apt-cache-mode.sh puis relu au
