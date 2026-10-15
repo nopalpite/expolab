@@ -79,4 +79,41 @@ bash "$REPO/network/teardown.sh" > /dev/null
 [ -z "$(ls "$NM_DIR")" ] || fail "connexions restantes apres teardown"
 bash "$REPO/network/teardown.sh" > /dev/null || fail "teardown non idempotent"
 
+# --sans-carte (test sur un serveur a une seule carte) : pont seul, aucune carte exigee.
+rm -rf "$WORK/sys/eth1"
+if bash "$SETUP" > "$WORK/out.log" 2>&1; then fail "eth1 absente acceptee sans --sans-carte"; fi
+grep -q -- "--sans-carte" "$WORK/out.log" || fail "--sans-carte non suggere quand la carte manque"
+[ -z "$(ls "$NM_DIR")" ] || fail "connexion creee malgre un refus"
+
+: > "$NM_LOG"
+bash "$SETUP" --sans-carte > "$WORK/out.log" 2>&1 || fail "--sans-carte a echoue"
+grep -q "ipv4.addresses 10.42.0.1/24 ipv4.never-default yes" "$NM_DIR/expo-lan" || fail "pont --sans-carte mal configure"
+[ ! -e "$NM_DIR/expo-lan-port" ] || fail "port cree malgre --sans-carte"
+grep -q "^connection up expo-lan$" "$NM_LOG" || fail "pont non active"
+! grep -q "^connection \(add\|modify\|up\).*expo-lan-port" "$NM_LOG" || fail "--sans-carte a touche au port"
+grep -q "SANS carte" "$WORK/out.log" || fail "mode sans carte non annonce"
+
+# Relance : idempotent, le pont n'est pas recree.
+: > "$NM_LOG"
+bash "$SETUP" --sans-carte > /dev/null 2>&1 || fail "--sans-carte non rejouable"
+! grep -q "connection add" "$NM_LOG" || fail "--sans-carte pas idempotent"
+
+# Incompatible avec une carte explicite.
+if bash "$SETUP" eth0 --sans-carte > "$WORK/out.log" 2>&1; then fail "--sans-carte + carte acceptes"; fi
+grep -q "incompatibles" "$WORK/out.log" || fail "incompatibilite non expliquee"
+
+# Une carte rattachee plus tard rejoint le pont existant (sans le recreer).
+mkdir -p "$WORK/sys/eth1"
+: > "$NM_LOG"
+FAKE_NO_CARRIER=1 bash "$SETUP" eth1 > /dev/null 2>&1 || fail "rattachement d'une carte a un pont sans carte"
+grep -q "type ethernet ifname eth1 con-name expo-lan-port master expo-lan" "$NM_DIR/expo-lan-port" || fail "port non cree apres coup"
+
+# Mais --sans-carte ne retire jamais une carte deja rattachee.
+if bash "$SETUP" --sans-carte > "$WORK/out.log" 2>&1; then fail "--sans-carte a ecrase un reseau d'expo en service"; fi
+grep -q "teardown.sh" "$WORK/out.log" || fail "teardown non suggere"
+[ -f "$NM_DIR/expo-lan-port" ] || fail "port supprime par --sans-carte"
+
+bash "$REPO/network/teardown.sh" > /dev/null
+[ -z "$(ls "$NM_DIR")" ] || fail "connexions restantes apres teardown (sans carte)"
+
 echo "OK : reseau de l'expo (pont expo-lan)"

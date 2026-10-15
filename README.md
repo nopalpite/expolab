@@ -321,7 +321,8 @@ genere pour les machines (voir plus haut, le reverse-proxy ne les concerne pas).
   par **NetworkManager** (defaut de Raspberry Pi OS)
 - **Deux cartes reseau** : une pour internet (Wi-Fi ou Ethernet), une
   Ethernet pour le reseau de l'expo (`eth1`, adaptateur USB-Ethernet...),
-  reliee au switch des machines
+  reliee au switch des machines. Pour **tester le deploiement sans cette
+  seconde carte**, voir `--sans-carte` plus bas
 - Une connexion internet sur l'hote pour que Docker telecharge ses images
   et que le cache apt serve les machines
 - Le **fuseau horaire de l'hote** (`timedatectl set-timezone Europe/Paris`) : chaque
@@ -361,7 +362,18 @@ sudo ./vpn/add-peer.sh mon-laptop   # optionnel : un pair nommement identifie en
 ```
 
 `network/setup.sh` est idempotent : relance sans argument, il garde la carte
-deja choisie ; avec un autre nom, le pont change de carte. `deploy-server.sh`
+deja choisie ; avec un autre nom, le pont change de carte.
+
+**Tester sans seconde carte** : `sudo ./install.sh --sans-carte` (ou
+`sudo ./network/setup.sh --sans-carte`) cree le pont `expo-lan` **seul**, sans le
+rattacher a une carte - les autres etapes n'ont besoin que de ce pont et de son
+adresse. Tous les services demarrent, mais **aucune machine ne peut s'y connecter**
+(il n'y a pas de switch). Pour brancher le reseau de l'expo ensuite : `sudo
+./network/setup.sh eth1` - le pont est conserve, la carte s'y ajoute. Le script
+refuse `--sans-carte` si une carte est deja rattachee (il ne coupe jamais un reseau
+d'expo en service : `network/teardown.sh` d'abord), et n'accepte pas les deux a la
+fois. Il ne contourne pas la protection de la route par defaut : donner `eth0` a
+l'expo couperait l'acces du serveur, ce qui reste refuse. `deploy-server.sh`
 est idempotent aussi : relancez-le apres avoir modifie `server/services.yaml`
 ou le code d'une application pour regenerer le Caddyfile et redeployer les
 stacks concernees via l'API Dockhand.

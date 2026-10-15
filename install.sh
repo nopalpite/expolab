@@ -7,10 +7,12 @@
 # Idempotent de bout en bout : relancer cette meme commande apres coup
 # ne repete que ce qui manque.
 #
-# Usage: sudo ./install.sh [carte_reseau_expo] [--force]
+# Usage: sudo ./install.sh [carte_reseau_expo] [--force] [--sans-carte]
 #   carte_reseau_expo : carte reliee au switch des machines (defaut : celle
 #                       deja configuree, sinon $EXPO_LAN_IFACE, sinon eth1)
 #   --force           : voir network/setup.sh
+#   --sans-carte      : test sans carte dediee a l'expo (pont seul, aucune machine
+#                       ne peut s'y connecter) - voir network/setup.sh
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
