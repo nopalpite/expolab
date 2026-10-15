@@ -1,5 +1,6 @@
 """Tests de dnsmasq-admin : reservations par MAC ET par nom, liberation de bail."""
 import importlib.util
+import json
 import subprocess
 import time
 from pathlib import Path
@@ -244,3 +245,98 @@ def test_host_alive_distinguishes_dead_host_from_missing_tool(monkeypatch):
     assert da.host_alive("10.42.0.60") is False
     monkeypatch.setattr(da.subprocess, "run", fake_run(127, "executable file not found"))
     assert da.host_alive("10.42.0.60") is None
+
+
+# --- topologie -------------------------------------------------------------------------
+
+MAC_B = "dc:a6:32:00:99:02"
+MAC_C = "dc:a6:32:00:99:03"
+
+
+def tlease(mac, ip, hostname, minutes=60):
+    return {"mac": mac, "ip": ip, "hostname": hostname, "client_id": "", "expires_in_min": minutes}
+
+
+def test_topology_merges_leases_reservations_and_presence():
+    leases = [tlease(MAC_A, "10.42.0.60", "pi-03"), tlease(MAC_B, "10.42.0.120", "intrus"), tlease(MAC_C, "10.42.0.130", "pi-04")]
+    reservations = [
+        {"mac": "", "ip": "10.42.0.60", "hostname": "pi-03"},      # par nom, sur son IP
+        {"mac": "", "ip": "10.42.0.61", "hostname": "pi-04"},      # par nom, sur une IP de repli
+        {"mac": "", "ip": "10.42.0.62", "hostname": "pi-05"},      # jamais vue
+    ]
+    presence = {MAC_A: {"alive": True, "since": 100, "last_seen": 150}, MAC_B: {"alive": False, "since": 120, "last_seen": None}}
+    data = da.build_topology(leases, reservations, presence, True)
+    m = {x["hostname"]: x for x in data["machines"]}
+    assert [x["ip"] for x in data["machines"]] == ["10.42.0.60", "10.42.0.62", "10.42.0.120", "10.42.0.130"]
+    assert m["pi-03"]["state"] == "online" and m["pi-03"]["reserved"] == "nom" and m["pi-03"]["alerts"] == []
+    assert m["intrus"]["state"] == "offline" and m["intrus"]["alerts"] == ["sans reservation"]
+    assert m["pi-04"]["state"] == "unknown" and m["pi-04"]["alerts"] == ["IP de repli (reservee : 10.42.0.61)"]
+    assert m["pi-05"]["state"] == "absent" and m["pi-05"]["reservation_id"] == "pi-05"
+    assert data["summary"] == {"online": 1, "known": 3, "absent": 1, "alerts": 2}
+
+
+def test_topology_mac_reservation_and_duplicate_names():
+    leases = [tlease(MAC_A, "10.42.0.60", "pi"), tlease(MAC_B, "10.42.0.61", "pi")]
+    data = da.build_topology(leases, [{"mac": MAC_A, "ip": "10.42.0.60", "hostname": "pi"}], {}, True)
+    a, b = data["machines"]
+    assert a["reserved"] == "mac" and a["reservation_id"] == MAC_A and a["alerts"] == ["nom en double"]
+    assert b["alerts"] == ["sans reservation", "nom en double"]
+
+
+def test_topology_presence_unknown_when_probe_unavailable():
+    data = da.build_topology([tlease(MAC_A, "10.42.0.60", "pi-03")], [], {MAC_A: {"alive": True, "since": 1, "last_seen": 1}}, False)
+    assert data["machines"][0]["state"] == "unknown" and data["presence_ok"] is False
+
+
+def test_diff_leases_reports_new_moved_and_gone():
+    old = {MAC_A: tlease(MAC_A, "10.42.0.60", "pi-03"), MAC_B: tlease(MAC_B, "10.42.0.61", "*")}
+    new = {MAC_A: tlease(MAC_A, "10.42.0.70", "pi-03"), MAC_C: tlease(MAC_C, "10.42.0.62", "(inconnu)")}
+    messages = [m for _k, m in da.diff_leases(old, new)]
+    assert messages == ["pi-03 passe de 10.42.0.60 a 10.42.0.70", f"{MAC_C} obtient 10.42.0.62", "* (10.42.0.61) : bail libere ou expire"]
+
+
+def test_presence_first_sight_is_silent_then_transitions_are_reported():
+    presence = {}
+    leases = [tlease(MAC_A, "10.42.0.60", "pi-03")]
+    assert da.update_presence(presence, leases, {"10.42.0.60"}, 100) == []
+    assert presence[MAC_A] == {"alive": True, "since": 100, "last_seen": 100}
+    assert da.update_presence(presence, leases, {"10.42.0.60"}, 110) == []
+    assert presence[MAC_A]["last_seen"] == 110 and presence[MAC_A]["since"] == 100
+    assert da.update_presence(presence, leases, set(), 120) == [("depart", "pi-03 (10.42.0.60) ne repond plus")]
+    assert presence[MAC_A]["since"] == 120 and presence[MAC_A]["last_seen"] == 110
+    assert da.update_presence(presence, leases, {"10.42.0.60"}, 130) == [("arrivee", "pi-03 (10.42.0.60) repond")]
+    da.update_presence(presence, [], set(), 140)
+    assert presence == {}   # bail parti : on oublie la machine
+
+
+def test_probe_runs_all_arpings_in_one_exec(monkeypatch):
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="10.42.0.60\n", stderr="")
+
+    monkeypatch.setattr(da.subprocess, "run", fake_run)
+    assert da.probe_alive(["10.42.0.60", "10.42.0.61"]) == {"10.42.0.60"}
+    assert len(calls) == 1 and calls[0][:3] == ["docker", "exec", "expolab-dnsmasq"]
+    assert calls[0][-2:] == ["10.42.0.60", "10.42.0.61"]   # IP en arguments, jamais dans le script
+    assert da.probe_alive([]) == set() and len(calls) == 1
+
+
+def test_probe_unavailable_is_none_not_offline(monkeypatch):
+    monkeypatch.setattr(da.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="Error: No such container"))
+    assert da.probe_alive(["10.42.0.60"]) is None
+    monkeypatch.setattr(da.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr=""))
+    assert da.probe_alive(["10.42.0.60"]) == set()   # personne ne repond : hors ligne
+
+
+def test_topology_api_and_stream_first_message(client):
+    write_leases(client, f"{future()} {MAC_A} 10.42.0.60 pi-03 *")
+    data = client.get("/api/topology").get_json()
+    assert data["machines"][0]["hostname"] == "pi-03" and "events" in data and "now" in data
+    response = client.get("/api/topology/stream")
+    assert response.mimetype == "text/event-stream"
+    first = next(response.response)
+    first = first.decode() if isinstance(first, bytes) else first
+    assert first.startswith("data: ") and json.loads(first[6:])["machines"][0]["ip"] == "10.42.0.60"
+    response.close()

@@ -8,11 +8,69 @@
 </head>
 <body>
     <header>
-        <h1>dnsmasq</h1>
-        <p class="subtitle">DHCP/DNS sur expo-lan (10.42.0.0/24)</p>
+        <div class="head-row">
+            <div>
+                <h1>dnsmasq</h1>
+                <p class="subtitle">DHCP/DNS sur expo-lan (10.42.0.0/24)</p>
+            </div>
+            <span id="live" class="live" title="Mise a jour en direct">
+                <span class="pulse"></span><span id="live-text">Connexion...</span>
+            </span>
+        </div>
+        <nav class="tabs" role="tablist">
+            <a href="#topologie" class="tab" role="tab" data-tab="topologie">Topologie</a>
+            <a href="#baux" class="tab" role="tab" data-tab="baux">Baux et reservations</a>
+        </nav>
     </header>
 
-    <main>
+    <main id="tab-topologie" class="wide" hidden>
+        <div class="kpis">
+            <div class="kpi"><b id="k-online">-</b><span>machines en ligne</span></div>
+            <div class="kpi"><b id="k-absent">-</b><span>reservations sans bail</span></div>
+            <div class="kpi"><b id="k-alerts">-</b><span>alertes</span></div>
+        </div>
+        <p id="presence-warning" class="status status-error" hidden>Presence inconnue : la sonde ARP ne repond pas (conteneur dnsmasq arrete ?).</p>
+
+        <div class="topo-grid">
+            <section class="panel">
+                <h2>Reseau de l'expo</h2>
+                <div class="toolbar">
+                    <input type="search" id="topo-search" placeholder="Rechercher un nom, une IP, une MAC..." autocomplete="off">
+                    <div class="filters" role="group" aria-label="Filtre">
+                        <button type="button" class="filter on" data-filter="all">Toutes</button>
+                        <button type="button" class="filter" data-filter="online">En ligne</button>
+                        <button type="button" class="filter" data-filter="offline">Hors ligne</button>
+                        <button type="button" class="filter" data-filter="alerts">Alertes</button>
+                    </div>
+                </div>
+                <div class="tree">
+                    <div class="node infra">
+                        <span class="dot ok"></span>
+                        <span class="n-name">Serveur</span>
+                        <span class="n-meta" id="server-meta">10.42.0.1 - expo-lan</span>
+                    </div>
+                    <div class="branch" id="topo-machines">
+                        <p class="empty">Chargement...</p>
+                    </div>
+                </div>
+            </section>
+
+            <aside class="side">
+                <section class="panel" id="detail">
+                    <h2 id="d-title">Machine</h2>
+                    <p class="empty" id="d-empty">Cliquer sur une machine pour le detail.</p>
+                    <dl id="d-list" hidden></dl>
+                    <div class="d-actions" id="d-actions"></div>
+                </section>
+                <section class="panel">
+                    <h2>Journal</h2>
+                    <div id="feed" class="feed"><p class="empty">Aucun evenement.</p></div>
+                </section>
+            </aside>
+        </div>
+    </main>
+
+    <main id="tab-baux" hidden>
         <section class="panel">
             <h2>Reservation DHCP</h2>
             <p class="subtitle">Fixe l'IP attribuee a une adresse MAC <strong>ou a un nom</strong>. Sans MAC, la reservation suit le hostname : une carte de remplacement qui s'annonce sous ce nom reprend l'IP (pensez a "Liberer" le bail de la machine morte).</p>
@@ -68,5 +126,6 @@
     </main>
 
     <script src="/static/app.js"></script>
+    <script src="/static/topology.js"></script>
 </body>
 </html>

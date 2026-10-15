@@ -140,7 +140,14 @@ chaque service comme **stack Dockhand independante** via son API REST
   (Flask) pour piloter dnsmasq/Caddy/WireGuard sans repasser par la ligne
   de commande : editer/lire un fichier de config existant et reutiliser les
   scripts/mecanismes deja en place, sans rien reimplementer.
-  - `dnsmasq-admin` (https://dnsmasq.web.expolab.lan) : baux DHCP actifs
+  - `dnsmasq-admin` (https://dnsmasq.web.expolab.lan) : onglet **Topologie**,
+    vue en direct du reseau de l'expo - une ligne par machine (bail, reservation,
+    presence ARP sondee toutes les 10 s en une seule commande, `DNSMASQ_PRESENCE_INTERVAL`),
+    alertes (sans reservation, IP de repli, nom en double), reservations sans bail
+    en grise, detail et actions (reserver, liberer), journal des arrivees/departs.
+    Poussee au navigateur par SSE (`/api/topology/stream`) a chaque changement : le
+    fichier de baux, que dnsmasq reecrit a chaque bail, est surveille chaque seconde
+    (aucun script branche sur dnsmasq). Onglet **Baux et reservations** : baux DHCP actifs
     (lecture seule) + **reservations DHCP** (MAC -> IP fixe), ecrites
     dans un fichier dedie (`server/stacks/dnsmasq/admin-config/`, non
     versionne) que dnsmasq relit **a chaud sur SIGHUP**

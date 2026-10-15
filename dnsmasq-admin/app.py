@@ -13,10 +13,14 @@ services du serveur d'expo vivent sous *.web.expolab.lan, un unique
 wildcard dans dnsmasq.conf (le tri par service se fait ensuite cote
 Caddy via le Host: HTTP, pas via DNS) - une liste d'enregistrements
 individuels par nom aurait ete purement redondante.
+
+Onglet "Topologie" : vue en direct des machines (baux + reservations +
+presence ARP), poussee au navigateur par SSE (/api/topology/stream).
 """
 import collections
 import datetime
 import ipaddress
+import json
 import os
 import re
 import subprocess
@@ -24,7 +28,7 @@ import threading
 import time
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 
 app = Flask(__name__)
 
@@ -309,6 +313,7 @@ def log_event(kind: str, message: str) -> None:
     now = datetime.datetime.now().isoformat(timespec="seconds")
     _events.appendleft({"time": now, "kind": kind, "message": message})
     print(f"[{now}] {kind}: {message}", flush=True)
+    notify_change()
 
 
 def reconcile_once(misses: dict) -> None:
@@ -396,7 +401,230 @@ def api_events():
     return jsonify({"events": list(_events), "auto_release": AUTO_RELEASE})
 
 
+# --- topologie (onglet "Topologie") ------------------------------------------------------
+#
+# Une seule source de verite par information : les baux (fichier de dnsmasq), les
+# reservations (notre fichier) et la presence ARP (sondee ici). Le navigateur recoit
+# l'etat complet par SSE a chaque changement : arrivee/depart d'une machine, bail
+# ajoute/modifie/retire, reservation modifiee, evenement de liberation.
+#
+# Temps reel sans toucher a dnsmasq : il reecrit son fichier de baux a chaque
+# changement de bail, on en surveille la date de modification chaque seconde.
+
+SERVER_IP = "10.42.0.1"
+PRESENCE_INTERVAL = int(os.environ.get("DNSMASQ_PRESENCE_INTERVAL", "10"))
+_change = threading.Condition()
+_version = 0
+_presence: dict = {}   # mac -> {"alive": bool, "since": epoch du dernier changement d'etat, "last_seen": epoch | None}
+_presence_ok = True    # False si la sonde ARP est indisponible (conteneur dnsmasq arrete...)
+
+
+def notify_change() -> None:
+    global _version
+    with _change:
+        _version += 1
+        _change.notify_all()
+
+
+def probe_alive(ips: list[str]) -> set[str] | None:
+    """IP qui repondent en ARP sur expo-lan, toutes sondees EN PARALLELE en une seule
+    commande dans le conteneur dnsmasq (le seul sur le reseau de l'hote). None si la
+    sonde est impossible (conteneur arrete, arping absent) : etat inconnu, pas "hors ligne"."""
+    if not ips:
+        return set()
+    script = f'for ip in "$@"; do (arping -q -I {EXPO_LAN_INTERFACE} -c 1 -w 2 "$ip" && echo "$ip") & done; wait'
+    try:
+        result = subprocess.run(
+            ["docker", "exec", DNSMASQ_CONTAINER, "sh", "-c", script, "sonde", *ips],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    alive = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    if not alive and result.stderr.strip():
+        return None
+    return alive
+
+
+def label(lease: dict) -> str:
+    return lease["hostname"] if lease["hostname"] != "(inconnu)" else lease["mac"]
+
+
+def diff_leases(old: dict, new: dict) -> list[tuple[str, str]]:
+    """Evenements entre deux etats des baux ({mac: bail})."""
+    events = []
+    for mac, lease in new.items():
+        before = old.get(mac)
+        if before is None:
+            events.append(("bail", f"{label(lease)} obtient {lease['ip']}"))
+        elif before["ip"] != lease["ip"]:
+            events.append(("bail", f"{label(lease)} passe de {before['ip']} a {lease['ip']}"))
+    for mac, lease in old.items():
+        if mac not in new:
+            events.append(("bail", f"{label(lease)} ({lease['ip']}) : bail libere ou expire"))
+    return events
+
+
+def update_presence(presence: dict, leases: list[dict], alive: set[str], now: float) -> list[tuple[str, str]]:
+    """Met a jour la presence par MAC et renvoie les arrivees/departs. La premiere
+    observation d'une machine ne produit pas d'evenement (le bail l'a deja annoncee,
+    et un redemarrage de dnsmasq-admin ne doit pas tout re-signaler)."""
+    events = []
+    current = {l["mac"] for l in leases}
+    for mac in list(presence):
+        if mac not in current:
+            del presence[mac]
+    for lease in leases:
+        is_alive = lease["ip"] in alive
+        p = presence.get(lease["mac"])
+        if p is None:
+            presence[lease["mac"]] = {"alive": is_alive, "since": now, "last_seen": now if is_alive else None}
+            continue
+        if is_alive:
+            p["last_seen"] = now
+        if is_alive != p["alive"]:
+            p["alive"], p["since"] = is_alive, now
+            events.append(("arrivee", f"{label(lease)} ({lease['ip']}) repond")
+                          if is_alive else ("depart", f"{label(lease)} ({lease['ip']}) ne repond plus"))
+    return events
+
+
+def build_topology(leases: list[dict], reservations: list[dict], presence: dict, presence_ok: bool) -> dict:
+    """Vue fusionnee : une entree par bail, plus une par reservation sans bail."""
+    by_mac = {r["mac"]: r for r in reservations if r["mac"]}
+    by_name = {r["hostname"]: r for r in reservations if not r["mac"]}
+    names = collections.Counter(l["hostname"] for l in leases if l["hostname"] != "(inconnu)")
+    used = set()
+    machines = []
+    for l in leases:
+        r, kind = (by_mac[l["mac"]], "mac") if l["mac"] in by_mac else (by_name.get(l["hostname"]), "nom")
+        if r is None:
+            kind = None
+        else:
+            used.add(id(r))
+        p = presence.get(l["mac"]) if presence_ok else None
+        alerts = []
+        if r is None:
+            alerts.append("sans reservation")
+        elif r["ip"] != l["ip"]:
+            alerts.append(f"IP de repli (reservee : {r['ip']})")
+        if names[l["hostname"]] > 1:
+            alerts.append("nom en double")
+        machines.append({
+            "id": l["mac"], "hostname": l["hostname"], "ip": l["ip"], "mac": l["mac"],
+            "state": "unknown" if p is None else ("online" if p["alive"] else "offline"),
+            "since": p["since"] if p else None, "last_seen": p["last_seen"] if p else None,
+            "reserved": kind, "reservation_id": reservation_id(r) if r else None,
+            "lease_expires_in_min": l["expires_in_min"], "alerts": alerts,
+        })
+    for r in reservations:
+        if id(r) not in used:
+            machines.append({
+                "id": reservation_id(r), "hostname": r["hostname"] or "(sans nom)", "ip": r["ip"], "mac": r["mac"],
+                "state": "absent", "since": None, "last_seen": None,
+                "reserved": "mac" if r["mac"] else "nom", "reservation_id": reservation_id(r),
+                "lease_expires_in_min": None, "alerts": [],
+            })
+    machines.sort(key=lambda m: ipaddress.ip_address(m["ip"]) if valid_ip_in_expo_lan(m["ip"]) else ipaddress.ip_address("255.255.255.255"))
+    present = [m for m in machines if m["state"] != "absent"]
+    return {
+        "server": {"ip": SERVER_IP, "interface": EXPO_LAN_INTERFACE, "network": str(EXPO_LAN)},
+        "machines": machines,
+        "summary": {
+            "online": sum(m["state"] == "online" for m in machines),
+            "known": len(present),
+            "absent": len(machines) - len(present),
+            "alerts": sum(len(m["alerts"]) for m in machines),
+        },
+        "presence_ok": presence_ok,
+        "presence_interval": PRESENCE_INTERVAL,
+    }
+
+
+def current_topology() -> dict:
+    with _change:
+        presence = {mac: dict(p) for mac, p in _presence.items()}
+        presence_ok = _presence_ok
+    data = build_topology(load_leases(), load_reservations(), presence, presence_ok)
+    data["events"] = list(_events)[:30]
+    data["now"] = time.time()
+    return data
+
+
+def _mtime(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def monitor_loop() -> None:
+    """Surveille baux et reservations (chaque seconde) et sonde la presence
+    (toutes les PRESENCE_INTERVAL s, et aussitot apres un changement de bail)."""
+    global _presence_ok
+    known = None
+    stamps = None
+    last_probe = 0.0
+    while True:
+        try:
+            now = time.time()
+            new_stamps = (_mtime(LEASES_PATH), _mtime(RESERVATIONS_PATH))
+            if new_stamps != stamps:
+                stamps = new_stamps
+                current = {l["mac"]: l for l in load_leases()}
+                if known is not None:
+                    for kind, message in diff_leases(known, current):
+                        log_event(kind, message)
+                    if set(current) != set(known):
+                        last_probe = 0.0   # machine arrivee ou partie : sonder tout de suite
+                known = current
+                notify_change()
+            if now - last_probe >= PRESENCE_INTERVAL:
+                last_probe = now
+                leases = list((known or {}).values())
+                alive = probe_alive([l["ip"] for l in leases])
+                with _change:
+                    was_ok, _presence_ok = _presence_ok, alive is not None
+                    events = update_presence(_presence, leases, alive, now) if alive is not None else []
+                if events or was_ok != _presence_ok:
+                    for kind, message in events:
+                        log_event(kind, message)
+                    notify_change()
+        except Exception as exc:  # noqa: BLE001 - ne jamais tuer la boucle
+            log_event("erreur", f"topologie : {exc}")
+        time.sleep(1)
+
+
+@app.route("/api/topology")
+def api_topology():
+    return jsonify(current_topology())
+
+
+@app.route("/api/topology/stream")
+def api_topology_stream():
+    """SSE : l'etat complet a la connexion puis a chaque changement ; un commentaire
+    toutes les 15 s garde la connexion ouverte a travers Caddy."""
+    def stream():
+        seen = -1
+        while True:
+            with _change:
+                if _version == seen:
+                    _change.wait(timeout=15)
+                version = _version
+            if version != seen:
+                seen = version
+                yield f"data: {json.dumps(current_topology())}\n\n"
+            else:
+                yield ": ping\n\n"
+
+    return Response(stream(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 if __name__ == "__main__":
     if AUTO_RELEASE:
         threading.Thread(target=reconcile_loop, daemon=True).start()
-    app.run(host="0.0.0.0", port=5051)
+    threading.Thread(target=monitor_loop, daemon=True).start()
+    app.run(host="0.0.0.0", port=5051, threaded=True)
