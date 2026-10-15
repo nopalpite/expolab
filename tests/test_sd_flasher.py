@@ -980,6 +980,31 @@ def test_invalid_apt_proxies_are_refused(value):
         flasher.check_settings({"apt_proxy": value})
 
 
+def test_keyboard_and_locale_go_to_cloud_init():
+    _files, user, _net = seed(settings={"keyboard_layout": "fr", "locale": "fr_FR.UTF-8"})
+    assert user["keyboard"] == {"layout": "fr", "model": "pc105"}
+    assert user["locale"] == "fr_FR.UTF-8"
+    _files, user, _net = seed()
+    assert "keyboard" not in user and "locale" not in user   # vide : reglages de l'image
+
+
+@pytest.mark.parametrize("settings", [{"keyboard_layout": "FR"}, {"keyboard_layout": "fr; rm"}, {"locale": "fr_FR"},
+                                      {"locale": "fr_FR.UTF-8\nruncmd"}])
+def test_invalid_keyboard_or_locale_is_refused(settings):
+    with pytest.raises(flasher.FlashError):
+        flasher.check_settings(settings)
+
+
+def test_api_defaults_to_french_keyboard_and_locale(api):
+    s = api.client.get("/api/settings").get_json()
+    assert s["keyboard_layout"] == "fr" and s["locale"] == "fr_FR.UTF-8"
+    p = api.client.get("/api/preview?hostname=module-02").get_json()
+    assert p["keyboard_layout"] == "fr" and p["locale"] == "fr_FR.UTF-8"
+    res = api.client.put("/api/settings", json={"keyboard_layout": "BE", "locale": ""})
+    assert res.status_code == 200 and res.get_json()["keyboard_layout"] == "be" and res.get_json()["locale"] == ""
+    assert api.client.put("/api/settings", json={"locale": "francais"}).status_code == 400
+
+
 def test_api_defaults_to_the_lab_time_server_and_no_proxy(api):
     s = api.client.get("/api/settings").get_json()
     assert s["time_server"] == "10.42.0.1" and s["apt_proxy"] == ""

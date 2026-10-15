@@ -531,7 +531,8 @@ cloud-init (`growpart`/`resizefs`). Reglages dans la page : compte (a definir : 
 `user-data` par defaut de l'image Ubuntu, qui creait le compte et son mot de passe,
 est remplace - sans compte, personne ne peut se connecter ; la page avertit),
 Wi-Fi, **serveur de temps du lab** (chrony, ajoute aux sources d'Ubuntu), **proxy apt** (vide par
-defaut : injoignable hors expo) et cles (la cle d'automatisation Ansible est injectee par defaut) ; le mot de passe Wi-Fi reste sur
+defaut : injoignable hors expo), **clavier et langue** (azerty `fr` et `fr_FR.UTF-8` par defaut, modules
+`keyboard` et `locale` de cloud-init ; l'image Ubuntu est en qwerty) et cles (la cle d'automatisation Ansible est injectee par defaut) ; le mot de passe Wi-Fi reste sur
 le serveur (`data/settings.json`, mode 600), jamais renvoye au navigateur.
 
 **Garde-fous** (verifies a chaque flash, pas seulement a l'affichage) : seuls les

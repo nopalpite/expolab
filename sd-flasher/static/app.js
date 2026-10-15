@@ -256,6 +256,8 @@ async function refreshSummary() {
         list.appendChild(el("li", { text: "Identité unique : machine-id vidé, clés SSH d'hôte supprimées" }));
         list.appendChild(el("li", { text: data.time_server ? `Serveur de temps : ${data.time_server}` : "Pas de serveur de temps du lab" }));
         list.appendChild(el("li", { text: data.apt_proxy ? `Proxy apt : ${data.apt_proxy}` : "Pas de proxy apt (apt direct sur internet)" }));
+        list.appendChild(el("li", { text: data.keyboard_layout ? `Clavier : ${data.keyboard_layout}` : "Clavier de l'image (qwerty)" }));
+        list.appendChild(el("li", { text: data.locale ? `Langue : ${data.locale}` : "Langue de l'image (anglais)" }));
         list.appendChild(el("li", { text: "Mises à jour automatiques désactivées (elles bloquent apt au premier démarrage)" }));
         list.appendChild(el("li", { text: "Éjection de la carte à la fin" }));
         box.hidden = false;
@@ -352,6 +354,8 @@ async function loadSettings() {
     $("extra-keys").value = s.extra_keys.join("\n");
     $("time-server").value = s.time_server;
     $("apt-proxy").value = s.apt_proxy;
+    $("keyboard-layout").value = s.keyboard_layout;
+    $("locale").value = s.locale;
     $("user-name").value = s.user_name;
     $("user-password").value = "";
     $("user-password").placeholder = s.has_user_password ? "(inchangé)" : "";
@@ -373,6 +377,7 @@ async function saveSettings(extra = {}) {
                 wifi_ssid: $("wifi-ssid").value, wifi_psk: $("wifi-psk").value, wifi_country: $("wifi-country").value,
                 use_automation_key: $("use-automation").checked,
                 time_server: $("time-server").value, apt_proxy: $("apt-proxy").value,
+                keyboard_layout: $("keyboard-layout").value, locale: $("locale").value,
                 user_name: $("user-name").value, user_password: $("user-password").value,
                 user_sudo: $("user-sudo").checked, user_pwauth: $("user-pwauth").checked,
                 extra_keys: $("extra-keys").value.split("\n"), ...extra,

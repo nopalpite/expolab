@@ -54,6 +54,8 @@ CHRONY_EXPO_CONF = (
 )
 HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")   # nom d'hote ou adresse IPv4
 APT_PROXY_RE = re.compile(r"^http://[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:[0-9]{1,5})?$")
+KEYBOARD_RE = re.compile(r"^[a-z]{2,8}$")   # disposition XKB (fr, us, be, ch...)
+LOCALE_RE = re.compile(r"^[a-z]{2,3}_[A-Z]{2}\.UTF-8$")   # fr_FR.UTF-8
 USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")  # noms de comptes Linux usuels
 RESERVED_USERS = {"root"}
 SSH_KEY_RE = re.compile(r"^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp\d+|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/=]+( .*)?$")
@@ -308,6 +310,12 @@ def check_settings(settings: dict) -> None:
     apt_proxy = settings.get("apt_proxy") or ""
     if apt_proxy and not APT_PROXY_RE.match(apt_proxy):
         raise FlashError("Proxy apt invalide (attendu : http://10.42.0.1:3142).")
+    keyboard = settings.get("keyboard_layout") or ""
+    if keyboard and not KEYBOARD_RE.match(keyboard):
+        raise FlashError("Disposition du clavier invalide (code en minuscules, ex. fr).")
+    locale = settings.get("locale") or ""
+    if locale and not LOCALE_RE.match(locale):
+        raise FlashError("Langue invalide (attendu : fr_FR.UTF-8).")
 
 
 def hash_password(password: str, run=subprocess.run) -> str:
@@ -402,6 +410,15 @@ def render_seed(hostname: str, settings: dict, now: int | None = None, hasher=ha
             "permissions": "0644",
             "content": f'Acquire::http::Proxy "{apt_proxy}";\n',
         })
+
+    # Clavier et langue : l'image Ubuntu est en qwerty / anglais, inutilisable au clavier
+    # branche sur une machine de l'expo. Modules keyboard et locale de cloud-init.
+    keyboard = (settings.get("keyboard_layout") or "").strip()
+    if keyboard:
+        user["keyboard"] = {"layout": keyboard, "model": "pc105"}
+    locale = (settings.get("locale") or "").strip()
+    if locale:
+        user["locale"] = locale
 
     if settings.get("wifi_ssid"):
         # Le Wi-Fi decrit dans network-config est ecrit mais PAS active au premier demarrage
