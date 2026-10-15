@@ -20,7 +20,7 @@ Image utilisée : **Ubuntu Server 26.04 LTS pour Raspberry Pi** (`ubuntu-26.04.1
 
 **Capturer un master n'est utile que pour** :
 - **embarquer les mises à jour** (130 paquets au premier `apt upgrade`) : indispensable si les machines n'ont pas internet et que le cache apt du serveur n'est pas amorcé ;
-- **`avahi-daemon`** : Bastion trouve le nom d'une machine par mDNS, puis par DNS inverse. Ubuntu Server ne répond pas en mDNS de lui-même, donc un scan Bastion n'affiche aucun nom (et la box peut renvoyer un faux nom, hérité d'un ancien appareil à la même adresse). Alternative sans capture : un rôle Ansible commun.
+- **`avahi-daemon`** (facultatif) : Bastion trouve le nom d'une machine par mDNS, puis par DNS inverse. Sur le réseau de l'expo, le DNS inverse suffit : Bastion interroge dnsmasq, qui connaît le nom annoncé par chaque machine au DHCP. `avahi-daemon` ne sert que pour un scan depuis un autre réseau.
 
 Tout le reste (logiciels propres à un rôle : GPIO, affichage, applications) relève d'Ansible : versionné, rejouable, et ça ne fige rien dans une image.
 

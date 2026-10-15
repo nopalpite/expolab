@@ -78,6 +78,9 @@ chaque service comme **stack Dockhand independante** via son API REST
   sur GHCR (`ghcr.io/nopalpite/bastion`), avec les **identifiants
   d'administration choisis a l'installation** (les memes que partout, voir
   "Identifiants d'administration" plus bas, conserves dans `bastion.env`).
+  Son resolveur DNS est **dnsmasq** (`server/stacks/bastion/resolv.conf`, monte
+  sur `/etc/resolv.conf`) et non celui de l'hote : le scan reseau de Bastion
+  nomme ainsi les machines par DNS inverse (nom annonce au DHCP), sans mDNS.
   Secrets (cle de session, cle de chiffrement des
   identifiants memorises) generes une seule fois au premier
   `deploy-server.sh` dans `server/stacks/bastion/bastion.env` (non

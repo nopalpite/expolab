@@ -30,3 +30,6 @@ services:
     volumes:
       - ${REPO_ROOT}/server/stacks/bastion/config:/app/config
       - ${REPO_ROOT}/server/stacks/bastion/maps:/app/static/uploads/maps
+      # DNS = dnsmasq de l'expo (voir resolv.conf) : le DNS inverse nomme les
+      # machines au scan reseau. Celui de l'hote ne les connait pas.
+      - ${REPO_ROOT}/server/stacks/bastion/resolv.conf:/etc/resolv.conf:ro
