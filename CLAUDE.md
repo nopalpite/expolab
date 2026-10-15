@@ -22,6 +22,12 @@ de secret ici (ni mot de passe, ni jeton, ni clé privée).
   sur le Pi. Ne jamais utiliser de mot de passe ni fouiller `~/.ssh`.
 - **Demander l'adresse du Pi à l'utilisateur** si elle n'est pas connue : elle
   change selon le réseau. Utilisateur `pi`.
+- **Le Pi n'est probablement jamais le même d'une session à l'autre** (autre carte,
+  installation neuve, autre réseau). Ne rien supposer : ni l'adresse, ni la branche
+  déployée, ni les conteneurs en marche. La clé est propre à l'**ordinateur**, pas au
+  Pi : si un Pi la refuse, elle n'y est simplement pas installée (donner la ligne
+  d'installation). Vérifier l'état réel (`git branch --show-current`, `docker ps`)
+  avant d'agir.
 - **sudo :** vérifier d'abord avec `sudo -n true`. S'il demande un mot de passe,
   ne jamais le passer par un tube (`sudo -S`) : demander à l'utilisateur.
 - **Mise à jour du code sur le Pi :** `cd ~/expolab && git pull --ff-only`. Le
@@ -78,6 +84,11 @@ de secret ici (ni mot de passe, ni jeton, ni clé privée).
 - **chrony sur Ubuntu 26.04 :** il ignore un serveur sans authentification NTS
   (comme celui du lab) tant que des sources NTS existent. Il faut
   `authselectmode ignore` et `makestep 1 -1`, que le flasheur écrit déjà.
+- **Secrets dans l'espace libre d'une image :** effacer ou remplacer un fichier ne vide
+  pas ses blocs. La capture (`sd-flasher/capture.py`) copie la partition ext4 par
+  `e2image` (blocs utilisés seulement : rien ne fuit) mais la partition de démarrage
+  FAT telle quelle : elle y met à zéro les clusters libres. Toute capture manuelle
+  (`dd`, PiShrink) laisse le mot de passe Wi-Fi de la graine dans l'image.
 - **API Dockhand :** `/api/` sur le port 3000, avec l'en-tête
   `Authorization: Bearer dh_...` (jeton dans `server/dockhand.env`). Les opérations
   longues renvoient un `jobId` ; avec l'en-tête `Accept: application/json`, le

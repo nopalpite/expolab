@@ -587,6 +587,16 @@ image Ubuntu re-agrandit sa partition au premier demarrage (cloud-init), une ima
 Raspberry Pi OS deja demarree non ; pour un master propre, `image/prepare-master.sh`
 sur la machine avant la capture.
 
+Aucun secret ne doit rester dans l'image, y compris dans l'espace LIBRE : un fichier efface
+ou remplace garde son contenu dans ses anciens blocs. Cote systeme ext4, `e2image` ne copie
+que les blocs utilises, donc rien n'en sort. La partition de demarrage, elle, est copiee
+telle quelle : la capture y remplit de zeros les clusters FAT **libres** (sur la copie, la
+carte reste intacte) - sans cela, le mot de passe Wi-Fi et le hache de la graine du flasheur,
+remplacee par `prepare-master.sh`, se retrouvaient dans l'image (constate sur disque virtuel).
+Un cluster n'est vide que si sa case de la table FAT vaut 0 ; si la partition n'est pas un
+FAT16/32 reconnu, la capture continue mais le signale (`boot_wipe_note`). L'archive est ensuite
+**relue et comparee** aux octets envoyes au compresseur avant d'apparaitre dans la liste.
+
 `SD_FLASHER_DRY_RUN=1` : mode simulation (ecrit dans des fichiers, aucun disque
 touche) - c'est comme ca que les tests tournent, sans materiel.
 

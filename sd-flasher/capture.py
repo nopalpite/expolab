@@ -34,7 +34,7 @@ CHUNK = 4 * 1024 * 1024
 EXT_MAGIC = 0xEF53
 COMPRESSIONS = {"zst": ".img.zst", "xz": ".img.xz", "none": ".img"}
 STEPS = ("read", "shrink", "compress", "checksum")
-STEP_LABELS = {"read": "Lecture de la carte", "shrink": "Reduction", "compress": "Compression", "checksum": "Empreinte"}
+STEP_LABELS = {"read": "Lecture de la carte", "shrink": "Reduction", "compress": "Compression", "checksum": "Verification et empreinte"}
 STEP_SPAN = {"read": (0, 45), "shrink": (45, 60), "compress": (60, 95), "checksum": (95, 100)}
 
 
@@ -95,8 +95,11 @@ def plan_capture(source: str, run=subprocess.run) -> dict:
     if sb is None:
         raise CaptureError("La derniere partition n'est pas un systeme de fichiers ext2/3/4 : disposition non prise en charge.")
     used = (sb["blocks"] - sb["free_blocks"]) * sb["block_size"]
+    boot = min(table["partitions"], key=lambda p: p["start"])      # la partition de demarrage : la premiere sur la carte
+    has_boot = boot["node"] != root["node"]
     return {"sector": sector, "root_number": number, "root_start": root["start"], "root_sectors": root["size"],
-            "head_bytes": root["start"] * sector, "used_bytes": used, "fs_bytes": sb["blocks"] * sb["block_size"]}
+            "head_bytes": root["start"] * sector, "used_bytes": used, "fs_bytes": sb["blocks"] * sb["block_size"],
+            "boot_start": boot["start"] if has_boot else None, "boot_sectors": boot["size"] if has_boot else None}
 
 
 def space_needed(plan: dict) -> int:
@@ -115,6 +118,56 @@ def patch_mbr(head: bytearray, number: int, start: int, sectors: int) -> None:
     if struct.unpack_from("<I", head, entry + 8)[0] != start:
         raise CaptureError("Entree MBR inattendue pour la partition systeme : rien n'a ete modifie.")
     struct.pack_into("<I", head, entry + 12, sectors)
+
+
+# --- espace libre de la partition de demarrage (FAT) -----------------------------------------
+
+def wipe_fat_free_space(head: bytearray, start: int, size: int) -> str | None:
+    """Remplit de zeros les clusters LIBRES de la partition de demarrage (FAT16 ou FAT32) copiee
+    dans `head`, a l'offset `start` (octets), sur `size` octets. None si c'est fait ; sinon la
+    raison pour laquelle ce n'est pas possible (la copie n'est alors pas modifiee).
+
+    Pourquoi : la partition systeme est copiee par e2image, qui ne lit QUE les blocs utilises -
+    un fichier ext4 efface n'est donc jamais dans l'image. La partition de demarrage, elle, est
+    copiee telle quelle : quand la graine du flasheur (mot de passe Wi-Fi, hache du compte) est
+    reecrite ou remplacee, ses anciens clusters sont liberes mais gardent leur contenu, et se
+    retrouvent dans l'image (constate par un test sur disque virtuel).
+
+    Ne touche JAMAIS un cluster alloue : un cluster n'est vide que si sa case de la table FAT vaut 0."""
+    boot = memoryview(head)[start:start + size]
+    try:
+        if len(boot) < 512 or bytes(boot[510:512]) != b"\x55\xaa":
+            return "la partition de demarrage n'a pas de secteur de demarrage FAT"
+        bps, spc, reserved, nfats = struct.unpack_from("<HBHB", boot, 11)
+        root_entries = struct.unpack_from("<H", boot, 17)[0]
+        total = struct.unpack_from("<H", boot, 19)[0] or struct.unpack_from("<I", boot, 32)[0]
+        fat_sectors = struct.unpack_from("<H", boot, 22)[0] or struct.unpack_from("<I", boot, 36)[0]
+        if bps not in (512, 1024, 2048, 4096) or spc == 0 or spc & (spc - 1) or spc > 128 or not (reserved and nfats and fat_sectors and total):
+            return "parametres FAT incoherents"
+        if total * bps > len(boot):
+            return "le systeme FAT declare plus de secteurs que la partition n'en a"
+        data_start = reserved + nfats * fat_sectors + (root_entries * 32 + bps - 1) // bps
+        if data_start >= total:
+            return "parametres FAT incoherents"
+        clusters = (total - data_start) // spc
+        if clusters < 4085:
+            return "FAT12 non pris en charge"
+        wide = clusters >= 65525                      # FAT32 ; entre les deux : FAT16
+        entry = 4 if wide else 2
+        if (clusters + 2) * entry > fat_sectors * bps:
+            return "table FAT trop petite pour le nombre de clusters"
+        fat = reserved * bps
+        cluster_bytes = spc * bps
+        fmt = "<I" if wide else "<H"
+        zeros = bytes(cluster_bytes)
+        for n in range(2, clusters + 2):
+            value = struct.unpack_from(fmt, boot, fat + n * entry)[0] & (0x0FFFFFFF if wide else 0xFFFF)
+            if value == 0:                            # libre
+                offset = (data_start + (n - 2) * spc) * bps
+                boot[offset:offset + cluster_bytes] = zeros
+        return None
+    finally:
+        boot.release()
 
 
 # --- pipeline -------------------------------------------------------------------------------
@@ -136,9 +189,13 @@ def _check(result, what: str, ok=(0,)) -> None:
         raise CaptureError(f"{what} a echoue : {(result.stderr or result.stdout or '').strip()[-400:]}")
 
 
-def _feed(stream, head: bytes, part: Path, length: int, progress: Callable[[float], None]) -> None:
+def _feed(stream, head: bytes, part: Path, length: int, progress: Callable[[float], None], digest=None) -> None:
+    """Envoie debut de carte + partition reduite. `digest` (sha256) recoit exactement les memes
+    octets : c'est la reference pour verifier ensuite que l'archive produite est fidele."""
     total = len(head) + length
     stream.write(head)
+    if digest is not None:
+        digest.update(head)
     done = len(head)
     with open(part, "rb") as f:
         remaining = length
@@ -147,6 +204,8 @@ def _feed(stream, head: bytes, part: Path, length: int, progress: Callable[[floa
             if not chunk:
                 chunk = b"\0" * min(CHUNK, remaining)   # fin creuse du fichier de travail
             stream.write(chunk)
+            if digest is not None:
+                digest.update(chunk)
             remaining -= len(chunk)
             done += len(chunk)
             progress(done / total)
@@ -192,6 +251,28 @@ def sha256_file(path: Path, on_read: Callable[[float], None] | None = None) -> s
     return digest.hexdigest()
 
 
+def verify_image(path: Path, compression: str, expected: str, on_read: Callable[[float], None] | None = None) -> None:
+    """Relit l'image produite (decompressee) et compare son empreinte a celle des octets envoyes :
+    c'est bien une copie fidele de ce qui a ete lu, pas une archive abimee ou tronquee."""
+    if compression == "none":
+        got = sha256_file(path, on_read)
+    else:
+        cmd = ["zstd", "-dc", "-q", str(path)] if compression == "zst" else ["xz", "-dc", str(path)]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        digest, size, done = hashlib.sha256(), path.stat().st_size, 0
+        while chunk := proc.stdout.read(CHUNK):
+            digest.update(chunk)
+            done += len(chunk)
+            if on_read:
+                on_read(min(1.0, done / (size * 3)))     # taille decompressee inconnue : progression indicative
+        err = proc.stderr.read().decode(errors="replace")
+        if proc.wait() != 0:
+            raise CaptureError(f"L'archive produite est illisible : {err.strip()[-300:]}")
+        got = digest.hexdigest()
+    if got != expected:
+        raise CaptureError("L'archive ne correspond pas a ce qui a ete lu sur la carte : ne pas l'utiliser.")
+
+
 def run_capture(*, source: str, work_dir: Path, output: Path, compression: str,
                 update: Callable[..., None], run=subprocess.run, free_bytes: int | None = None) -> dict:
     """Capture `source` (carte ou fichier) dans `output` (ecrit sous output.part puis
@@ -217,6 +298,13 @@ def run_capture(*, source: str, work_dir: Path, output: Path, compression: str,
             head = bytearray(f.read(plan["head_bytes"]))
         if len(head) != plan["head_bytes"]:
             raise CaptureError("Lecture du debut de la carte incomplete.")
+        # La partition de demarrage est copiee telle quelle : on y vide les clusters libres (restes de la
+        # graine du flasheur : mot de passe Wi-Fi, hache du compte). Sur la COPIE seulement.
+        wipe_note = None
+        if plan["boot_start"] is not None:
+            wipe_note = wipe_fat_free_space(head, plan["boot_start"] * plan["sector"], plan["boot_sectors"] * plan["sector"])
+            progress("read", 0.03, "Espace libre de la partition de demarrage efface" if wipe_note is None
+                     else f"Espace libre de la partition de demarrage NON efface : {wipe_note}")
         progress("read", 0.05, f"Copie des donnees utilisees ({plan['used_bytes'] / 1e9:.1f} Go)")
         stop = threading.Event()
         watcher = threading.Thread(target=_watch, args=(part, plan["used_bytes"], lambda x: progress("read", 0.05 + 0.95 * x, "Copie des donnees utilisees"), stop), daemon=True)
@@ -246,16 +334,17 @@ def run_capture(*, source: str, work_dir: Path, output: Path, compression: str,
         image_bytes = len(head) + sectors * plan["sector"]
         label = "Compression" if compression != "none" else "Ecriture de l'image"
         report = lambda x: progress("compress", x, label)  # noqa: E731
+        sent = hashlib.sha256()            # empreinte des octets envoyes : reference de la verification
         if compression == "none":
             writer = _SparseWriter(final_part)
             try:
-                _feed(writer, bytes(head), part, sectors * plan["sector"], report)
+                _feed(writer, bytes(head), part, sectors * plan["sector"], report, sent)
             finally:
                 writer.close()
         else:
             proc = _compressor(compression, final_part)
             try:
-                _feed(proc.stdin, bytes(head), part, sectors * plan["sector"], report)
+                _feed(proc.stdin, bytes(head), part, sectors * plan["sector"], report, sent)
                 proc.stdin.close()
             except BrokenPipeError:
                 pass
@@ -264,12 +353,15 @@ def run_capture(*, source: str, work_dir: Path, output: Path, compression: str,
                 raise CaptureError(f"La compression a echoue : {err.strip()[-400:]}")
         progress("compress", 1, f"Image : {image_bytes / 1e9:.2f} Go")
 
-        # 4. empreinte, puis l'image apparait dans la liste (renommage atomique)
-        digest = sha256_file(final_part, lambda x: progress("checksum", x, "Calcul de l'empreinte"))
+        # 4. verification (l'archive, relue, redonne exactement les octets envoyes), empreinte, puis l'image
+        #    apparait dans la liste (renommage atomique)
+        verify_image(final_part, compression, sent.hexdigest(), lambda x: progress("checksum", 0.7 * x, "Verification de l'archive"))
+        digest = sha256_file(final_part, lambda x: progress("checksum", 0.7 + 0.3 * x, "Calcul de l'empreinte"))
         os.replace(final_part, output)
         progress("checksum", 1, "Terminee")
         return {"name": output.name, "bytes": output.stat().st_size, "image_bytes": image_bytes, "sha256": digest,
-                "used_bytes": plan["used_bytes"], "seconds": round(time.monotonic() - started)}
+                "used_bytes": plan["used_bytes"], "seconds": round(time.monotonic() - started),
+                "boot_wiped": plan["boot_start"] is not None and wipe_note is None, "boot_wipe_note": wipe_note}
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
         final_part.unlink(missing_ok=True)

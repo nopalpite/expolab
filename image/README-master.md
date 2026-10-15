@@ -41,8 +41,8 @@ Tout le reste (logiciels propres à un rôle : GPIO, affichage, applications) re
    Il demande de taper `MASTER`, puis : remplace la graine du flasheur par des fichiers **neutres**, remet cloud-init à neuf, vide `machine-id`, supprime les clés SSH d'hôte, vide les caches, journaux et historiques, **supprime le compte temporaire** et éteint la machine. Ne pas la redémarrer ensuite.
    - **La graine** contient le mot de passe Wi-Fi en clair et le hache du mot de passe : sans ce nettoyage, l'image les embarquerait. Le flasheur réécrit les trois fichiers à chaque flash.
    - **Le compte temporaire** doit disparaître : si un compte du même nom que celui de l'expo restait dans l'image, cloud-init verrait un compte déjà présent sur chaque carte, et je ne garantis pas qu'il lui remette son mot de passe et ses clés.
-4. **Capturer** la carte en image (`dd`, Win32DiskImager…), la **réduire** (PiShrink avec `-s` : sans son propre agrandissement, c'est cloud-init qui agrandit au premier démarrage), la compresser (`.xz` ou `.zst`).
-5. Envoyer l'image dans le flasheur (section « Image master »).
+4. **Capturer** la carte depuis le flasheur (section « Capturer une carte », la carte dans le lecteur du serveur) : elle n'est que lue, l'image est réduite, compressée, vérifiée et rangée avec les autres. Une capture manuelle (`dd`, PiShrink…) est déconseillée : elle ne vide pas l'espace libre de la partition de démarrage, où restent le mot de passe Wi-Fi et le hache de l'ancienne graine, invisibles dans l'arborescence mais présents dans l'image.
+5. L'image apparaît dans la liste « Image master » : prête à flasher.
 
 **Agrandissement au premier démarrage** : les modules `growpart` et `resizefs` de cloud-init agrandissent la partition racine puis son système de fichiers jusqu'à la taille de la carte. Ils tournent à chaque démarrage, donc même sur une copie du master.
 

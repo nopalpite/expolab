@@ -404,3 +404,241 @@ def test_fetch_can_be_cancelled(api, monkeypatch):
     assert not (api.IMAGES_DIR / "a.img.part").exists()
     # l'etat final n'est visible qu'APRES le nettoyage : le verrou est libre, un nouvel envoi est possible tout de suite
     assert not api._upload_lock.locked()
+
+
+# --- espace libre de la partition de demarrage (FAT) -----------------------------------------------------------
+# Un volume FAT minimal mais conforme au calcul de la specification (le type se deduit du nombre de
+# clusters) : on y met des clusters VIVANTS (a conserver) et des clusters LIBRES pleins de restes (a vider).
+
+STALE = b"RESTE-DE-SECRET-"
+LIVE = b"DONNEE-VIVANTE-"
+
+
+def make_fat(kind, total_sectors, bps=512, spc=1, live_chains=((3, 4, 5),)):
+    """Retourne (octets du volume, infos). Les chaines `live_chains` sont allouees ; tous les autres
+    clusters de donnees sont LIBRES mais contiennent STALE. Le cluster 2 est le repertoire racine (FAT32)."""
+    fat32 = kind == "fat32"
+    reserved, nfats = (32, 2) if fat32 else (1, 2)
+    root_entries = 0 if fat32 else 512
+    root_sectors = (root_entries * 32 + bps - 1) // bps
+    entry = 4 if fat32 else 2
+    fat_sectors = 1
+    for _ in range(50):                       # la taille de la FAT depend du nombre de clusters, qui depend d'elle
+        clusters = (total_sectors - reserved - nfats * fat_sectors - root_sectors) // spc
+        needed = -(-(clusters + 2) * entry // bps)
+        if needed == fat_sectors:
+            break
+        fat_sectors = needed
+    data_start = reserved + nfats * fat_sectors + root_sectors
+    assert (clusters >= 65525) == fat32 and clusters >= 4085, f"{kind} : {clusters} clusters ne donne pas ce type"
+    image = bytearray(total_sectors * bps)
+    struct.pack_into("<HBHB", image, 11, bps, spc, reserved, nfats)
+    struct.pack_into("<H", image, 17, root_entries)
+    struct.pack_into("<H", image, 19, total_sectors if total_sectors < 65536 else 0)
+    struct.pack_into("<I", image, 32, 0 if total_sectors < 65536 else total_sectors)
+    struct.pack_into("<H", image, 22, 0 if fat32 else fat_sectors)
+    struct.pack_into("<I", image, 36, fat_sectors if fat32 else 0)
+    image[510:512] = b"\x55\xaa"
+    fmt = "<I" if fat32 else "<H"
+    eoc = 0x0FFFFFFF if fat32 else 0xFFFF
+    table = reserved * bps
+    struct.pack_into(fmt, image, table, 0x0FFFFFF8 if fat32 else 0xFFF8)
+    struct.pack_into(fmt, image, table + entry, eoc)
+    live = []
+    if fat32:
+        struct.pack_into(fmt, image, table + 2 * entry, eoc)           # repertoire racine
+        live.append(2)
+    for chain in live_chains:
+        for here, following in zip(chain, chain[1:] + (None,)):
+            struct.pack_into(fmt, image, table + here * entry, eoc if following is None else following)
+            live.append(here)
+    cluster_bytes = spc * bps
+    for n in range(2, clusters + 2):
+        offset = (data_start + (n - 2) * spc) * bps
+        pattern = LIVE if n in live else STALE
+        image[offset:offset + cluster_bytes] = (pattern * (cluster_bytes // len(pattern) + 1))[:cluster_bytes]
+    return bytes(image), {"data_start": data_start, "clusters": clusters, "live": sorted(live), "bps": bps, "spc": spc}
+
+
+def cluster_range(info, n):
+    start = (info["data_start"] + (n - 2) * info["spc"]) * info["bps"]
+    return start, start + info["spc"] * info["bps"]
+
+
+@pytest.mark.parametrize("kind, sectors", [("fat32", 67_500), ("fat16", 16_384)])
+def test_wipe_zeroes_free_clusters_and_never_touches_allocated_ones(kind, sectors):
+    image, info = make_fat(kind, sectors)
+    prefix = b"MBR" * 170 + b"\0" * 2                   # 512 octets avant la partition : elle n'est pas au debut de la copie
+    offset = len(prefix)
+    head = bytearray(prefix) + bytearray(image) + bytearray(b"SUITE-DE-LA-COPIE" * 10)
+    before = bytes(head)
+    assert capture.wipe_fat_free_space(head, offset, len(image)) is None
+    assert STALE not in head                            # plus aucun reste
+    for n in info["live"]:
+        a, b = cluster_range(info, n)
+        assert head[offset + a:offset + b] == before[offset + a:offset + b]      # cluster alloue : intact
+        assert LIVE in head[offset + a:offset + b]
+    zeroed = sum(1 for n in range(2, info["clusters"] + 2) if n not in info["live"]
+                 and not any(head[offset + cluster_range(info, n)[0]:offset + cluster_range(info, n)[1]]))
+    assert zeroed == info["clusters"] - len(info["live"])                          # tous les autres sont a zero
+    data_start = offset + info["data_start"] * info["bps"]
+    assert head[:data_start] == before[:data_start]                                # secteur de demarrage, FAT, racine : intacts
+    assert head[offset + len(image):] == before[offset + len(image):]              # rien en dehors de la partition
+
+
+def test_wipe_is_idempotent():
+    image, _ = make_fat("fat16", 16_384)
+    head = bytearray(image)
+    assert capture.wipe_fat_free_space(head, 0, len(head)) is None
+    once = bytes(head)
+    assert capture.wipe_fat_free_space(head, 0, len(head)) is None and bytes(head) == once
+
+
+@pytest.mark.parametrize(
+    "damage, reason",
+    [
+        (lambda b: b.__setitem__(slice(510, 512), b"\0\0"), "secteur de demarrage"),
+        (lambda b: struct.pack_into("<H", b, 11, 513), "incoherents"),            # octets par secteur invalides
+        (lambda b: b.__setitem__(13, 3), "incoherents"),                         # secteurs par cluster : pas une puissance de 2
+        (lambda b: b.__setitem__(13, 0), "incoherents"),
+        (lambda b: struct.pack_into("<H", b, 22, 0), "incoherents"),             # taille de FAT nulle
+        (lambda b: struct.pack_into("<H", b, 19, 60_000), "plus de secteurs"),   # annonce plus que la partition
+    ],
+)
+def test_wipe_refuses_inconsistent_volumes_and_leaves_the_copy_alone(damage, reason):
+    image, _ = make_fat("fat16", 16_384)
+    head = bytearray(image)
+    damage(head)
+    before = bytes(head)
+    note = capture.wipe_fat_free_space(head, 0, len(head))
+    assert note and reason in note
+    assert bytes(head) == before                                                  # en cas de doute : on ne touche a rien
+
+
+def test_wipe_reports_what_is_not_a_fat_volume():
+    head = bytearray(b"BOOT" * 1024)                                              # comme dans les tests de pipeline : pas un FAT
+    assert "FAT" in capture.wipe_fat_free_space(head, 0, len(head))
+    assert capture.wipe_fat_free_space(bytearray(100), 0, 100)                    # partition trop courte pour un secteur de demarrage
+
+
+def test_wipe_does_not_handle_fat12():
+    image, _ = make_fat("fat16", 16_384)
+    head = bytearray(image)
+    head[13] = 8                                                                  # 8 secteurs par cluster : ~2000 clusters, donc FAT12 selon la specification
+    before = bytes(head)
+    assert "FAT12" in capture.wipe_fat_free_space(head, 0, len(head))
+    assert bytes(head) == before
+
+
+def test_a_partition_cut_short_by_the_copy_is_refused():
+    image, _ = make_fat("fat16", 16_384)
+    head = bytearray(image[:len(image) // 2])                                     # la copie s'arrete avant la fin de la partition
+    before = bytes(head)
+    assert "plus de secteurs" in capture.wipe_fat_free_space(head, 0, len(image))
+    assert bytes(head) == before
+
+
+def test_plan_exposes_the_boot_partition(tmp_path):
+    plan = capture.plan_capture(card(tmp_path), fake_sfdisk())
+    assert plan["boot_start"] == 8192 and plan["boot_sectors"] == 1000
+    only_root = fake_sfdisk(partitions=[{"node": "/dev/sda1", "start": 16384, "size": 50000}])
+    plan = capture.plan_capture(card(tmp_path), only_root)
+    assert plan["boot_start"] is None and plan["boot_sectors"] is None            # une seule partition : pas de demarrage a effacer
+
+
+# --- verification de l'archive --------------------------------------------------------------------------------------
+
+def test_verify_image_for_a_plain_image(tmp_path):
+    data = os.urandom(300_000) + b"\0" * 100_000
+    path = tmp_path / "x.img"
+    path.write_bytes(data)
+    capture.verify_image(path, "none", hashlib.sha256(data).hexdigest())
+    with pytest.raises(capture.CaptureError, match="ne correspond pas"):
+        capture.verify_image(path, "none", "0" * 64)
+
+
+@needs_tools
+@pytest.mark.parametrize("compression", ["zst", "xz"])
+def test_verify_image_detects_corrupt_and_truncated_archives(tmp_path, compression):
+    if compression == "xz" and not shutil.which("xz"):
+        pytest.skip("xz absent")
+    data = os.urandom(200_000) + bytes(300_000)
+    cmd = ["zstd", "-q", "-c"] if compression == "zst" else ["xz", "-c"]
+    path = tmp_path / ("a.img." + compression)
+    path.write_bytes(subprocess.run(cmd, input=data, capture_output=True, check=True).stdout)
+    expected = hashlib.sha256(data).hexdigest()
+    capture.verify_image(path, compression, expected)
+    with pytest.raises(capture.CaptureError, match="ne correspond pas"):
+        capture.verify_image(path, compression, "0" * 64)
+    whole = path.read_bytes()
+    path.write_bytes(whole[:len(whole) // 2])                                      # tronquee
+    with pytest.raises(capture.CaptureError):
+        capture.verify_image(path, compression, expected)
+
+
+# --- pipeline reel : plus aucun secret dans l'image ---------------------------------------------------------------------
+
+def build_card_with_boot(tmp_path):
+    """Comme build_card, mais la partition de demarrage est un vrai volume FAT16 contenant un fichier vivant
+    et, dans ses clusters LIBRES, des restes de secrets (la graine du flasheur avant son remplacement)."""
+    img = build_card(tmp_path)
+    fat, info = make_fat("fat16", 16_384)
+    stale = (b"MOT-DE-PASSE-WIFI-EN-CLAIR" + b"--" + b"HACHE-DU-MOT-DE-PASSE-").ljust(512, b"#")
+    fat = bytearray(fat)
+    for n in range(2, info["clusters"] + 2):
+        if n not in info["live"]:
+            a, b = cluster_range(info, n)
+            fat[a:b] = stale[:b - a]
+    with open(img, "r+b") as f:
+        f.seek(2048 * 512)
+        f.write(fat)
+    return img, info
+
+
+@needs_tools
+def test_capture_leaves_no_secret_in_the_boot_partition(tmp_path):
+    src, info = build_card_with_boot(tmp_path)
+    raw_before = src.read_bytes()
+    assert b"MOT-DE-PASSE-WIFI-EN-CLAIR" in raw_before                            # le scenario contient bien le secret
+    out = tmp_path / "images" / "master.img.zst"
+    out.parent.mkdir()
+    result = capture.run_capture(source=str(src), work_dir=tmp_path / "images" / ".w", output=out, compression="zst", update=lambda **k: None)
+    assert src.read_bytes() == raw_before                                          # la carte source n'a PAS ete modifiee
+    assert result["boot_wiped"] is True and result["boot_wipe_note"] is None
+    raw = subprocess.run(["zstd", "-dc", str(out)], capture_output=True, check=True).stdout
+    for secret in (b"MOT-DE-PASSE-WIFI-EN-CLAIR", b"HACHE-DU-MOT-DE-PASSE-", STALE):
+        assert secret not in raw, secret
+    boot = raw[2048 * 512:2048 * 512 + 16_384 * 512]
+    for n in info["live"]:
+        a, b = cluster_range(info, n)
+        assert LIVE in boot[a:b]                                                   # les fichiers vivants sont conserves
+    assert raw[:512][510:512] == b"\x55\xaa"
+
+
+@needs_tools
+def test_capture_still_works_when_the_boot_partition_is_not_fat(tmp_path):
+    src = build_card(tmp_path)                                                     # partition de demarrage factice
+    out = tmp_path / "images" / "master.img.zst"
+    out.parent.mkdir()
+    result = capture.run_capture(source=str(src), work_dir=tmp_path / "images" / ".w", output=out, compression="zst", update=lambda **k: None)
+    assert result["boot_wiped"] is False and "FAT" in result["boot_wipe_note"]     # signale, sans bloquer
+    assert out.exists()
+
+
+@needs_tools
+def test_a_tampered_archive_is_refused_and_leaves_nothing(tmp_path, monkeypatch):
+    src = build_card(tmp_path)
+    out = tmp_path / "images" / "master.img.zst"
+    out.parent.mkdir()
+    real = capture.verify_image
+
+    def corrupt_then_verify(path, compression, expected, on_read=None):
+        data = bytearray(path.read_bytes())
+        data[len(data) // 2] ^= 0xFF                                              # un octet abime dans l'archive
+        path.write_bytes(bytes(data))
+        return real(path, compression, expected, on_read)
+
+    monkeypatch.setattr(capture, "verify_image", corrupt_then_verify)
+    with pytest.raises(capture.CaptureError):
+        capture.run_capture(source=str(src), work_dir=tmp_path / "images" / ".w", output=out, compression="zst", update=lambda **k: None)
+    assert not out.exists() and not Path(str(out) + ".part").exists()
