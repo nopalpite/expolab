@@ -104,10 +104,13 @@ function renderImages() {
     images.forEach((i) => {
         const del = el("button", { type: "button", class: "secondary small", text: "Supprimer" });
         del.addEventListener("click", () => deleteImage(i.name));
+        // Lien direct : le navigateur gere le telechargement (et sa reprise) lui-meme.
+        const get = el("a", { class: "button secondary small", href: "/api/images/" + encodeURIComponent(i.name) + "/file", download: i.name, text: "Télécharger" });
         const sha = el("td", { class: "mono", text: i.sha256 ? i.sha256.slice(0, 12) + "…" : "—" });
         if (i.sha256) sha.setAttribute("title", i.sha256);
         tbody.appendChild(el("tr", {}, [
-            el("td", { text: i.name }), el("td", { text: formatBytes(i.size) }), el("td", { text: formatTime(i.mtime) }), sha, el("td", {}, [del]),
+            el("td", { text: i.name }), el("td", { text: formatBytes(i.size) }), el("td", { text: formatTime(i.mtime) }), sha,
+            el("td", { class: "row-actions" }, [get, del]),
         ]));
     });
     table.appendChild(tbody);
@@ -224,6 +227,112 @@ async function deleteImage(name) {
     refresh();
 }
 
+// --- import depuis un lien ---------------------------------------------------------------------
+
+let fetchNameAuto = true;   // le nom suit le lien tant qu'il n'a pas ete modifie a la main
+
+function fetchNameFromUrl(url) {
+    try {
+        const last = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
+        return sanitizeName(last);
+    } catch (e) {
+        return "";
+    }
+}
+
+function validateFetch() {
+    const url = $("fetch-url").value.trim();
+    const name = $("fetch-name").value.trim();
+    const running = state.status && state.status.fetch.state === "running";
+    let problem = null;
+    if (!url) problem = "";
+    else if (!/^https?:\/\/[^/]+/i.test(url)) problem = "Lien invalide : une adresse http:// ou https:// est attendue.";
+    else if (!UPLOAD_SUFFIXES.some((s) => name.endsWith(s))) problem = "Le nom doit finir par .img, .img.gz, .img.xz ou .img.zst.";
+    else if (!NAME_RE.test(name) || name.includes("..")) problem = "Nom invalide : lettres, chiffres et . _ - + = @ , uniquement, sans espace ni accent.";
+    else if (state.status && state.status.images.some((i) => i.name === name)) problem = "Une image de ce nom existe déjà : supprime-la d'abord.";
+    $("fetch-btn").disabled = running || problem !== null;
+    if (!running && problem) showStatus($("fetch-status"), problem, "error");
+    else if (!running && problem === "" && state.status && state.status.fetch.state === "idle") $("fetch-status").hidden = true;
+    return problem === null;
+}
+
+async function startFetch() {
+    if (!validateFetch()) return;
+    try {
+        await api("/api/images/fetch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: $("fetch-url").value.trim(), name: $("fetch-name").value.trim(), sha256: $("fetch-sha").value.trim() }),
+        });
+    } catch (err) {
+        showStatus($("fetch-status"), err.message, "error");
+    }
+    refresh();
+}
+
+function renderFetch() {
+    const f = state.status.fetch;
+    const running = f.state === "running";
+    $("fetch-cancel").hidden = !running;
+    $("fetch-bar-wrap").hidden = !running;
+    ["fetch-url", "fetch-name", "fetch-sha"].forEach((id) => { $(id).disabled = running; });
+    const status = $("fetch-status");
+    if (running) {
+        const pct = f.total ? (f.received / f.total) * 100 : 0;
+        $("fetch-bar").style.width = (f.total ? pct.toFixed(1) : 100) + "%";
+        const speed = f.received / Math.max(1, Date.now() / 1000 - f.started);
+        const of = f.total ? ` / ${formatBytes(f.total)} (${pct.toFixed(0)} %)` : "";
+        showStatus(status, `Téléchargement de ${f.name} : ${formatBytes(f.received)}${of}, ${formatBytes(speed)}/s`, "ok");
+    } else if (f.state === "done") {
+        showStatus(status, `${f.name} téléchargée (${formatBytes(f.received)}, SHA-256 ${f.sha256.slice(0, 12)}…).`, "ok");
+    } else if (f.state === "error") {
+        showStatus(status, f.error, "error");
+    }
+    validateFetch();
+}
+
+// --- capture d'une carte ---------------------------------------------------------------------
+
+function renderCapture() {
+    const { devices, job } = state.status;
+    const busy = job.state === "running";
+    const eligible = devices.eligible;
+    $("capture-waiting").hidden = eligible.length > 0;
+    $("capture-form").hidden = eligible.length === 0;
+    const pick = $("capture-device");
+    const key = eligible.map((d) => d.path + d.size).join(",");
+    if (pick.dataset.key !== key) {
+        const previous = pick.value;
+        pick.textContent = "";
+        eligible.forEach((d) => pick.appendChild(el("option", { value: d.path, text: `${d.model || "Carte"} — ${formatBytes(d.size)} (${d.path})` })));
+        if (eligible.some((d) => d.path === previous)) pick.value = previous;
+        pick.dataset.key = key;
+    }
+    $("capture-device-pick").hidden = eligible.length < 2;
+    const name = $("capture-name").value.trim();
+    $("capture-btn").disabled = busy || !eligible.length || !name;
+    $("capture-btn").textContent = busy ? "Une opération est en cours…" : "Capturer la carte";
+}
+
+async function startCapture() {
+    const dev = state.status.devices.eligible.find((d) => d.path === $("capture-device").value) || state.status.devices.eligible[0];
+    if (!dev) return;
+    if (!confirm(`Capturer ${dev.model || "la carte"} (${formatBytes(dev.size)}, ${dev.path}) ?\n\nLa carte est seulement lue. Selon la quantité de données, cela peut prendre de quelques minutes à plus d'une demi-heure.`)) return;
+    $("capture-btn").disabled = true;
+    try {
+        await api("/api/capture", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ device: dev.path, name: $("capture-name").value.trim(), compression: $("capture-compression").value }),
+        });
+        $("capture-status").hidden = true;
+        $("card-panel").scrollIntoView({ behavior: "smooth" });
+    } catch (err) {
+        showStatus($("capture-status"), err.message, "error");
+    }
+    refresh();
+}
+
 async function onHostChange() {
     const hosts = $("host-select");
     const isNew = hosts.value === NEW_MACHINE;
@@ -297,7 +406,8 @@ async function startFlash() {
 }
 
 function renderJob(job) {
-    $("job-title").textContent = `${job.hostname} — ${job.model || job.device}`;
+    const capturing = job.kind === "capture";
+    $("job-title").textContent = capturing ? `Capture de ${job.model || job.device} → ${job.image}` : `${job.hostname} — ${job.model || job.device}`;
     const order = job.steps.map((s) => s.id);
     const current = order.indexOf(job.step);
     const list = $("job-steps");
@@ -314,7 +424,11 @@ function renderJob(job) {
     $("job-message").textContent = job.state === "running" ? (job.message || "") : "";
     $("job-done").hidden = job.state !== "done";
     $("job-error").hidden = job.state !== "error";
-    if (job.state === "done") {
+    $("dismiss-btn").textContent = capturing ? "Fermer" : "Carte suivante";
+    if (job.state === "done" && capturing) {
+        const r = job.result || {};
+        $("done-text").textContent = `Image ${job.image} prête : ${formatBytes(r.bytes)} (${formatBytes(r.used_bytes)} de données, image décompressée ${formatBytes(r.image_bytes)}). Tu peux retirer la carte.`;
+    } else if (job.state === "done") {
         const where = job.ip ? ` — ${job.hostname} / ${job.ip}` : ` — ${job.hostname}`;
         $("done-text").textContent = `Carte prête. Tu peux la retirer${where}.` + (job.result && job.result.dry_run ? " (simulation)" : "");
     }
@@ -395,7 +509,9 @@ async function saveSettings(extra = {}) {
 
 const EVENT_LABELS = {
     "flash-start": "Flash démarré", "flash-done": "Flash terminé", "flash-error": "Échec", settings: "Réglages modifiés",
-    "image-upload": "Image envoyée", "image-delete": "Image supprimée",
+    "image-upload": "Image envoyée", "image-delete": "Image supprimée", "image-fetch": "Image téléchargée depuis un lien",
+    "image-download": "Image récupérée", "capture-start": "Capture démarrée", "capture-done": "Capture terminée",
+    "capture-error": "Échec de capture",
 };
 
 async function loadAudit() {
@@ -424,7 +540,9 @@ async function refresh() {
         $("dry-banner").hidden = !state.status.dry_run;
         renderImages();
         renderCard();
-        running = state.status.job.state === "running";
+        renderCapture();
+        renderFetch();
+        running = state.status.job.state === "running" || state.status.fetch.state === "running";
         if (!running) loadAudit();
     } catch (err) {
         $("ignored-hint").textContent = err.message;
@@ -441,6 +559,15 @@ $("upload-name").addEventListener("input", validateUpload);
 $("upload-btn").addEventListener("click", startUpload);
 $("upload-cancel").addEventListener("click", () => uploadRequest && uploadRequest.abort());
 $("flash-btn").addEventListener("click", startFlash);
+$("capture-btn").addEventListener("click", startCapture);
+$("capture-name").addEventListener("input", () => state.status && renderCapture());
+$("fetch-url").addEventListener("input", () => {
+    if (fetchNameAuto) $("fetch-name").value = fetchNameFromUrl($("fetch-url").value.trim());
+    validateFetch();
+});
+$("fetch-name").addEventListener("input", () => { fetchNameAuto = $("fetch-name").value === ""; validateFetch(); });
+$("fetch-btn").addEventListener("click", startFetch);
+$("fetch-cancel").addEventListener("click", async () => { await api("/api/images/fetch", { method: "DELETE" }); refresh(); });
 $("settings-save").addEventListener("click", () => saveSettings());
 $("wifi-clear").addEventListener("click", () => saveSettings({ clear_wifi: true }));
 $("user-password-clear").addEventListener("click", () => saveSettings({ clear_user_password: true }));

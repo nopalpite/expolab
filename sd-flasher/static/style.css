@@ -130,3 +130,10 @@ td.mono { font-family: ui-monospace, monospace; font-size: 0.82rem; color: var(-
 button.small { padding: 2px 10px; font-size: 0.85rem; }
 .upload-bar { margin-top: 10px; }
 input[type="file"] { color: var(--muted); max-width: 100%; }
+
+/* Lien "Telecharger" presente comme un bouton secondaire */
+a.button { display: inline-block; text-decoration: none; border-radius: 6px; cursor: pointer; }
+a.button.secondary { color: var(--text); border: 1px solid var(--border); }
+a.button.small { padding: 2px 10px; font-size: 0.85rem; }
+a.button:hover { filter: brightness(1.12); }
+td.row-actions { display: flex; gap: 6px; flex-wrap: wrap; }

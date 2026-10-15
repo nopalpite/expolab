@@ -3,6 +3,9 @@
 sur le serveur) et la personnalise pour une machine : hostname, identite unique,
 Wi-Fi et cles SSH. Voir flasher.py pour la logique et les garde-fous.
 
+Aussi : capture d'une carte en image reduite (capture.py), import d'une image depuis
+une URL (telechargee par le serveur) et telechargement d'une image stockee.
+
 Dossiers montes dans le conteneur :
   /images             images master (.img, .img.gz, .img.xz, .img.zst) : envoyees depuis la page
                       (PUT /api/images/<nom>, flux ecrit directement sur disque) ou copiees a la main
@@ -18,10 +21,14 @@ import re
 import shutil
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 
+import capture
 import flasher
 
 app = Flask(__name__)
@@ -50,7 +57,10 @@ DEFAULT_TIMEZONE = "Europe/Paris"
 
 _job_lock = threading.Lock()
 _job: dict = {"state": "idle"}  # idle | running | done | error
-_upload_lock = threading.Lock()  # un seul envoi a la fois
+_upload_lock = threading.Lock()  # un seul envoi a la fois (depuis le navigateur OU depuis une URL)
+_fetch: dict = {"state": "idle"}  # import depuis une URL : idle | running | done | error
+_fetch_cancel = threading.Event()
+FETCH_TIMEOUT = 30   # secondes sans donnees avant d'abandonner un telechargement
 
 
 def settings_path() -> Path:
@@ -217,13 +227,20 @@ def magic_error(name: str, head: bytes) -> str | None:
 
 
 def remove_stale_parts() -> None:
-    """Envois interrompus par un arret du service : les restes .part ne servent a rien."""
+    """Envois ou captures interrompus par un arret du service : les restes ne servent a rien."""
     if IMAGES_DIR.is_dir():
         for part in IMAGES_DIR.glob("*.part"):
             try:
                 part.unlink()
             except OSError:
                 pass
+        for work in IMAGES_DIR.glob(".capture-*"):
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def free_for_images() -> int:
+    """Place utilisable pour une image : le serveur garde toujours UPLOAD_RESERVE."""
+    return max(0, shutil.disk_usage(IMAGES_DIR).free - UPLOAD_RESERVE) if IMAGES_DIR.is_dir() else 0
 
 
 # --- routes ----------------------------------------------------------------------------------
@@ -243,6 +260,7 @@ def api_status():
             "images_free": shutil.disk_usage(IMAGES_DIR).free if IMAGES_DIR.is_dir() else 0,
             "machines": machine_names(),
             "job": _job,
+            "fetch": _fetch,
             "dry_run": DRY_RUN,
             "max_gb": MAX_BYTES // 10**9,
         }
@@ -320,6 +338,195 @@ def api_image_delete(name):
         return jsonify({"error": f"Suppression impossible : {exc}"}), 500
     audit("image-delete", image=name)
     return jsonify({"deleted": name})
+
+
+# --- telechargement d'une image stockee ----------------------------------------------------
+
+@app.route("/api/images/<name>/file")
+def api_image_file(name):
+    """Fichier de l'image, en piece jointe ; reprise possible (requetes partielles)."""
+    if name not in {i["name"] for i in flasher.list_images(IMAGES_DIR)}:   # nom pris dans la liste, jamais un chemin
+        return jsonify({"error": "Image introuvable."}), 404
+    audit("image-download", image=name)
+    return send_file(IMAGES_DIR / name, as_attachment=True, download_name=name, conditional=True,
+                     mimetype="application/octet-stream")
+
+
+# --- import d'une image depuis une URL -----------------------------------------------------------
+
+def _opener() -> urllib.request.OpenerDirector:
+    """HTTP(S) uniquement, redirections comprises : jamais file:// ni ftp:// (pas de
+    FileHandler/FTPHandler, une redirection vers eux echoue)."""
+    opener = urllib.request.OpenerDirector()
+    for handler in (urllib.request.HTTPHandler, urllib.request.HTTPSHandler, urllib.request.HTTPRedirectHandler,
+                    urllib.request.HTTPErrorProcessor, urllib.request.HTTPDefaultErrorHandler):
+        opener.add_handler(handler())
+    return opener
+
+
+def url_error(url: str) -> str | None:
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return "Lien invalide : une adresse http:// ou https:// est attendue."
+    return None
+
+
+def _fetch_update(**fields) -> None:
+    _fetch.update(fields)
+
+
+def _run_fetch(url: str, name: str, expected: str) -> None:
+    target, part = IMAGES_DIR / name, IMAGES_DIR / (name + ".part")
+    try:
+        request_ = urllib.request.Request(url, headers={"User-Agent": "expolab-sd-flasher"})
+        with _opener().open(request_, timeout=FETCH_TIMEOUT) as resp:
+            total = int(resp.headers.get("Content-Length") or 0)
+            _fetch_update(total=total)
+            if total and total > free_for_images():
+                raise flasher.FlashError(f"Espace insuffisant : {total / 1e9:.1f} Go a telecharger, {free_for_images() / 1e9:.1f} Go disponibles.")
+            digest, received = hashlib.sha256(), 0
+            with open(part, "wb") as f:
+                while True:
+                    if _fetch_cancel.is_set():
+                        raise flasher.FlashError("Telechargement annule.")
+                    chunk = resp.read(UPLOAD_CHUNK)
+                    if not chunk:
+                        break
+                    if received == 0:
+                        bad = magic_error(name, chunk[:512])
+                        if bad:
+                            raise flasher.FlashError(bad)
+                    if free_for_images() < len(chunk):   # taille inconnue d'avance : on surveille en cours de route
+                        raise flasher.FlashError("Espace insuffisant sur le serveur : telechargement arrete.")
+                    f.write(chunk)
+                    digest.update(chunk)
+                    received += len(chunk)
+                    _fetch_update(received=received)
+                f.flush()
+                os.fsync(f.fileno())
+        if total and received != total:
+            raise flasher.FlashError("Telechargement interrompu : fichier incomplet.")
+        if received == 0:
+            raise flasher.FlashError("Le lien n'a renvoye aucune donnee.")
+        if expected and digest.hexdigest() != expected:
+            raise flasher.FlashError("L'empreinte SHA-256 ne correspond pas : fichier corrompu ou different de celui attendu.")
+        os.replace(part, target)
+        sha_path(name).write_text(digest.hexdigest() + "\n")
+        audit("image-fetch", image=name, url=url, bytes=received, sha256=digest.hexdigest())
+        _fetch_update(state="done", sha256=digest.hexdigest())
+    except flasher.FlashError as exc:
+        _fetch_update(state="error", error=str(exc))
+    except urllib.error.HTTPError as exc:
+        _fetch_update(state="error", error=f"Le serveur distant a repondu {exc.code} ({exc.reason}).")
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        reason = getattr(exc, "reason", exc)
+        _fetch_update(state="error", error=f"Telechargement impossible : {reason} (le serveur a-t-il acces a internet ?)")
+    finally:
+        part.unlink(missing_ok=True)
+        _upload_lock.release()
+
+
+@app.route("/api/images/fetch", methods=["POST"])
+def api_image_fetch():
+    global _fetch
+    body = request.get_json(silent=True) or {}
+    url, name = str(body.get("url", "")).strip(), str(body.get("name", "")).strip()
+    expected = str(body.get("sha256", "")).strip().lower()
+    error = url_error(url) or image_name_error(name)
+    if error:
+        return jsonify({"error": error}), 400
+    if expected and not SHA256_RE.match(expected):
+        return jsonify({"error": "Empreinte SHA-256 invalide (64 caracteres hexadecimaux)."}), 400
+    if not IMAGES_DIR.is_dir():
+        return jsonify({"error": "Dossier des images introuvable."}), 500
+    if (IMAGES_DIR / name).exists():
+        return jsonify({"error": "Une image de ce nom existe deja : supprime-la d'abord."}), 409
+    if not _upload_lock.acquire(blocking=False):
+        return jsonify({"error": "Un autre envoi est en cours."}), 409
+    _fetch_cancel.clear()
+    _fetch = {"state": "running", "url": url, "name": name, "received": 0, "total": 0, "started": int(time.time())}
+    threading.Thread(target=_run_fetch, args=(url, name, expected), daemon=True).start()
+    return jsonify(_fetch), 202
+
+
+@app.route("/api/images/fetch", methods=["DELETE"])
+def api_image_fetch_cancel():
+    """Annule un telechargement en cours, ou efface le resultat du dernier."""
+    global _fetch
+    if _fetch.get("state") == "running":
+        _fetch_cancel.set()
+        return jsonify({"cancelling": True})
+    _fetch = {"state": "idle"}
+    return jsonify(_fetch)
+
+
+# --- capture d'une carte (image reduite) -------------------------------------------------------
+
+def capture_name(base: str, compression: str) -> tuple[str | None, str | None]:
+    """(nom final, erreur) : le nom saisi + l'extension de la compression choisie."""
+    if compression not in capture.COMPRESSIONS:
+        return None, "Compression inconnue (zst, xz ou none)."
+    base = base.strip()
+    for suffix in flasher.IMAGE_SUFFIXES:   # "rpi-test.img.zst" saisi en entier : on ne double pas l'extension
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    name = base + capture.COMPRESSIONS[compression]
+    return name, image_name_error(name)
+
+
+@app.route("/api/capture", methods=["POST"])
+def api_capture():
+    global _job
+    body = request.get_json(silent=True) or {}
+    device, compression = body.get("device", ""), body.get("compression", "zst")
+    name, error = capture_name(str(body.get("name", "")), compression)
+    if error:
+        return jsonify({"error": error}), 400
+    if (IMAGES_DIR / name).exists():
+        return jsonify({"error": f"Une image {name} existe deja : choisis un autre nom."}), 409
+    eligible = {d["path"]: d for d in read_devices().get("eligible", [])}
+    if device not in eligible:
+        return jsonify({"error": "Carte introuvable ou non eligible (retiree ? deja utilisee par le serveur ?)."}), 409
+    if eligible[device].get("mountpoints"):
+        return jsonify({"error": "Une partition de la carte est montee : demonte-la avant la capture (copie incoherente sinon)."}), 409
+    with _job_lock:
+        if _job.get("state") == "running":
+            return jsonify({"error": "Une operation sur une carte est deja en cours."}), 409
+        _job = {"kind": "capture", "state": "running", "step": "read", "percent": 0, "message": "Demarrage",
+                "device": device, "model": eligible[device]["model"], "image": name, "started": int(time.time()),
+                "steps": [{"id": s, "label": capture.STEP_LABELS[s]} for s in capture.STEPS]}
+    audit("capture-start", device=device, model=eligible[device]["model"], serial=eligible[device]["serial"],
+          image=name, compression=compression, dry_run=DRY_RUN)
+    threading.Thread(target=_run_capture, args=(device, name, compression, eligible[device]), daemon=True).start()
+    return jsonify(_job), 202
+
+
+def _run_capture(device: str, name: str, compression: str, expected: dict) -> None:
+    source = device
+    try:
+        if DRY_RUN:
+            # Simulation : la "carte" est le fichier ecrit par un flash simule sur ce peripherique.
+            source = str(DRY_RUN_DIR / os.path.basename(device))
+            if not os.path.isfile(source):
+                raise capture.CaptureError("Simulation : aucune carte simulee pour ce peripherique (flashe-la d'abord en simulation).")
+        else:
+            now = {d["path"]: d for d in read_devices().get("eligible", [])}.get(device)
+            if not now or now["serial"] != expected["serial"] or now["size"] != expected["size"]:
+                raise capture.CaptureError("La carte a change ou a ete retiree depuis la verification : rien n'a ete lu.")
+        result = capture.run_capture(source=source, work_dir=IMAGES_DIR / f".capture-{name}", output=IMAGES_DIR / name,
+                                     compression=compression, update=_update, free_bytes=free_for_images())
+        sha_path(name).write_text(result["sha256"] + "\n")
+        if not DRY_RUN:
+            flasher.eject(device)
+        _update(state="done", step="checksum", percent=100, message="Image prete", result=result)
+        audit("capture-done", device=device, image=name, bytes=result["bytes"], sha256=result["sha256"])
+    except (capture.CaptureError, flasher.FlashError) as exc:
+        _update(state="error", error=str(exc))
+        audit("capture-error", device=device, image=name, error=str(exc))
+    except Exception as exc:  # jamais de thread silencieusement morte : l'interface doit voir l'echec
+        _update(state="error", error=f"Erreur inattendue : {exc}")
+        audit("capture-error", device=device, image=name, error=repr(exc))
 
 
 @app.route("/api/settings", methods=["GET"])
@@ -431,8 +638,8 @@ def api_flash():
 
     with _job_lock:
         if _job.get("state") == "running":
-            return jsonify({"error": "Un flash est deja en cours."}), 409
-        _job = {"state": "running", "step": "write", "percent": 0, "message": "Demarrage", "hostname": hostname,
+            return jsonify({"error": "Une operation sur une carte est deja en cours."}), 409
+        _job = {"kind": "flash", "state": "running", "step": "write", "percent": 0, "message": "Demarrage", "hostname": hostname,
                 "device": device, "model": eligible[device]["model"], "image": image.name, "started": int(time.time()),
                 "steps": [{"id": s, "label": flasher.STEP_LABELS[s]} for s in flasher.STEPS]}
     audit("flash-start", device=device, model=eligible[device]["model"], serial=eligible[device]["serial"],
@@ -480,7 +687,7 @@ def api_job_dismiss():
     global _job
     with _job_lock:
         if _job.get("state") == "running":
-            return jsonify({"error": "Un flash est en cours."}), 409
+            return jsonify({"error": "Une operation sur une carte est en cours."}), 409
         _job = {"state": "idle"}
     return jsonify(_job)
 

@@ -566,6 +566,27 @@ nom deja pris, espace insuffisant (1 Go est toujours laisse au serveur), envoi
 interrompu, un envoi deja en cours, et un SHA-256 qui ne correspond pas a celui
 fourni. Une image en cours d'ecriture ne peut pas etre supprimee.
 
+**Depuis un lien** (section "Depuis un lien") : le serveur telecharge lui-meme l'image
+(http/https uniquement, redirections comprises mais jamais vers `file://` ou `ftp://`),
+en arriere-plan avec progression et annulation, et avec les memes controles qu'un envoi
+(nom, extension, debut du fichier, place, SHA-256 facultatif, `.part` renomme a la fin).
+**Telecharger** une image stockee : bouton sur chaque ligne de la liste
+(`/api/images/<nom>/file`, reprise possible apres coupure).
+
+**Capturer une carte** (section du meme nom, `sd-flasher/capture.py`) : copie une carte
+Raspberry Pi OS / Ubuntu en image **reduite**, rangee avec les autres images. La carte
+est seulement lue, jamais montee ni modifiee. Pour ne pas demander au serveur la taille
+de la carte entiere : debut de la carte (table MBR, partition de demarrage) copie tel
+quel, puis seuls les blocs utilises de la partition systeme (`e2image -ra`, fichier
+creux), `e2fsck` + `resize2fs -M` sur cette copie, taille corrigee dans la table, et
+compression (`.img.zst` par defaut, `.img.xz` plus petit mais lent, ou `.img`). Place
+necessaire verifiee avant de commencer (~2 x les donnees utilisees). Disposition
+acceptee : MBR, partition systeme ext2/3/4 primaire et derniere ; le reste est refuse.
+Une capture et un flash ne tournent jamais en meme temps (meme lecteur). A savoir : une
+image Ubuntu re-agrandit sa partition au premier demarrage (cloud-init), une image
+Raspberry Pi OS deja demarree non ; pour un master propre, `image/prepare-master.sh`
+sur la machine avant la capture.
+
 `SD_FLASHER_DRY_RUN=1` : mode simulation (ecrit dans des fichiers, aucun disque
 touche) - c'est comme ca que les tests tournent, sans materiel.
 
@@ -772,7 +793,7 @@ vpn-admin/                       # idem - appelle vpn/add-peer.sh et vpn/remove-
 git-mirror/                      # idem, mais fait lui-meme le travail git (clone/fetch), rien a piloter
 ansible-web/                     # idem, mais fait lui-meme le travail ansible-playbook (clone/pull depuis git-mirror, execute)
 ntp-admin/                       # idem - interface du serveur de temps : etat, reglages, sources, machines
-sd-flasher/                      # flasheur de cartes SD : flasher.py (logique, garde-fous), app.py (API), templates/, static/
+sd-flasher/                      # flasheur de cartes SD : flasher.py (logique, garde-fous), capture.py (capture reduite), app.py (API), templates/, static/
 vpn/
   install.sh                  # genere wg0.conf, cree/redeploie les stacks Dockhand "wireguard" et "vpn-admin"
   uninstall.sh                 # arrete la stack (docker compose direct), supprime la config generee

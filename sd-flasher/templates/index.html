@@ -75,6 +75,37 @@
             </div>
         </section>
 
+        <section class="panel" id="capture-panel">
+            <h2>Capturer une carte</h2>
+            <p class="subtitle">Copie une carte (Raspberry Pi OS, Ubuntu) en image <strong>réduite</strong> : seules les données utilisées sont copiées, puis la partition système est ramenée à sa taille minimale. La carte est seulement lue, jamais modifiée. L'image rejoint la liste ci-dessous et peut servir de master.</p>
+            <p class="hint">Pour un master propre, lance d'abord <code>image/prepare-master.sh</code> sur la machine. Une image Raspberry Pi OS déjà démarrée ne ré-agrandit pas seule sa partition après le flash (Ubuntu oui, par cloud-init).</p>
+            <p class="waiting" id="capture-waiting">Aucune carte détectée.</p>
+            <div id="capture-form" hidden>
+                <div class="field" id="capture-device-pick">
+                    <label for="capture-device">Carte</label>
+                    <select id="capture-device"></select>
+                </div>
+                <div class="grid">
+                    <div class="field">
+                        <label for="capture-name">Nom de l'image</label>
+                        <input type="text" id="capture-name" placeholder="rpi-test-2026-10-15" autocomplete="off" spellcheck="false">
+                    </div>
+                    <div class="field">
+                        <label for="capture-compression">Compression</label>
+                        <select id="capture-compression">
+                            <option value="zst">.img.zst — rapide (recommandé)</option>
+                            <option value="xz">.img.xz — plus petit, beaucoup plus lent</option>
+                            <option value="none">.img — sans compression</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="actions">
+                    <button id="capture-btn" type="button" disabled>Capturer la carte</button>
+                </div>
+            </div>
+            <p id="capture-status" class="status" hidden></p>
+        </section>
+
         <section class="panel">
             <h2>Image master</h2>
             <div id="images-body" class="hint">Chargement…</div>
@@ -100,6 +131,27 @@
             </div>
             <div class="bar upload-bar" id="upload-bar-wrap" hidden><div id="upload-bar"></div></div>
             <p id="upload-status" class="status" hidden></p>
+
+            <h3 class="sub">Depuis un lien</h3>
+            <p class="subtitle">Le serveur télécharge lui-même l'image (il doit avoir accès à internet) : inutile de garder la page ouverte.</p>
+            <div class="field">
+                <label for="fetch-url">Lien</label>
+                <input type="url" id="fetch-url" placeholder="https://cdimage.ubuntu.com/…/ubuntu-…-raspi.img.xz" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="field">
+                <label for="fetch-name">Nom enregistré</label>
+                <input type="text" id="fetch-name" placeholder="déduit du lien" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="field">
+                <label for="fetch-sha">SHA-256 attendu</label>
+                <input type="text" id="fetch-sha" placeholder="facultatif : souvent publié à côté de l'image" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="actions">
+                <button id="fetch-btn" type="button" disabled>Télécharger sur le serveur</button>
+                <button id="fetch-cancel" type="button" class="secondary" hidden>Annuler</button>
+            </div>
+            <div class="bar upload-bar" id="fetch-bar-wrap" hidden><div id="fetch-bar"></div></div>
+            <p id="fetch-status" class="status" hidden></p>
         </section>
 
         <section class="panel">
