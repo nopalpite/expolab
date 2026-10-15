@@ -25,6 +25,8 @@ contains "$WORK/root/etc/systemd/timesyncd.conf.d/expolab.conf" "NTP=10.42.0.1"
 mkdir -p "$WORK/root/etc/chrony"
 bash "$SETUP" --stage network --server-ip 10.42.0.1 > /dev/null
 contains "$WORK/root/etc/chrony/sources.d/expolab.sources" "server 10.42.0.1 iburst prefer"
+contains "$WORK/root/etc/chrony/conf.d/expolab.conf" "authselectmode ignore"
+contains "$WORK/root/etc/chrony/conf.d/expolab.conf" "makestep 1 -1"
 [ ! -e "$WORK/root/etc/chrony/chrony.conf" ] || fail "chrony.conf modifie : le serveur du lab doit s'ajouter, pas remplacer"
 
 # Les machines n'ont pas internet : pas de repli en connexion directe, et

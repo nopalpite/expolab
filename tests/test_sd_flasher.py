@@ -930,9 +930,17 @@ def test_time_server_is_added_to_chrony_not_substituted():
     assert ["systemctl", "restart", "chrony"] in user["runcmd"]
 
 
+def test_chrony_accepts_the_unauthenticated_lab_server_and_steps():
+    # Sans authselectmode ignore, chrony attend des sources NTS injoignables en expo (constate sur materiel)
+    _files, user, _net = seed(settings={"time_server": "10.42.0.1"})
+    conf = files_by_path(user)["/etc/chrony/conf.d/expolab.conf"]["content"]
+    assert "authselectmode ignore\n" in conf and "makestep 1 -1\n" in conf
+
+
 def test_no_time_server_means_no_chrony_file():
     _files, user, _net = seed()
     assert "/etc/chrony/sources.d/expolab.sources" not in files_by_path(user)
+    assert "/etc/chrony/conf.d/expolab.conf" not in files_by_path(user)
     assert ["systemctl", "restart", "chrony"] not in user["runcmd"]
 
 
@@ -946,7 +954,7 @@ def test_apt_proxy_is_written_only_when_configured():
 def test_the_other_files_are_kept_when_adding_the_expo_servers():
     _files, user, _net = seed(settings={"time_server": "10.42.0.1", "apt_proxy": "http://10.42.0.1:3142"})
     assert "/etc/apt/apt.conf.d/99-expolab-no-auto-upgrade" in files_by_path(user)
-    assert len(user["write_files"]) == 3
+    assert len(user["write_files"]) == 4
 
 
 @pytest.mark.parametrize("value", ["10.42.0.1", "ntp.interne", "time.example.org", "a"])

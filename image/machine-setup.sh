@@ -60,6 +60,11 @@ EOF
     if [ -d "$ROOT/etc/chrony" ]; then
         install -d "$ROOT/etc/chrony/sources.d"
         printf '# Ecrit par image/machine-setup.sh : serveur de temps du lab\nserver %s iburst prefer\n' "$SERVER_IP" > "$ROOT/etc/chrony/sources.d/expolab.sources"
+        # Le serveur du lab n'est pas authentifie (NTS) : sans authselectmode ignore, chrony l'ecarte
+        # tant que les sources NTS d'Ubuntu ne repondent pas (jamais, en expo). makestep 1 -1 :
+        # toujours corriger d'un saut (horloge fausse de plusieurs semaines au demarrage).
+        install -d "$ROOT/etc/chrony/conf.d"
+        printf '# Ecrit par image/machine-setup.sh\nauthselectmode ignore\nmakestep 1 -1\n' > "$ROOT/etc/chrony/conf.d/expolab.conf"
     fi
     echo "[+] Reseau : proxy apt (cache du serveur, sans repli direct) et serveur de temps -> $SERVER_IP"
 }

@@ -42,6 +42,16 @@ NO_AUTO_UPGRADE_CONF = (
     'APT::Periodic::Unattended-Upgrade "0";\n'
     'APT::Periodic::AutocleanInterval "0";\n'
 )
+# chrony d'Ubuntu 26.04 : ses sources par defaut sont en NTS (authentifiees) et le serveur du lab ne
+# l'est pas. Par defaut (authselectmode mix), chrony met alors le serveur du lab en attente tant
+# qu'aucune source NTS ne repond - jamais, en expo : la machine ne se met pas a l'heure. Et apres
+# 3 mesures, il ne corrige plus que par glissement, inutilisable sur une horloge fausse de plusieurs
+# semaines (pas de pile RTC) : toujours corriger d'un saut.
+CHRONY_EXPO_CONF = (
+    "# Ecrit par sd-flasher : accepter le serveur du lab (non authentifie) et corriger d'un saut.\n"
+    'authselectmode ignore\n'
+    'makestep 1 -1\n'
+)
 HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")   # nom d'hote ou adresse IPv4
 APT_PROXY_RE = re.compile(r"^http://[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:[0-9]{1,5})?$")
 USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")  # noms de comptes Linux usuels
@@ -375,6 +385,11 @@ def render_seed(hostname: str, settings: dict, now: int | None = None, hasher=ha
             "path": "/etc/chrony/sources.d/expolab.sources",
             "permissions": "0644",
             "content": f"# Ecrit par sd-flasher : serveur de temps du lab\nserver {time_server} iburst prefer\n",
+        })
+        user["write_files"].append({
+            "path": "/etc/chrony/conf.d/expolab.conf",
+            "permissions": "0644",
+            "content": CHRONY_EXPO_CONF,
         })
         user["runcmd"].append(["systemctl", "restart", "chrony"])   # prise en compte immediate (sans effet si chrony est absent)
 
