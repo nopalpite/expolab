@@ -41,11 +41,21 @@ EXPO_LAN = ipaddress.ip_network("10.42.0.0/24")
 MAC_RE = re.compile(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$")
 HOSTNAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 
+# Duree de bail ecrite sur CHAQUE reservation : longue, une machine reservee garde son
+# adresse meme si le serveur s'arrete plusieurs heures. La plage dynamique de
+# dnsmasq.conf, elle, a un bail tres court : une carte de remplacement qui a recu une
+# IP de repli (adresse reservee encore tenue par la carte morte) la redemande au bout
+# d'une minute, dnsmasq la refuse et la carte repart sur son adresse reservee - au
+# lieu d'attendre la moitie d'un bail de 12 h (constate : 6 h sur la mauvaise IP).
+RESERVED_LEASE = "12h"
+LEASE_TIME_RE = re.compile(r"^(\d+[smhdw]?|infinite)$")
+
 # Liberation automatique des baux orphelins (voir reconcile_once).
 AUTO_RELEASE = os.environ.get("DNSMASQ_AUTO_RELEASE", "1") != "0"
-RECONCILE_INTERVAL = int(os.environ.get("DNSMASQ_RECONCILE_INTERVAL", "20"))
+RECONCILE_INTERVAL = int(os.environ.get("DNSMASQ_RECONCILE_INTERVAL", "10"))
 STALE_AFTER_CHECKS = 3  # verifications consecutives sans reponse avant liberation
 _events: collections.deque = collections.deque(maxlen=50)
+_reconcile_now = threading.Event()   # reveille la reconciliation des qu'un bail change
 
 
 def reload_dnsmasq() -> tuple[bool, str]:
@@ -99,11 +109,14 @@ def parse_reservation_line(line: str) -> dict | None:
     """Une ligne de dhcp-hostsfile : `mac,ip[,hostname]` (reservation par
     MAC) ou `hostname,ip` (par NOM, sans MAC - dnsmasq l'applique a toute
     machine qui s'annonce sous ce nom, ce qui permet de remplacer une carte
-    sans toucher a la reservation)."""
+    sans toucher a la reservation). Une duree de bail finale (`,12h`) est
+    ignoree ici : elle est reecrite par format_reservation_line."""
     line = line.strip()
     if not line or line.startswith("#"):
         return None
     parts = [p.strip() for p in line.split(",")]
+    if len(parts) > 2 and LEASE_TIME_RE.match(parts[-1]):   # jamais un nom : un nom commence par une lettre
+        parts = parts[:-1]
     if len(parts) < 2:
         return None
     if MAC_RE.match(parts[0].lower()):
@@ -113,8 +126,24 @@ def parse_reservation_line(line: str) -> dict | None:
 
 def format_reservation_line(r: dict) -> str:
     if not r["mac"]:
-        return f"{r['hostname']},{r['ip']}"
-    return f"{r['mac']},{r['ip']},{r['hostname']}" if r["hostname"] else f"{r['mac']},{r['ip']}"
+        line = f"{r['hostname']},{r['ip']}"
+    else:
+        line = f"{r['mac']},{r['ip']},{r['hostname']}" if r["hostname"] else f"{r['mac']},{r['ip']}"
+    return f"{line},{RESERVED_LEASE}"
+
+
+def migrate_reservations() -> bool:
+    """Reservations ecrites avant l'ajout de la duree de bail : sans elle, dnsmasq leur
+    applique le bail COURT de la plage dynamique. Reecrit le fichier une fois (et fait
+    relire dnsmasq). True si quelque chose a change."""
+    if not RESERVATIONS_PATH.exists():
+        return False
+    lines = [ln.strip() for ln in RESERVATIONS_PATH.read_text().splitlines()]
+    expected = [format_reservation_line(r) for r in load_reservations()]
+    if sorted(ln for ln in lines if ln and not ln.startswith("#")) == sorted(expected):
+        return False
+    save_reservations(load_reservations())
+    return True
 
 
 def reservation_id(r: dict) -> str:
@@ -389,7 +418,8 @@ def reconcile_once(misses: dict) -> None:
 def reconcile_loop() -> None:
     misses: dict = {}
     while True:
-        time.sleep(RECONCILE_INTERVAL)
+        _reconcile_now.wait(RECONCILE_INTERVAL)   # toutes les RECONCILE_INTERVAL s, ou aussitot qu'un bail change
+        _reconcile_now.clear()
         try:
             reconcile_once(misses)
         except Exception as exc:  # noqa: BLE001 - ne jamais tuer la boucle
@@ -579,6 +609,8 @@ def monitor_loop() -> None:
                         log_event(kind, message)
                     if set(current) != set(known):
                         last_probe = 0.0   # machine arrivee ou partie : sonder tout de suite
+                    if current != known:
+                        _reconcile_now.set()   # carte de remplacement sur une IP de repli : traitee sans attendre
                 known = current
                 notify_change()
             if now - last_probe >= PRESENCE_INTERVAL:
@@ -624,6 +656,10 @@ def api_topology_stream():
 
 
 if __name__ == "__main__":
+    if migrate_reservations():
+        ok, err = reload_dnsmasq()
+        log_event("reservation" if ok else "erreur",
+                  f"duree de bail {RESERVED_LEASE} ajoutee aux reservations" if ok else f"rechargement dnsmasq echoue : {err}")
     if AUTO_RELEASE:
         threading.Thread(target=reconcile_loop, daemon=True).start()
     threading.Thread(target=monitor_loop, daemon=True).start()

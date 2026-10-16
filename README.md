@@ -488,22 +488,31 @@ les anciennes lignes MAC d'une machine qu'on gere par nom.
 4. ansible-web : lancer le playbook en ciblant la **machine** (le select
    "Cible" propose les tags et les machines de Bastion).
 
-**Liberation automatique des baux.** dnsmasq-admin verifie toutes les 20 s,
-pour chaque reservation par nom, que la machine qui tient l'IP repond encore
-en ARP ; apres 3 verifications sans reponse (~1 min) son bail est libere. La
-carte neuve, qui demarre ensuite, prend directement l'IP. Une machine
-simplement eteinte retrouve elle aussi sa place a son retour. Un detenteur
-qui repond encore n'est **jamais** libere : deux machines vivantes pour un
-meme nom donnent un conflit, signale dans `docker logs expolab-dnsmasq-admin`
-et sur `/api/events`.
+**Liberation automatique des baux.** dnsmasq-admin verifie toutes les 10 s (et
+aussitot qu'un bail change), pour chaque reservation par nom, que la machine qui
+tient l'IP repond encore en ARP ; apres 3 verifications sans reponse (~30 s) son
+bail est libere. La carte neuve, qui demarre ensuite, prend directement l'IP. Une
+machine simplement eteinte retrouve elle aussi sa place a son retour. Un detenteur
+qui repond encore n'est **jamais** libere : deux machines vivantes pour un meme nom
+donnent un conflit, signale dans `docker logs expolab-dnsmasq-admin` et sur
+`/api/events`.
 
-Si la carte neuve est branchee **avant** (moins d'une minute apres la mort),
-elle recoit d'abord une IP de repli ; dnsmasq-admin libere alors les deux
-baux et dnsmasq refuse (NAK) tout renouvellement de l'IP de repli. Le
-**redemarrage de la carte** la remet sur l'IP reservee (verifie dans le lab ;
-le client `systemd-networkd` des machines simulees ne repartait pas seul
-apres le NAK, le comportement sur les vraies machines reste a verifier). Le bouton **Liberer** reste disponible pour forcer a la main, et
-`DNSMASQ_AUTO_RELEASE=0` coupe l'automatisme.
+Si la carte neuve est branchee **avant** cette liberation, elle recoit d'abord une
+IP de repli ; dnsmasq-admin libere alors les deux baux des qu'il le voit. Deux
+durees de bail font le reste :
+- les adresses de la **plage dynamique** (donc l'IP de repli) ont un bail de
+  **2 min** (`dnsmasq.conf`) : la carte la redemande au bout d'une minute, dnsmasq
+  refuse (NAK) et elle repart sur son adresse reservee ;
+- les **reservations** gardent un bail de **12 h**, ecrit sur chaque ligne de
+  `reservations.conf` par dnsmasq-admin (`nom,ip,12h` ; les anciennes lignes sont
+  completees a son demarrage) : une panne du serveur ne leur fait pas perdre leur
+  adresse.
+
+Constate avant ce reglage : une carte arrivee 1 s trop tot est restee 6 h (moitie
+d'un bail de 12 h) sur l'IP de repli. A savoir : un appareil **non reserve** (portable
+d'admin, point d'acces) perd son adresse apres 2 min de panne de dnsmasq - lui donner
+une reservation s'il doit tenir. Le bouton **Liberer** reste disponible pour forcer a
+la main, et `DNSMASQ_AUTO_RELEASE=0` coupe l'automatisme.
 
 Dans Bastion, referencer les machines par **IP** (pas `*.expolab.lan` :
 l'hote et le conteneur ansible-web n'utilisent pas dnsmasq comme resolveur).

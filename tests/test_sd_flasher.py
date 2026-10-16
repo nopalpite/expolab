@@ -376,6 +376,11 @@ def test_status_lists_machines_by_name_only(api):
     assert data["devices"]["eligible"][0]["path"] == "/dev/sda" and data["dry_run"] is True
 
 
+def test_machines_are_read_with_the_lease_time_written_by_dnsmasq_admin(api):
+    api.RESERVATIONS_FILE.write_text("module-02,10.42.0.148,12h\naa:bb:cc:dd:ee:ff,10.42.0.50,par-mac,12h\naa:bb:cc:dd:ee:00,10.42.0.51,12h\n")
+    assert api.client.get("/api/status").get_json()["machines"] == [{"hostname": "module-02", "ip": "10.42.0.148"}]
+
+
 def test_full_flash_through_the_api(api):
     assert flash(api).status_code == 202
     job = wait_done(api)

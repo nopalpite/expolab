@@ -32,8 +32,35 @@ def test_parse_ignores_comments_blank_and_malformed_lines():
 
 
 def test_format_roundtrip():
+    # Chaque reservation est ecrite avec sa duree de bail (longue), relue sans la confondre avec un nom.
     for line in (f"{MAC_A},10.42.0.60,pi-03", f"{MAC_A},10.42.0.60", "pi-03,10.42.0.60"):
-        assert da.format_reservation_line(da.parse_reservation_line(line)) == line
+        written = da.format_reservation_line(da.parse_reservation_line(line))
+        assert written == f"{line},{da.RESERVED_LEASE}"
+        assert da.format_reservation_line(da.parse_reservation_line(written)) == written
+
+
+def test_parse_ignores_the_lease_time_never_takes_it_for_a_name():
+    assert da.parse_reservation_line("pi-03,10.42.0.60,12h") == {"mac": "", "ip": "10.42.0.60", "hostname": "pi-03"}
+    assert da.parse_reservation_line(f"{MAC_A},10.42.0.60,12h") == {"mac": MAC_A, "ip": "10.42.0.60", "hostname": ""}
+    assert da.parse_reservation_line(f"{MAC_A},10.42.0.60,pi-03,infinite")["hostname"] == "pi-03"
+
+
+def test_migration_adds_the_lease_time_once(tmp_path, monkeypatch):
+    path = tmp_path / "reservations.conf"
+    monkeypatch.setattr(da, "RESERVATIONS_PATH", path)
+    assert da.migrate_reservations() is False   # pas de fichier
+    path.write_text("pi-03,10.42.0.60\n" + f"{MAC_A},10.42.0.61,pi-04\n")
+    assert da.migrate_reservations() is True
+    assert path.read_text() == f"pi-03,10.42.0.60,12h\n{MAC_A},10.42.0.61,pi-04,12h\n"
+    assert da.migrate_reservations() is False   # deja fait : rien n'est reecrit, dnsmasq n'est pas relance
+
+
+def test_dynamic_range_lease_is_short_and_reservations_long():
+    # Le correctif du "mauvaise IP pendant 6 h" tient a ces deux reglages ensemble.
+    conf = (Path(__file__).resolve().parent.parent / "server" / "stacks" / "dnsmasq" / "dnsmasq.conf").read_text()
+    ranges = [ln for ln in conf.splitlines() if ln.startswith("dhcp-range=")]
+    assert ranges == ["dhcp-range=10.42.0.100,10.42.0.250,2m"]
+    assert da.RESERVED_LEASE == "12h"
 
 
 @pytest.fixture
@@ -60,7 +87,7 @@ def future():
 def test_create_name_only_reservation(client):
     response = client.post("/api/reservations", json={"ip": "10.42.0.60", "hostname": "pi-03"})
     assert response.status_code == 201
-    assert (client.tmp / "reservations.conf").read_text() == "pi-03,10.42.0.60\n"
+    assert (client.tmp / "reservations.conf").read_text() == "pi-03,10.42.0.60,12h\n"
     assert client.reloads == [1]
 
 
@@ -83,7 +110,7 @@ def test_update_and_delete_name_only_reservation(client):
     client.post("/api/reservations", json={"ip": "10.42.0.60", "hostname": "pi-03"})
     assert client.put("/api/reservations/pi-03", json={"ip": "10.42.0.70", "hostname": "autre"}).status_code == 200
     # le nom est la cle d'une reservation par nom : il ne change pas
-    assert (client.tmp / "reservations.conf").read_text() == "pi-03,10.42.0.70\n"
+    assert (client.tmp / "reservations.conf").read_text() == "pi-03,10.42.0.70,12h\n"
     assert client.delete("/api/reservations/pi-03").status_code == 200
     assert (client.tmp / "reservations.conf").read_text() == ""
     assert client.delete("/api/reservations/pi-03").status_code == 404

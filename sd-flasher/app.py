@@ -161,6 +161,8 @@ def machine_names() -> list[dict]:
             if not line or line.startswith("#"):
                 continue
             parts = [p.strip() for p in line.split(",")]
+            if len(parts) == 3 and re.fullmatch(r"\d+[smhdw]?|infinite", parts[2]):
+                parts = parts[:2]   # duree de bail ecrite par dnsmasq-admin (nom,ip,12h)
             if len(parts) == 2 and not is_mac(parts[0]):
                 machines.append({"hostname": parts[0], "ip": parts[1]})
     except OSError:
