@@ -392,7 +392,25 @@ mDNS) - pose par `network/setup.sh` (relance sans coupure : `nmcli device reappl
 Matter **en Wi-Fi** (2,4 GHz), avec mesure de consommation exposee en Matter ; valider un
 modele avant d'en acheter plusieurs.
 
-En attendant la page d'administration, `sudo ./server/matter.sh` :
+### Page Prises (portail, groupe Infrastructure)
+
+Stack `prises-admin` (Flask, `127.0.0.1:5058`, derriere l'authentification du portail),
+qui ne fait que parler au controleur :
+
+- **Approvisionnement** : code d'appairage saisi ou **QR code scanne** (camera arriere d'un
+  smartphone, webcam d'un PC - `BarcodeDetector` du navigateur, sinon jsQR embarque ; HTTPS
+  requis, d'ou l'acces par le portail), module alimente (reservations DHCP et machines de
+  Bastion), nom. Le Wi-Fi de l'expo (reglages du flasheur) est transmis au controleur avant
+  chaque ajout. Identifier (clignotement), modifier, retirer.
+- **Tableau de bord** : marche/arret, puissance (W), energie du jour, historique 24 h (une
+  mesure par minute en SQLite, 48 h gardees, `server/stacks/prises-admin/data/`), tout
+  allumer / tout eteindre. Association prise -> module dans `data/plugs.json`.
+- **Extinction propre** (par defaut) : `sudo systemctl poweroff` sur la machine du module par
+  SSH (cle d'automatisation d'ansible-web), attente que le SSH ne reponde plus (90 s au plus)
+  + 10 s, puis coupure. **Une machine qui repond encore n'est jamais coupee** : la page le
+  signale et propose "Couper tout de suite".
+
+En ligne de commande, `sudo ./server/matter.sh` :
 
 ```bash
 sudo ./server/matter.sh info              # controleur pret ?

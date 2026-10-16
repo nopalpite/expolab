@@ -1,0 +1,28 @@
+# Stack Dockhand "prises-admin" - page des prises connectees Matter (approvisionnement,
+# tableau de bord). Parle au controleur (stack matter) sur 127.0.0.1:5580, et arrete
+# proprement un module par SSH avant de couper sa prise.
+#
+# network_mode: host : joint le controleur en local et les machines de l'expo en SSH.
+# N'ecoute que sur 127.0.0.1:5058 : joignable uniquement via Caddy, derriere le portail.
+services:
+  prises-admin:
+    build: ${REPO_ROOT}/prises-admin
+    container_name: expolab-prises-admin
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      # Compte des machines (cle d'automatisation, sudo sans mot de passe) : celui cree par
+      # le flasheur, le meme qu'ansible-web.
+      - PRISES_SSH_USER=pi
+    volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
+      # Prise -> module, historique de consommation (non versionne).
+      - ${REPO_ROOT}/server/stacks/prises-admin/data:/data
+      # Modules de l'expo : reservations DHCP (nom -> IP) et machines de Bastion, en lecture seule.
+      - ${REPO_ROOT}/server/stacks/dnsmasq/admin-config:/dnsmasq-admin-config:ro
+      - ${REPO_ROOT}/server/stacks/bastion/config:/bastion-config:ro
+      # Wi-Fi de l'expo transmis aux prises : celui des reglages du flasheur (lecture seule).
+      - ${REPO_ROOT}/server/stacks/sd-flasher/data:/flasher-data:ro
+      # Cle d'automatisation (arret propre des modules), lecture seule.
+      - ${REPO_ROOT}/server/stacks/ansible-web/automation_key:/keys:ro

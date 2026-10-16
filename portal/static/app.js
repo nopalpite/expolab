@@ -219,7 +219,7 @@
       openAlone.addEventListener("click", function () { window.open(svc.url, "_blank", "noopener"); });
       notice.appendChild(openAlone);
 
-      var iframe = el("iframe", { title: svc.title, allow: "fullscreen; clipboard-read; clipboard-write", referrerpolicy: "same-origin" }, []);
+      var iframe = el("iframe", { title: svc.title, allow: "fullscreen; clipboard-read; clipboard-write; camera", referrerpolicy: "same-origin" }, []);
       var timer = setTimeout(function () { notice.hidden = false; }, 12000);
       iframe.addEventListener("load", function () { clearTimeout(timer); notice.hidden = true; });
       iframe.src = svc.url;

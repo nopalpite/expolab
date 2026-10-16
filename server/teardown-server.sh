@@ -36,7 +36,7 @@ if command -v docker &>/dev/null; then
     TMP_COMPOSE="$(mktemp)"
     trap 'rm -f "$TMP_COMPOSE"' EXIT
 
-    for stack in dnsmasq dnsmasq-admin caddy caddy-admin bastion dashboard git-mirror apt-cache apt-cache-admin ntp ntp-admin ansible-web sd-flasher matter; do
+    for stack in dnsmasq dnsmasq-admin caddy caddy-admin bastion dashboard git-mirror apt-cache apt-cache-admin ntp ntp-admin ansible-web sd-flasher matter prises-admin; do
         compose_file="$SCRIPT_DIR/stacks/$stack/docker-compose.yml"
         if [ -f "$compose_file" ]; then
             echo "[+] Arret de la stack '$stack'..."

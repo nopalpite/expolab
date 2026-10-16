@@ -91,3 +91,4 @@ server/stacks/ntp/run/
 
 # Etat Matter (fabric, prises approvisionnees) : propre a chaque installation, a sauvegarder.
 server/stacks/matter/data/
+server/stacks/prises-admin/data/

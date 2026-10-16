@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>expolab · Prises</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Prises connectées</h1>
+  <p class="subtitle">Prises Matter (Wi-Fi) de l'expo, pilotées depuis le serveur, sans cloud.</p>
+  <p id="ctl-error" class="status status-error" hidden></p>
+  <nav class="tabs">
+    <a href="#tableau" class="tab" data-tab="tableau">Tableau de bord</a>
+    <a href="#ajout" class="tab" data-tab="ajout">Approvisionnement</a>
+  </nav>
+</header>
+
+<!-- ================= TABLEAU DE BORD ================= -->
+<main id="tab-tableau" hidden>
+  <div class="kpis">
+    <div class="kpi"><b id="k-power">–</b><span>consommation actuelle de l'expo</span></div>
+    <div class="kpi"><b id="k-energy">–</b><span>aujourd'hui</span></div>
+    <div class="kpi"><b id="k-on">–</b><span>modules allumés</span></div>
+    <div class="kpi"><b id="k-down">–</b><span>prise(s) injoignable(s)</span></div>
+  </div>
+  <div class="bulk">
+    <button type="button" id="all-on">Tout allumer</button>
+    <button type="button" id="all-off" class="secondary">Tout éteindre proprement</button>
+    <span class="hint">Ouverture / fermeture de l'expo. Chaque action groupée demande confirmation.</span>
+  </div>
+  <p id="no-plug" class="empty" hidden>Aucune prise pour l'instant : ajoute-en une dans l'onglet Approvisionnement.</p>
+  <div id="tiles" class="tiles"></div>
+</main>
+
+<!-- ================= APPROVISIONNEMENT ================= -->
+<main id="tab-ajout" hidden>
+  <div class="grid2">
+    <section class="panel">
+      <h2>Ajouter une prise</h2>
+      <p class="hint">Branche la prise neuve près du serveur (Bluetooth, quelques mètres), en mode appairage, puis saisis ou scanne son code.</p>
+      <div class="field">
+        <label for="code">Code d'appairage (11 chiffres, ou texte du QR code « MT:… »)</label>
+        <div class="row nowrap">
+          <input type="text" id="code" autocomplete="off" spellcheck="false" placeholder="3497-011-2332">
+          <button type="button" id="scan-btn" class="secondary" title="Caméra arrière sur smartphone, webcam sur PC">📷 Scanner</button>
+        </div>
+        <span id="code-hint" class="hint"></span>
+      </div>
+      <div class="field">
+        <label for="module">Module alimenté par cette prise</label>
+        <select id="module"></select>
+      </div>
+      <div class="field">
+        <label for="name">Nom de la prise (facultatif)</label>
+        <input type="text" id="name" autocomplete="off" spellcheck="false" placeholder="prise-module">
+      </div>
+      <div class="row">
+        <button type="button" id="add-btn" disabled>Ajouter la prise</button>
+        <span class="hint">Le Wi-Fi de l'expo (réglages du flasheur) lui est transmis automatiquement.</span>
+      </div>
+      <p id="add-error" class="status status-error" hidden></p>
+    </section>
+
+    <section class="panel" id="job-panel" hidden>
+      <h2 id="job-title">Ajout en cours</h2>
+      <ol class="steps" id="job-steps"></ol>
+      <p class="hint" id="job-hint"></p>
+      <p id="job-error" class="status status-error" hidden></p>
+      <button type="button" id="job-close" class="secondary" hidden>Fermer</button>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Prises approvisionnées</h2>
+    <div id="ctl-info" class="hint"></div>
+    <table>
+      <thead><tr><th>Prise</th><th>Module</th><th>État</th><th>Mesure</th><th>Modèle / version</th><th></th></tr></thead>
+      <tbody id="plug-rows"></tbody>
+    </table>
+    <p class="hint">« Identifier » fait clignoter la prise. « Retirer » la désappaire ; elle devra être réinitialisée pour être réutilisée.</p>
+  </section>
+</main>
+
+<!-- ================= FENETRES ================= -->
+<div class="modal" id="scan-modal" hidden>
+  <div class="dialog">
+    <h2>Scanner le QR code de la prise</h2>
+    <div class="viewfinder"><video id="video" playsinline muted></video><div class="frame-guide"></div></div>
+    <p class="hint" id="scan-hint">Présente le QR code de la prise (sur la prise, son emballage ou sa notice) devant la caméra.</p>
+    <div class="row end">
+      <button type="button" id="cam-switch" class="secondary" hidden>Changer de caméra</button>
+      <button type="button" id="scan-cancel" class="secondary">Annuler</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="off-modal" hidden>
+  <div class="dialog">
+    <h2 id="off-title"></h2>
+    <label class="choice rec"><input type="radio" name="off-mode" value="clean" checked> <b>Arrêt propre puis coupure (recommandé)</b>
+      <span class="hint">La machine s'éteint d'abord par SSH, puis la prise est coupée. Évite d'abîmer la carte SD.</span></label>
+    <label class="choice"><input type="radio" name="off-mode" value="now"> <b>Couper tout de suite</b>
+      <span class="hint">Comme débrancher la prise : à réserver à une machine bloquée.</span></label>
+    <p class="hint" id="off-noip" hidden>Aucune adresse connue pour ce module : la prise sera coupée sans arrêt préalable.</p>
+    <div class="row end"><button type="button" class="secondary" data-close>Annuler</button><button type="button" id="off-go">Éteindre</button></div>
+  </div>
+</div>
+
+<div class="modal" id="confirm-modal" hidden>
+  <div class="dialog">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-text" class="hint"></p>
+    <div class="row end"><button type="button" class="secondary" data-close>Annuler</button><button type="button" id="confirm-go">Confirmer</button></div>
+  </div>
+</div>
+
+<div class="modal" id="edit-modal" hidden>
+  <div class="dialog">
+    <h2>Modifier la prise</h2>
+    <div class="field"><label for="edit-name">Nom</label><input type="text" id="edit-name" autocomplete="off"></div>
+    <div class="field"><label for="edit-module">Module</label><select id="edit-module"></select></div>
+    <div class="row end"><button type="button" class="secondary" data-close>Annuler</button><button type="button" id="edit-go">Enregistrer</button></div>
+  </div>
+</div>
+
+<script src="/static/vendor/jsQR.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

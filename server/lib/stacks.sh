@@ -1,7 +1,7 @@
 # Creation/redeploiement des stacks via l'API Dockhand - source par
 # deploy-server.sh. Necessite dockhand_upsert_stack (dockhand-api.sh).
 
-SERVER_STACKS="dnsmasq dnsmasq-admin caddy caddy-admin bastion dashboard git-mirror apt-cache apt-cache-admin ntp ntp-admin ansible-web sd-flasher matter"
+SERVER_STACKS="dnsmasq dnsmasq-admin caddy caddy-admin bastion dashboard git-mirror apt-cache apt-cache-admin ntp ntp-admin ansible-web sd-flasher matter prises-admin"
 
 deploy_stacks() {
     echo "[+] Creation/redeploiement des stacks applicatives via l'API Dockhand..."

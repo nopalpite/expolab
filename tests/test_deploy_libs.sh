@@ -38,7 +38,7 @@ REPO_ROOT="$WORK"
 SERVICES="$SCRIPT_DIR/services.yaml"
 export REPO_ROOT SCRIPT_DIR SERVICES
 
-for lib in tls secrets credentials automation-key ansible-web sd-flasher apt-cache ntp matter lan-isolation dashboard dnsmasq stacks summary; do
+for lib in tls secrets credentials automation-key ansible-web sd-flasher apt-cache ntp matter prises lan-isolation dashboard dnsmasq stacks summary; do
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/lib/$lib.sh"
 done
@@ -103,6 +103,8 @@ contains "$SCRIPT_DIR/stacks/ansible-web/ansible-web.env" "ANSIBLE_REMOTE_USER=p
 [ -f "$SCRIPT_DIR/stacks/ansible-web/automation_key/automation_ed25519" ] || fail "cle SSH non generee"
 
 setup_matter
+setup_prises
+[ -d "$SCRIPT_DIR/stacks/prises-admin/data" ] || fail "dossier de la stack prises-admin non cree"
 [ -d "$SCRIPT_DIR/stacks/matter/data" ] || fail "dossier de la stack matter non cree"
 
 setup_ntp
