@@ -66,7 +66,14 @@ SEED_FILES = ("user-data", "network-config", "meta-data")
 # image capturee garderait l'ancienne valeur (voir remove_unset_files). Memes chemins dans
 # image/prepare-master.sh --remove-accounts.
 APT_PROXY_FILE = "/etc/apt/apt.conf.d/01expolab-proxy"
-TIME_SERVER_FILES = ("/etc/chrony/sources.d/expolab.sources", "/etc/chrony/conf.d/expolab.conf")  # graine cloud-init (NoCloud) sur la partition de demarrage
+TIME_SERVER_FILES = ("/etc/chrony/sources.d/expolab.sources", "/etc/chrony/conf.d/expolab.conf")
+# Installation des paquets demandes (voir packages_files) : script, service, et marque "fait".
+PACKAGES_SCRIPT = "/usr/local/sbin/expolab-install-packages"
+PACKAGES_UNIT = "/etc/systemd/system/expolab-packages.service"
+PACKAGES_WANTS = "/etc/systemd/system/multi-user.target.wants/expolab-packages.service"
+PACKAGES_DONE = "/var/lib/expolab/packages.done"
+PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]{1,62}$")   # nom de paquet Debian
+MAX_PACKAGES = 100  # graine cloud-init (NoCloud) sur la partition de demarrage
 
 
 class FlashError(Exception):
@@ -326,6 +333,56 @@ def check_settings(settings: dict) -> None:
     timezone = settings.get("timezone") or ""
     if timezone and not TIMEZONE_RE.match(timezone):
         raise FlashError("Fuseau horaire invalide (attendu : Europe/Paris).")
+    packages = settings.get("packages") or []
+    if len(packages) > MAX_PACKAGES:
+        raise FlashError(f"Trop de paquets ({MAX_PACKAGES} au maximum).")
+    for name in packages:
+        if not PACKAGE_RE.match(name):
+            raise FlashError(f"Nom de paquet invalide : {name[:40]} (minuscules, chiffres, + . -).")
+    if packages and not apt_proxy:
+        raise FlashError("Installer des paquets demande le proxy apt (http://10.42.0.1:3142) : les machines n'ont pas acces a internet.")
+
+
+def packages_files(packages: list[str]) -> list[dict]:
+    """Script + service systemd qui installent `packages` via apt - donc par le cache du serveur
+    (proxy apt). Pas le module `packages` de cloud-init : il tourne au PREMIER demarrage seulement,
+    or une carte en Wi-Fi n'a pas encore de reseau a ce moment (redemarrage unique, voir
+    power_state), et un echec n'est jamais retente. Le service, lui, attend le reseau, reessaie
+    toutes les minutes et a chaque demarrage jusqu'a reussir, puis ne se relance plus jamais."""
+    script = (
+        "#!/bin/sh\n"
+        "# Ecrit par sd-flasher : installe les paquets demandes au flash, par le cache apt du serveur.\n"
+        "# Lance par expolab-packages.service jusqu'a reussite ; journal : journalctl -u expolab-packages\n"
+        "set -u\n"
+        f"STAMP={PACKAGES_DONE}\n"
+        "[ -f \"$STAMP\" ] && exit 0\n"
+        "export DEBIAN_FRONTEND=noninteractive\n"
+        "dpkg --configure -a || true   # une installation interrompue (redemarrage) est reprise\n"
+        "apt-get update -q || exit 1\n"
+        f"apt-get install -y -q --no-install-recommends {' '.join(packages)} || exit 1\n"
+        "mkdir -p \"$(dirname \"$STAMP\")\" && date > \"$STAMP\"\n"
+        "echo \"expolab : paquets installes\"\n"
+    )
+    unit = (
+        "# Ecrit par sd-flasher : voir " + PACKAGES_SCRIPT + "\n"
+        "[Unit]\n"
+        "Description=expolab : installation des paquets demandes au flash (cache apt du serveur)\n"
+        "Wants=network-online.target\n"
+        "After=network-online.target cloud-final.service\n"
+        f"ConditionPathExists=!{PACKAGES_DONE}\n"
+        "StartLimitIntervalSec=0\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"ExecStart={PACKAGES_SCRIPT}\n"
+        "Restart=on-failure\n"
+        "RestartSec=60\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+    return [{"path": PACKAGES_SCRIPT, "permissions": "0755", "content": script},
+            {"path": PACKAGES_UNIT, "permissions": "0644", "content": unit}]
 
 
 def hash_password(password: str, run=subprocess.run) -> str:
@@ -420,6 +477,14 @@ def render_seed(hostname: str, settings: dict, now: int | None = None, hasher=ha
             "permissions": "0644",
             "content": f'Acquire::http::Proxy "{apt_proxy}";\n',
         })
+
+    # Paquets demandes : installes par un service qui reessaie (voir packages_files), demarre sans
+    # attendre (--no-block : il est ordonne apres cloud-final, qui execute justement ce runcmd).
+    packages = settings.get("packages") or []
+    if packages:
+        user["write_files"] += packages_files(packages)
+        user["runcmd"] += [["systemctl", "daemon-reload"],
+                           ["systemctl", "enable", "--now", "--no-block", "expolab-packages.service"]]
 
     # Clavier et langue : l'image Ubuntu est en qwerty / anglais, inutilisable au clavier
     # branche sur une machine de l'expo. Modules keyboard et locale de cloud-init.
@@ -579,12 +644,17 @@ def remove_unset_files(root: Path, settings: dict) -> list[str]:
         unset.append(APT_PROXY_FILE)
     if not (settings.get("time_server") or "").strip():
         unset += TIME_SERVER_FILES
+    # Paquets : la marque "deja installe" d'une image capturee empecherait l'installation demandee
+    # maintenant ; sans paquets demandes, le service de l'image n'a plus rien a faire.
+    unset.append(PACKAGES_DONE)
+    if not settings.get("packages"):
+        unset += [PACKAGES_SCRIPT, PACKAGES_UNIT, PACKAGES_WANTS]
     removed = []
     for rel in unset:
         path = root / rel.lstrip("/")
         if path.is_file() or path.is_symlink():   # un lien n'est jamais suivi : on retire le lien lui-meme
             path.unlink()
-            removed.append(f"{rel} retire (reglage vide)")
+            removed.append(f"{rel} retire" + ("" if rel == PACKAGES_DONE else " (reglage vide)"))
     return removed
 
 

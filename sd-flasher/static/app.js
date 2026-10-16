@@ -369,6 +369,7 @@ async function refreshSummary() {
         list.appendChild(el("li", { text: data.keyboard_layout ? `Clavier : ${data.keyboard_layout}` : "Clavier de l'image (qwerty)" }));
         list.appendChild(el("li", { text: data.locale ? `Langue : ${data.locale}` : "Langue de l'image (anglais)" }));
         list.appendChild(el("li", { text: data.timezone ? `Fuseau horaire : ${data.timezone}` : "Fuseau de l'image (UTC)" }));
+        if (data.packages.length) list.appendChild(el("li", { text: `Paquets installés au démarrage (cache apt, réessai jusqu'à réussite) : ${data.packages.join(", ")}` }));
         list.appendChild(el("li", { text: "Mises à jour automatiques désactivées (elles bloquent apt au premier démarrage)" }));
         list.appendChild(el("li", { text: "Éjection de la carte à la fin" }));
         box.hidden = false;
@@ -474,6 +475,7 @@ async function loadSettings() {
     $("keyboard-layout").value = s.keyboard_layout;
     $("locale").value = s.locale;
     $("timezone").value = s.timezone;
+    $("packages").value = s.packages.join("\n");
     $("user-name").value = s.user_name;
     $("user-password").value = "";
     $("user-password").placeholder = s.has_user_password ? "(inchangé)" : "";
@@ -496,6 +498,7 @@ async function saveSettings(extra = {}) {
                 use_automation_key: $("use-automation").checked,
                 time_server: $("time-server").value, apt_proxy: $("apt-proxy").value,
                 keyboard_layout: $("keyboard-layout").value, locale: $("locale").value, timezone: $("timezone").value,
+                packages: $("packages").value,
                 user_name: $("user-name").value, user_password: $("user-password").value,
                 user_sudo: $("user-sudo").checked, user_pwauth: $("user-pwauth").checked,
                 extra_keys: $("extra-keys").value.split("\n"), ...extra,

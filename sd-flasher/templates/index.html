@@ -176,6 +176,11 @@
                 <div class="field"><label for="time-server">Serveur de temps</label><input type="text" id="time-server" placeholder="10.42.0.1" autocomplete="off" spellcheck="false"></div>
                 <div class="field"><label for="apt-proxy">Proxy apt (cache du serveur)</label><input type="text" id="apt-proxy" placeholder="http://10.42.0.1:3142" autocomplete="off" spellcheck="false"></div>
             </div>
+            <div class="field stacked">
+                <label for="packages">Paquets à installer (un par ligne)</label>
+                <textarea id="packages" rows="3" spellcheck="false" placeholder="avahi-daemon"></textarea>
+            </div>
+            <p class="hint">Installés au démarrage de la machine par le cache apt (le proxy apt est donc obligatoire). En cas d'échec — Wi-Fi pas encore actif, serveur éteint, paquet absent — nouvel essai chaque minute et à chaque démarrage jusqu'à réussite. Suivi sur la machine : <code>journalctl -u expolab-packages</code>. Le premier téléchargement d'un paquet passe par internet (serveur connecté), les suivants viennent du cache.</p>
 
             <h3 class="sub">Clavier, langue et heure</h3>
             <p class="hint">Pour un clavier branché sur la machine. Vide = réglage de l'image (qwerty, anglais, UTC).</p>

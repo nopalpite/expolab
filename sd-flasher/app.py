@@ -99,7 +99,15 @@ def load_settings() -> dict:
         "keyboard_layout": data.get("keyboard_layout", DEFAULT_KEYBOARD),
         "locale": data.get("locale", DEFAULT_LOCALE),
         "timezone": data.get("timezone", DEFAULT_TIMEZONE),
+        "packages": [p for p in data.get("packages", []) if isinstance(p, str)],
     }
+
+
+def parse_packages(value) -> list[str]:
+    """Liste de paquets depuis la page (texte, un par ligne ou separes par des espaces/virgules)
+    ou depuis l'API (liste) : sans doublon, dans l'ordre saisi."""
+    items = value.replace(",", " ").split() if isinstance(value, str) else [str(v).strip() for v in value or []]
+    return list(dict.fromkeys(p.strip().lower() for p in items if p.strip()))
 
 
 def automation_key() -> str:
@@ -119,7 +127,8 @@ def effective_settings() -> dict:
     return {"wifi_ssid": s["wifi_ssid"], "wifi_psk": s["wifi_psk"], "wifi_country": s["wifi_country"], "authorized_keys": keys,
             "user_name": s["user_name"], "user_password": s["user_password"], "user_sudo": s["user_sudo"], "user_pwauth": s["user_pwauth"],
             "time_server": s["time_server"], "apt_proxy": s["apt_proxy"],
-            "keyboard_layout": s["keyboard_layout"], "locale": s["locale"], "timezone": s["timezone"]}
+            "keyboard_layout": s["keyboard_layout"], "locale": s["locale"], "timezone": s["timezone"],
+            "packages": s["packages"]}
 
 
 def save_settings(data: dict) -> None:
@@ -146,6 +155,7 @@ def public_settings() -> dict:
         "keyboard_layout": s["keyboard_layout"],
         "locale": s["locale"],
         "timezone": s["timezone"],
+        "packages": s["packages"],
         "extra_keys": s["extra_keys"],
         "use_automation_key": s["use_automation_key"],
         "automation_key_available": bool(automation_key()),
@@ -564,6 +574,7 @@ def api_settings_put():
         "keyboard_layout": str(body.get("keyboard_layout", current["keyboard_layout"])).strip().lower(),
         "locale": str(body.get("locale", current["locale"])).strip(),
         "timezone": str(body.get("timezone", current["timezone"])).strip(),
+        "packages": parse_packages(body.get("packages", current["packages"])),
     }
     if body.get("wifi_psk"):  # vide = on garde l'actuel
         new["wifi_psk"] = str(body["wifi_psk"])
@@ -578,7 +589,7 @@ def api_settings_put():
                                 "authorized_keys": new["extra_keys"], "user_name": new["user_name"],
                                 "user_password": new["user_password"], "time_server": new["time_server"],
                                 "apt_proxy": new["apt_proxy"], "keyboard_layout": new["keyboard_layout"],
-                                "locale": new["locale"], "timezone": new["timezone"]})
+                                "locale": new["locale"], "timezone": new["timezone"], "packages": new["packages"]})
     except flasher.FlashError as exc:
         return jsonify({"error": str(exc)}), 400
     save_settings(new)
@@ -614,6 +625,7 @@ def api_preview():
             "keyboard_layout": eff["keyboard_layout"] or None,
             "locale": eff["locale"] or None,
             "timezone": eff["timezone"] or None,
+            "packages": eff["packages"],
             "reboot": bool(eff["wifi_ssid"]),  # redemarrage unique au premier demarrage (active le Wi-Fi)
             "warnings": warnings,
             "keys": len(eff["authorized_keys"]),

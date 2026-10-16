@@ -7,6 +7,8 @@ import importlib.util
 import json
 import lzma
 import os
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -707,7 +709,6 @@ def test_unsafe_names_stay_refused(api, name):
 
 # --- compte utilisateur -----------------------------------------------------------------------------------
 
-import shutil  # noqa: E402
 
 needs_openssl = pytest.mark.skipif(shutil.which("openssl") is None, reason="openssl absent")
 FAKE_HASH = "$6$sel$" + "a" * 86
@@ -1063,3 +1064,86 @@ def test_seed_writes_the_files_that_remove_unset_files_knows():
     _files, user, _net = seed(settings={"apt_proxy": "http://10.42.0.1:3142", "time_server": "10.42.0.1"})
     paths = {f["path"] for f in user["write_files"]}
     assert {flasher.APT_PROXY_FILE, *flasher.TIME_SERVER_FILES} <= paths
+
+
+# --- paquets installes au demarrage (via le cache apt) ------------------------------------------
+
+PROXY = "http://10.42.0.1:3142"
+
+
+def test_seed_installs_packages_through_a_retrying_service():
+    _files, user, _net = seed(settings={"apt_proxy": PROXY, "packages": ["avahi-daemon", "htop"]})
+    files = files_by_path(user)
+    script = files[flasher.PACKAGES_SCRIPT]
+    assert script["permissions"] == "0755" and script["content"].startswith("#!/bin/sh\n")
+    assert "apt-get install -y -q --no-install-recommends avahi-daemon htop" in script["content"]
+    unit = files[flasher.PACKAGES_UNIT]["content"]
+    for line in ("After=network-online.target cloud-final.service", f"ConditionPathExists=!{flasher.PACKAGES_DONE}",
+                 "Restart=on-failure", "StartLimitIntervalSec=0", "WantedBy=multi-user.target"):
+        assert line in unit
+    assert ["systemctl", "enable", "--now", "--no-block", "expolab-packages.service"] in user["runcmd"]
+    assert "packages" not in user   # jamais le module cloud-init, qui ne reessaie pas
+
+
+def test_no_packages_no_service():
+    _files, user, _net = seed(settings={"apt_proxy": PROXY})
+    assert flasher.PACKAGES_UNIT not in files_by_path(user)
+    assert not any("expolab-packages.service" in " ".join(c) for c in user["runcmd"])
+
+
+@pytest.mark.parametrize("settings, message", [
+    ({"packages": ["htop"]}, "proxy apt"),
+    ({"apt_proxy": PROXY, "packages": ["htop; rm -rf /"]}, "invalide"),
+    ({"apt_proxy": PROXY, "packages": ["Htop"]}, "invalide"),
+    ({"apt_proxy": PROXY, "packages": ["-y"]}, "invalide"),
+    ({"apt_proxy": PROXY, "packages": [f"p{i:03d}" for i in range(101)]}, "Trop"),
+])
+def test_package_settings_are_checked(settings, message):
+    with pytest.raises(flasher.FlashError, match=message):
+        flasher.check_settings(settings)
+
+
+def test_api_packages_from_text_deduplicated_and_shown_in_preview(api):
+    res = api.client.put("/api/settings", json={"apt_proxy": PROXY, "packages": "avahi-daemon\nHTOP, htop  avahi-daemon\n"})
+    assert res.status_code == 200 and res.get_json()["packages"] == ["avahi-daemon", "htop"]
+    assert api.client.get("/api/preview?hostname=module-02").get_json()["packages"] == ["avahi-daemon", "htop"]
+    assert api.client.put("/api/settings", json={"apt_proxy": "", "packages": "htop"}).status_code == 400
+    assert api.client.put("/api/settings", json={"apt_proxy": PROXY, "packages": ""}).get_json()["packages"] == []
+
+
+def test_flash_cleans_package_service_and_stamp_of_a_captured_image(tmp_path):
+    root = tmp_path / "racine"
+    for rel in (flasher.PACKAGES_SCRIPT, flasher.PACKAGES_UNIT, flasher.PACKAGES_WANTS, flasher.PACKAGES_DONE):
+        (root / rel.lstrip("/")).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel.lstrip("/")).write_text("de l'image")
+    # Paquets demandes : seule la marque "deja fait" part (sinon l'installation ne se ferait jamais).
+    flasher.remove_unset_files(root, {"apt_proxy": PROXY, "time_server": "x", "packages": ["htop"]})
+    assert not (root / flasher.PACKAGES_DONE.lstrip("/")).exists()
+    assert (root / flasher.PACKAGES_UNIT.lstrip("/")).exists()
+    # Aucun paquet demande : le service de l'image part aussi.
+    flasher.remove_unset_files(root, {"apt_proxy": PROXY, "time_server": "x"})
+    for rel in (flasher.PACKAGES_SCRIPT, flasher.PACKAGES_UNIT, flasher.PACKAGES_WANTS):
+        assert not (root / rel.lstrip("/")).exists()
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("sh") is None, reason="sh Linux requis")
+def test_install_script_retries_until_success_then_stops(tmp_path):
+    files = {f["path"]: f["content"] for f in flasher.packages_files(["avahi-daemon", "htop"])}
+    stamp = tmp_path / "expolab" / "packages.done"
+    script = tmp_path / "install.sh"
+    script.write_text(files[flasher.PACKAGES_SCRIPT].replace(flasher.PACKAGES_DONE, str(stamp)))
+    fakes = tmp_path / "bin"
+    fakes.mkdir()
+    log = tmp_path / "calls.log"
+    for tool in ("apt-get", "dpkg"):
+        (fakes / tool).write_text(f'#!/bin/sh\necho "{tool} $*" >> "{log}"\n[ "$1" = install ] && [ -f "{tmp_path}/fail" ] && exit 100\nexit 0\n')
+        (fakes / tool).chmod(0o755)
+    env = dict(os.environ, PATH=f"{fakes}:{os.environ['PATH']}")
+    (tmp_path / "fail").write_text("")   # cache injoignable : l'installation echoue
+    assert subprocess.run(["sh", str(script)], env=env).returncode != 0 and not stamp.exists()
+    (tmp_path / "fail").unlink()
+    assert subprocess.run(["sh", str(script)], env=env).returncode == 0 and stamp.exists()
+    assert "apt-get install -y -q --no-install-recommends avahi-daemon htop" in log.read_text()
+    calls = log.read_text().count("\n")
+    assert subprocess.run(["sh", str(script)], env=env).returncode == 0
+    assert log.read_text().count("\n") == calls   # deja fait : apt n'est plus jamais appele

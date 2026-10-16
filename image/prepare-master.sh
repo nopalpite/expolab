@@ -22,7 +22,7 @@
 # --remove-accounts (copie HORS LIGNE uniquement, PREPARE_MASTER_ROOT obligatoire) : supprime
 #   aussi tous les comptes ordinaires (UID 1000 a 59999) avec leur dossier personnel, leurs droits
 #   sudo poses par cloud-init, les cles SSH de root, et les fichiers que le flasheur ecrit lui-meme
-#   (proxy apt, serveur de temps). Utilise par le flasheur a la capture d'une carte : l'image se
+#   (proxy apt, serveur de temps, service d'installation des paquets ; les paquets restent). Utilise par le flasheur a la capture d'une carte : l'image se
 #   comporte alors comme une Ubuntu neuve, le flasheur cree le compte et applique TOUS ses reglages.
 #
 # Variables (surtout pour les tests) : PREPARE_MASTER_ROOT (prefixe toutes les ecritures),
@@ -193,7 +193,9 @@ if [ "$REMOVE_ACCOUNTS" -eq 1 ]; then
     # Fichiers que le flasheur ecrit (sd-flasher/flasher.py) : il les reecrit a chaque flash ; laisses
     # dans l'image, ils garderaient l'ancienne valeur si le reglage est vide au flash suivant.
     rm -f "$ROOT/etc/apt/apt.conf.d/01expolab-proxy" \
-          "$ROOT/etc/chrony/sources.d/expolab.sources" "$ROOT/etc/chrony/conf.d/expolab.conf"
+          "$ROOT/etc/chrony/sources.d/expolab.sources" "$ROOT/etc/chrony/conf.d/expolab.conf" \
+          "$ROOT/usr/local/sbin/expolab-install-packages" "$ROOT/etc/systemd/system/expolab-packages.service" \
+          "$ROOT/etc/systemd/system/multi-user.target.wants/expolab-packages.service" "$ROOT/var/lib/expolab/packages.done"
 fi
 
 # --- fin : compte temporaire et extinction ---------------------------------------------------------

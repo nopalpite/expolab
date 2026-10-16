@@ -139,6 +139,11 @@ echo 'Acquire::http::Proxy "http://10.42.0.1:3142";' > "$R/etc/apt/apt.conf.d/01
 echo "server 10.42.0.1 iburst prefer" > "$R/etc/chrony/sources.d/expolab.sources"
 echo "authselectmode ignore" > "$R/etc/chrony/conf.d/expolab.conf"
 echo "courrier" > "$R/var/mail/pi"; echo "application" > "$R/srv/expo/app"
+mkdir -p "$R/usr/local/sbin" "$R/etc/systemd/system/multi-user.target.wants" "$R/var/lib/expolab"
+for f in usr/local/sbin/expolab-install-packages etc/systemd/system/expolab-packages.service \
+         etc/systemd/system/multi-user.target.wants/expolab-packages.service var/lib/expolab/packages.done; do
+    echo "flasheur" > "$R/$f"
+done
 
 bash "$SCRIPT" --yes --keep-user --remove-accounts > "$WORK/out.log" 2>&1 || fail "--remove-accounts en echec : $(cat "$WORK/out.log")"
 grep -q "Comptes ordinaires supprimes : pi" "$WORK/out.log" || fail "comptes supprimes non annonces"
@@ -156,6 +161,10 @@ grep -qx "sudo:\*::" "$R/etc/gshadow" && grep -qx "staff:\*::" "$R/etc/gshadow" 
 [ ! -e "$R/root/.ssh/authorized_keys" ] || fail "cles SSH de root conservees"
 [ ! -e "$R/etc/apt/apt.conf.d/01expolab-proxy" ] && [ ! -e "$R/etc/chrony/sources.d/expolab.sources" ] && [ ! -e "$R/etc/chrony/conf.d/expolab.conf" ] \
     || fail "fichiers du flasheur conserves"
+for f in usr/local/sbin/expolab-install-packages etc/systemd/system/expolab-packages.service \
+         etc/systemd/system/multi-user.target.wants/expolab-packages.service var/lib/expolab/packages.done; do
+    [ ! -e "$R/$f" ] || fail "service des paquets conserve : $f"
+done
 ! grep -rq "HACHE\|cle-personnelle\|cle-root" "$R" || fail "un secret de compte est encore dans la copie"
 bash "$SCRIPT" --yes --keep-user --remove-accounts > /dev/null 2>&1 || fail "--remove-accounts : second passage en echec"
 
