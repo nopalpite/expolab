@@ -571,7 +571,11 @@ est remplace - sans compte, personne ne peut se connecter ; la page avertit),
 Wi-Fi, **serveur de temps du lab** (chrony, ajoute aux sources d'Ubuntu), **proxy apt** (vide par
 defaut : injoignable hors expo), **clavier, langue et fuseau horaire** (azerty `fr`, `fr_FR.UTF-8` et `Europe/Paris`
 par defaut, modules `keyboard`, `locale` et `timezone` de cloud-init ; l'image Ubuntu
-est en qwerty et en UTC) et cles (la cle d'automatisation Ansible est injectee par defaut) ; le mot de passe Wi-Fi reste sur
+est en qwerty et en UTC), **paquets a installer** (installes au demarrage de la machine par
+le cache apt - proxy apt obligatoire - par un petit service `expolab-packages` qui reessaie
+chaque minute et a chaque demarrage jusqu'a reussite, puis ne se relance plus ; pas le module
+`packages` de cloud-init, qui ne tourne qu'au premier demarrage, quand une carte en Wi-Fi n'a
+pas encore de reseau, et ne reessaie jamais) et cles (la cle d'automatisation Ansible est injectee par defaut) ; le mot de passe Wi-Fi reste sur
 le serveur (`data/settings.json`, mode 600), jamais renvoye au navigateur.
 
 **Garde-fous** (verifies a chaque flash, pas seulement a l'affichage) : seuls les
