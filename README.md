@@ -26,7 +26,7 @@ passerelle ni IPv6. Un pont plutot que l'adresse posee sur la carte : le nom
 `expo-lan` ne depend pas de la carte (dnsmasq, le VPN et les pages
 d'administration n'ont rien a savoir), et un pont garde son adresse **meme
 cable debranche** - dnsmasq demarre et le DNS des clients VPN reste joignable,
-switch eteint. Le script refuse une carte Wi-Fi, la carte qui porte la route
+switch eteint. Le script refuse une carte Wi-Fi (sauf `--wifi-ap`, voir plus bas), la carte qui porte la route
 par defaut (ce serait couper l'acces du serveur), et une carte deja utilisee
 par une autre connexion (sauf `--force`).
 
@@ -373,7 +373,21 @@ adresse. Tous les services demarrent, mais **aucune machine ne peut s'y connecte
 refuse `--sans-carte` si une carte est deja rattachee (il ne coupe jamais un reseau
 d'expo en service : `network/teardown.sh` d'abord), et n'accepte pas les deux a la
 fois. Il ne contourne pas la protection de la route par defaut : donner `eth0` a
-l'expo couperait l'acces du serveur, ce qui reste refuse. `deploy-server.sh`
+l'expo couperait l'acces du serveur, ce qui reste refuse.
+
+**Reseau de l'expo en Wi-Fi (point d'acces)** : avec une antenne USB Wi-Fi en plus du
+Wi-Fi qui donne internet au serveur, `sudo EXPO_WIFI_PASSWORD=... ./install.sh wlan1
+--wifi-ap` (ou `network/setup.sh wlan1 --wifi-ap`) fait de l'antenne un **point d'acces** dont
+les clients sont sur le pont `expo-lan` : memes adresses `10.42.0.x`, meme DHCP/DNS/heure que
+sur un switch. SSID `EXPO_WIFI_SSID` (defaut `expolab`), canal `EXPO_WIFI_CHANNEL` (1 a 11,
+defaut 6), WPA2, **2,4 GHz seulement**. Le mot de passe (8 a 63 caracteres) est lu dans
+`EXPO_WIFI_PASSWORD` ou demande au terminal : il n'est jamais ecrit dans le depot, seul
+NetworkManager le garde (lisible par root). Relance sans mot de passe : le point d'acces
+configure est conserve ; avec un mot de passe, il est recree. Passer d'un point d'acces a un
+switch (ou l'inverse) : relancer `setup.sh` avec l'autre interface, le profil est remplace.
+Limites : debit d'une antenne 802.11n monoflux (~150 Mb/s au mieux), peu de clients
+simultanes selon le pilote (a verifier avec la puce), et le reseau de l'expo devient joignable
+par quiconque a le mot de passe Wi-Fi. `deploy-server.sh`
 est idempotent aussi : relancez-le apres avoir modifie `server/services.yaml`
 ou le code d'une application pour regenerer le Caddyfile et redeployer les
 stacks concernees via l'API Dockhand.

@@ -10,7 +10,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 fail() { echo "ECHEC : $*" >&2; exit 1; }
 
-mkdir -p "$WORK/bin" "$WORK/cons" "$WORK/sys/eth0" "$WORK/sys/eth1" "$WORK/sys/wlan0/wireless"
+mkdir -p "$WORK/bin" "$WORK/cons" "$WORK/sys/eth0" "$WORK/sys/eth1" "$WORK/sys/wlan0/wireless" "$WORK/sys/wlan1/wireless"
 export PATH="$WORK/bin:$PATH" NM_DIR="$WORK/cons" NM_LOG="$WORK/nmcli.log" SYS_CLASS_NET="$WORK/sys"
 
 printf '#!/usr/bin/env bash\necho 0\n' > "$WORK/bin/id"
@@ -31,6 +31,12 @@ case "$*" in
     "-g connection.interface-name connection show "*)
         f="$NM_DIR/$5"; [ -f "$f" ] || exit 10
         grep -o 'ifname [^ ]*\|connection.interface-name [^ ]*' "$f" | tail -1 | cut -d' ' -f2 ;;
+    "-g connection.type connection show "*)
+        f="$NM_DIR/$5"; [ -f "$f" ] || exit 10
+        if grep -q 'add type wifi' "$f"; then echo 802-11-wireless; else echo 802-3-ethernet; fi ;;
+    "-g 802-11-wireless.ssid connection show "*)
+        f="$NM_DIR/$5"; [ -f "$f" ] || exit 10
+        sed -n 's/.* ssid \([^ ]*\) .*/\1/p' "$f" ;;
     "-g GENERAL.CONNECTION device show "*) echo "${FAKE_DEV_CON:-}" ;;
     "connection show "*) [ -f "$NM_DIR/$3" ] ;;
     "connection add "*)
@@ -123,5 +129,56 @@ grep -q "teardown.sh" "$WORK/out.log" || fail "teardown non suggere"
 
 bash "$REPO/network/teardown.sh" > /dev/null
 [ -z "$(ls "$NM_DIR")" ] || fail "connexions restantes apres teardown (sans carte)"
+
+# --wifi-ap : l'antenne Wi-Fi devient un point d'acces rattache au pont.
+PW="mdp-de-test-12"
+unset EXPO_WIFI_PASSWORD EXPO_WIFI_SSID EXPO_WIFI_CHANNEL
+# Refus : carte Ethernet, pas d'interface, --sans-carte, Wi-Fi sans --wifi-ap, route par defaut (wlan0 ici n'en a pas,
+# donc on teste le refus d'une carte Wi-Fi en mode Ethernet).
+if EXPO_WIFI_PASSWORD="$PW" bash "$SETUP" eth1 --wifi-ap > "$WORK/out.log" 2>&1; then fail "--wifi-ap sur une carte Ethernet accepte"; fi
+grep -q "pas une carte Wi-Fi" "$WORK/out.log" || fail "refus d'une carte Ethernet non explique"
+if EXPO_WIFI_PASSWORD="$PW" bash "$SETUP" --wifi-ap > "$WORK/out.log" 2>&1; then fail "--wifi-ap sans interface accepte"; fi
+if EXPO_WIFI_PASSWORD="$PW" bash "$SETUP" wlan1 --wifi-ap --sans-carte > "$WORK/out.log" 2>&1; then fail "--wifi-ap + --sans-carte acceptes"; fi
+if bash "$SETUP" wlan1 > "$WORK/out.log" 2>&1; then fail "carte Wi-Fi acceptee sans --wifi-ap"; fi
+grep -q -- "--wifi-ap" "$WORK/out.log" || fail "--wifi-ap non suggere pour une carte Wi-Fi"
+# Mot de passe absent (pas de terminal) ou trop court : refus AVANT toute modification.
+if bash "$SETUP" wlan1 --wifi-ap < /dev/null > "$WORK/out.log" 2>&1; then fail "point d'acces sans mot de passe"; fi
+grep -q "EXPO_WIFI_PASSWORD" "$WORK/out.log" || fail "mot de passe absent non explique"
+if EXPO_WIFI_PASSWORD="court" bash "$SETUP" wlan1 --wifi-ap > "$WORK/out.log" 2>&1; then fail "mot de passe trop court accepte"; fi
+if EXPO_WIFI_PASSWORD="$PW" EXPO_WIFI_CHANNEL=14 bash "$SETUP" wlan1 --wifi-ap > "$WORK/out.log" 2>&1; then fail "canal 14 accepte"; fi
+[ -z "$(ls "$NM_DIR")" ] || fail "connexion creee malgre un refus (point d'acces)"
+
+# Cas nominal : SSID par defaut, WPA2, canal 6, port du pont, mot de passe jamais affiche.
+: > "$NM_LOG"
+EXPO_WIFI_PASSWORD="$PW" bash "$SETUP" wlan1 --wifi-ap > "$WORK/out.log" 2>&1 || fail "--wifi-ap a echoue"
+grep -q "type wifi ifname wlan1 con-name expo-lan-port ssid expolab " "$NM_DIR/expo-lan-port" || fail "SSID par defaut absent"
+grep -q "802-11-wireless.mode ap" "$NM_DIR/expo-lan-port" || fail "mode point d'acces absent"
+grep -q "802-11-wireless.band bg 802-11-wireless.channel 6" "$NM_DIR/expo-lan-port" || fail "bande/canal incorrects"
+grep -q "802-11-wireless-security.key-mgmt wpa-psk" "$NM_DIR/expo-lan-port" || fail "WPA2 absent"
+grep -q "master expo-lan slave-type bridge" "$NM_DIR/expo-lan-port" || fail "antenne non rattachee au pont"
+! grep -q "$PW" "$WORK/out.log" || fail "mot de passe affiche"
+grep -q "Wi-Fi 'expolab'\|reseau Wi-Fi 'expolab'" "$WORK/out.log" || fail "SSID non annonce"
+
+# Relance sans mot de passe : conserve, rien n'est recree.
+: > "$NM_LOG"
+bash "$SETUP" wlan1 --wifi-ap < /dev/null > "$WORK/out.log" 2>&1 || fail "relance sans mot de passe a echoue"
+! grep -q "connection add\|connection delete" "$NM_LOG" || fail "point d'acces recree malgre la relance sans mot de passe"
+grep -q "conserve" "$WORK/out.log" || fail "conservation non signalee"
+
+# Relance avec mot de passe et autre SSID/canal : le profil est recree.
+: > "$NM_LOG"
+EXPO_WIFI_PASSWORD="autre-mdp-123" EXPO_WIFI_SSID=salle2 EXPO_WIFI_CHANNEL=11 bash "$SETUP" wlan1 --wifi-ap > /dev/null 2>&1 || fail "reconfiguration a echoue"
+grep -q "^connection delete expo-lan-port$" "$NM_LOG" || fail "ancien profil non supprime"
+grep -q "ssid salle2 " "$NM_DIR/expo-lan-port" || fail "nouveau SSID absent"
+grep -q "channel 11" "$NM_DIR/expo-lan-port" || fail "nouveau canal absent"
+
+# Retour a un switch Ethernet : le profil Wi-Fi est remplace par un profil Ethernet.
+: > "$NM_LOG"
+FAKE_NO_CARRIER=1 bash "$SETUP" eth1 > /dev/null 2>&1 || fail "retour a Ethernet a echoue"
+grep -q "type ethernet ifname eth1 con-name expo-lan-port" "$NM_DIR/expo-lan-port" || fail "profil Ethernet absent"
+! grep -q "type wifi" "$NM_DIR/expo-lan-port" || fail "profil Wi-Fi conserve"
+
+bash "$REPO/network/teardown.sh" > /dev/null
+[ -z "$(ls "$NM_DIR")" ] || fail "connexions restantes apres teardown (Wi-Fi)"
 
 echo "OK : reseau de l'expo (pont expo-lan)"
