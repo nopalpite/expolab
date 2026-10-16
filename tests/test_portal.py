@@ -267,6 +267,18 @@ def test_operator_reaches_only_the_exploitation_pages(portal, tmp_path):
     assert b"drawer" not in home.data   # pas le tiroir des services de l'administrateur
 
 
+def test_admin_sees_the_operator_view_without_switching_account(portal, tmp_path):
+    auth = logged_in(portal)
+    assert b'href="/exploitation"' in portal.client.get("/", **auth).data
+    page = portal.client.get("/exploitation", **auth)
+    assert page.status_code == 200 and b"Plans des salles" in page.data and b"Administration" in page.data
+    set_operator(portal, tmp_path)
+    op = portal.client.get("/exploitation", **op_cookie(portal))
+    assert op.status_code == 200 and b"Administration" not in op.data   # pas de lien d'administration pour lui
+    res = portal.client.get("/exploitation")
+    assert res.status_code == 302 and "/login" in res.headers["Location"]
+
+
 def test_admin_is_unchanged(portal, tmp_path):
     set_operator(portal, tmp_path)
     auth = logged_in(portal)

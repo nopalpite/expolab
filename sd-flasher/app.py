@@ -54,6 +54,9 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 MAGIC = {".gz": b"\x1f\x8b", ".xz": b"\xfd7zXZ\x00", ".zst": b"\x28\xb5\x2f\xfd"}  # debut des archives reconnues
 UPLOAD_CHUNK = 4 * 1024 * 1024
 DEFAULT_TIME_SERVER = "10.42.0.1"   # serveur de temps du lab (stack ntp) : sans danger ailleurs, chrony garde ses autres sources
+# Cache apt du serveur : les machines de l'expo n'ont pas internet, c'est leur seul acces aux paquets
+# (et l'installation de paquets au flash l'exige). A vider pour une carte destinee a un autre reseau.
+DEFAULT_APT_PROXY = "http://10.42.0.1:3142"
 DEFAULT_KEYBOARD = "fr"   # azerty
 DEFAULT_LOCALE = "fr_FR.UTF-8"
 DEFAULT_TIMEZONE = "Europe/Paris"
@@ -95,7 +98,7 @@ def load_settings() -> dict:
         "user_sudo": data.get("user_sudo", True),
         "user_pwauth": data.get("user_pwauth", True),
         "time_server": data.get("time_server", DEFAULT_TIME_SERVER),
-        "apt_proxy": data.get("apt_proxy", ""),
+        "apt_proxy": data.get("apt_proxy", DEFAULT_APT_PROXY),
         "keyboard_layout": data.get("keyboard_layout", DEFAULT_KEYBOARD),
         "locale": data.get("locale", DEFAULT_LOCALE),
         "timezone": data.get("timezone", DEFAULT_TIMEZONE),

@@ -598,8 +598,8 @@ neuves). L'agrandissement du systeme de fichiers au premier demarrage est fait p
 cloud-init (`growpart`/`resizefs`). Reglages dans la page : compte (a definir : le
 `user-data` par defaut de l'image Ubuntu, qui creait le compte et son mot de passe,
 est remplace - sans compte, personne ne peut se connecter ; la page avertit),
-Wi-Fi, **serveur de temps du lab** (chrony, ajoute aux sources d'Ubuntu), **proxy apt** (vide par
-defaut : injoignable hors expo), **clavier, langue et fuseau horaire** (azerty `fr`, `fr_FR.UTF-8` et `Europe/Paris`
+Wi-Fi, **serveur de temps du lab** (chrony, ajoute aux sources d'Ubuntu), **proxy apt** (prerempli :
+`http://10.42.0.1:3142`, le cache du serveur ; a vider pour une carte destinee a un autre reseau), **clavier, langue et fuseau horaire** (azerty `fr`, `fr_FR.UTF-8` et `Europe/Paris`
 par defaut, modules `keyboard`, `locale` et `timezone` de cloud-init ; l'image Ubuntu
 est en qwerty et en UTC), **paquets a installer** (installes au demarrage de la machine par
 le cache apt - proxy apt obligatoire - par un petit service `expolab-packages` qui reessaie

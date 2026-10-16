@@ -1015,11 +1015,11 @@ def test_api_defaults_to_french_keyboard_and_locale(api):
     assert api.client.put("/api/settings", json={"locale": "francais"}).status_code == 400
 
 
-def test_api_defaults_to_the_lab_time_server_and_no_proxy(api):
+def test_api_defaults_to_the_lab_time_server_and_apt_cache(api):
     s = api.client.get("/api/settings").get_json()
-    assert s["time_server"] == "10.42.0.1" and s["apt_proxy"] == ""
+    assert s["time_server"] == "10.42.0.1" and s["apt_proxy"] == "http://10.42.0.1:3142"
     p = api.client.get("/api/preview?hostname=module-02").get_json()
-    assert p["time_server"] == "10.42.0.1" and p["apt_proxy"] is None
+    assert p["time_server"] == "10.42.0.1" and p["apt_proxy"] == "http://10.42.0.1:3142"
 
 
 def test_api_saves_and_clears_both(api):
@@ -1035,7 +1035,7 @@ def test_api_refuses_invalid_values_and_keeps_the_previous_ones(api):
     assert api.client.put("/api/settings", json={"time_server": "mauvais nom"}).status_code == 400
     assert api.client.put("/api/settings", json={"apt_proxy": "10.42.0.1:3142"}).status_code == 400
     s = api.client.get("/api/settings").get_json()
-    assert s["time_server"] == "10.42.0.1" and s["apt_proxy"] == ""
+    assert s["time_server"] == "10.42.0.1" and s["apt_proxy"] == "http://10.42.0.1:3142"
 
 
 @needs_openssl

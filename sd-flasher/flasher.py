@@ -504,8 +504,8 @@ def render_seed(hostname: str, settings: dict, now: int | None = None, hasher=ha
         })
         user["runcmd"].append(["systemctl", "restart", "chrony"])   # prise en compte immediate (sans effet si chrony est absent)
 
-    # Proxy apt (cache du serveur) : vide par defaut - injoignable hors du reseau de l'expo, il
-    # casserait apt sur un autre reseau.
+    # Proxy apt (cache du serveur) : prerempli par defaut dans la page (les machines de l'expo n'ont
+    # que lui). Vide = pas de proxy : pour une carte destinee a un autre reseau, ou il serait injoignable.
     apt_proxy = (settings.get("apt_proxy") or "").strip()
     if apt_proxy:
         user["write_files"].append({

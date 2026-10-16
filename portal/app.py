@@ -419,9 +419,23 @@ def index():
     if session is None:
         return redirect("/login", 302)
     if session[1] == OPERATOR:
-        return render_template("exploitant.html", user=session[0], domain=DOMAIN,
-                               flasher_url=f"https://{OPERATOR_SERVICE}.{DOMAIN}/exploitation")
+        return exploitant_page(session)
     return render_template("index.html", user=creds[0], domain=DOMAIN, has_ca=TLS_MODE == "internal")
+
+
+def exploitant_page(session: tuple[str, str]):
+    return render_template("exploitant.html", user=session[0], domain=DOMAIN, is_admin=session[1] == ADMIN,
+                           flasher_url=f"https://{OPERATOR_SERVICE}.{DOMAIN}/exploitation")
+
+
+@app.route("/exploitation")
+def exploitation():
+    """La vue de l'exploitant, telle qu'il la voit - aussi pour l'administrateur (sans changer de
+    compte), avec un lien de retour vers l'administration."""
+    session = current_session()
+    if session is None:
+        return redirect(f"/login?next={quote('/exploitation', safe='')}", 302)
+    return exploitant_page(session)
 
 
 # --- plans des salles (administrateur et exploitant) ----------------------------
