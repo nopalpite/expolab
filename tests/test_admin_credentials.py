@@ -147,3 +147,31 @@ def test_without_bastion_installed_nothing_is_redeployed(server):
     assert run(server, calls) == ["Dockhand", "Portail et interfaces d'administration"]
     assert ("bastion",) not in calls.events
     assert not (server / "stacks" / "bastion" / "bastion.env").exists()
+
+
+# --- compte exploitant ----------------------------------------------------------------------
+
+def test_operator_account_written_in_place_and_cleared(server):
+    path = ac.operator_env_path(server)
+    path.parent.mkdir(parents=True)
+    path.write_text("")
+    inode = os.stat(path).st_ino
+    ac.set_operator(server, "exploitant", "Mdp-exploit-1", rounds=4)
+    text = path.read_text()
+    assert text.startswith("OPERATOR_USER=exploitant\nOPERATOR_HASH=$2")
+    assert "Mdp-exploit-1" not in text   # jamais le mot de passe en clair
+    assert bcrypt.checkpw(b"Mdp-exploit-1", ac.env_value(path, "OPERATOR_HASH").encode())
+    assert os.stat(path).st_ino == inode and ac.operator_user(server) == "exploitant"
+    ac.clear_operator(server)
+    assert path.read_text() == "" and ac.operator_user(server) == "" and os.stat(path).st_ino == inode
+
+
+@pytest.mark.parametrize("user, password, message", [
+    ("admin", "Mdp-exploit-1", "different"),
+    ("x", "Mdp-exploit-1", "Identifiant"),
+    ("exploitant", "court", "court"),
+])
+def test_operator_account_refusals(server, user, password, message):
+    with pytest.raises(ac.CredentialsError, match=message):
+        ac.set_operator(server, user, password, rounds=4)
+    assert not ac.operator_env_path(server).exists()

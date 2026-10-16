@@ -23,6 +23,13 @@ services:
       - /etc/localtime:/etc/localtime:ro
       # Identifiants d'administration (utilisateur + hash bcrypt), en lecture seule.
       - ${REPO_ROOT}/server/stacks/caddy/auth.env:/config/auth.env:ro
+      # Compte exploitant (identifiant + hash bcrypt), gere depuis caddy-admin ; toujours present.
+      - ${REPO_ROOT}/server/stacks/dashboard/operator.env:/config/operator.env:ro
+      # Plans des salles de l'interface d'exploitation : donnees de Bastion, en LECTURE SEULE
+      # (salles, positions des machines, images des plans) - voir portal/plans.py. Des dossiers,
+      # pas des fichiers : Bastion remplace son machines.yaml a chaque modification.
+      - ${REPO_ROOT}/server/stacks/bastion/config:/bastion-config:ro
+      - ${REPO_ROOT}/server/stacks/bastion/maps:/bastion-maps:ro
       # Copie de server/services.yaml tenue a jour sur place par deploy-server.sh
       # et caddy-admin (un fichier remplace par renommage resterait perime
       # dans un bind-mount de fichier).

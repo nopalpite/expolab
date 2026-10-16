@@ -64,6 +64,7 @@ vpn/wireguard/config/
 server/stacks/dashboard/dashboard.env
 server/stacks/dashboard/portal.env
 server/stacks/dashboard/services.yaml
+server/stacks/dashboard/operator.env
 
 # Bytecode Python (genere localement par un simple `python -m py_compile`
 # de verification syntaxique, jamais volontairement).

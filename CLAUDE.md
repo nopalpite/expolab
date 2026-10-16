@@ -94,6 +94,10 @@ de secret ici (ni mot de passe, ni jeton, ni clé privée).
   `e2image` (blocs utilisés seulement : rien ne fuit) mais la partition de démarrage
   FAT telle quelle : elle y met à zéro les clusters libres. Toute capture manuelle
   (`dd`, PiShrink) laisse le mot de passe Wi-Fi de la graine dans l'image.
+- **Compte exploitant :** tout nouvel acces qu'on veut lui ouvrir passe par
+  `OPERATOR_PATHS` / `operator_may_reach` du portail (liste blanche) ; par defaut il n'a acces
+  a rien. Ne jamais lui faire confiance pour l'image ou les reglages du flash : le serveur les
+  impose (`/api/exploitation/flash`).
 - **API Dockhand :** `/api/` sur le port 3000, avec l'en-tête
   `Authorization: Bearer dh_...` (jeton dans `server/dockhand.env`). Les opérations
   longues renvoient un `jobId` ; avec l'en-tête `Accept: application/json`, le

@@ -550,5 +550,36 @@ def api_credentials_update():
     return jsonify({"ok": True, "steps": steps})
 
 
+# --- Compte exploitant (interface d'exploitation seulement) -------------------------
+# Le mot de passe ACTUEL de l'administrateur est exige, comme pour le couple d'administration.
+
+@app.route("/api/operator", methods=["GET"])
+def api_operator_get():
+    return jsonify({"user": admin_credentials.operator_user(SERVER_DIR)})
+
+
+@app.route("/api/operator", methods=["POST", "DELETE"])
+def api_operator_update():
+    body = request.get_json(force=True, silent=True) or {}
+    ip = _client_ip()
+    now = time.time()
+    recent = [t for t in _cred_failures.get(ip, []) if now - t < CRED_WINDOW]
+    _cred_failures[ip] = recent
+    if len(recent) >= CRED_LIMIT:
+        return jsonify({"error": "Trop de tentatives. Reessaie dans quelques minutes."}), 429
+    if not admin_credentials.verify_current(SERVER_DIR, body.get("current_password") or ""):
+        recent.append(now)
+        return jsonify({"error": "Mot de passe administrateur incorrect."}), 403
+    _cred_failures.pop(ip, None)
+    if request.method == "DELETE":
+        admin_credentials.clear_operator(SERVER_DIR)
+        return jsonify({"ok": True, "user": ""})
+    try:
+        admin_credentials.set_operator(SERVER_DIR, (body.get("user") or "").strip(), body.get("password") or "")
+    except admin_credentials.CredentialsError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "user": admin_credentials.operator_user(SERVER_DIR)})
+
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5052)

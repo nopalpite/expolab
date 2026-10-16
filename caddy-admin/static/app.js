@@ -378,6 +378,55 @@ document.getElementById("cred-form").addEventListener("submit", async (e) => {
 });
 
 loadCredentialsUser();
+
+// --- Compte exploitant --------------------------------------------------------------
+
+async function loadOperator() {
+    try {
+        const data = await (await fetch("/api/operator")).json();
+        document.getElementById("op-current").textContent = data.user
+            ? `Compte exploitant actuel : ${data.user}.` : "Aucun compte exploitant.";
+        document.getElementById("op_user").value = data.user || "";
+        document.getElementById("op-delete-btn").hidden = !data.user;
+    } catch (e) {
+        /* laisse tel quel */
+    }
+}
+
+async function sendOperator(method, body) {
+    const status = document.getElementById("op-status");
+    status.hidden = false;
+    try {
+        const res = await fetch("/api/operator", {
+            method, headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ current_password: document.getElementById("op_admin").value, ...body }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Erreur");
+        status.className = "status status-ok";
+        status.textContent = data.user ? `Compte exploitant ${data.user} enregistre.` : "Compte exploitant supprime.";
+        ["op_admin", "op_password"].forEach((id) => { document.getElementById(id).value = ""; });
+        loadOperator();
+    } catch (err) {
+        status.className = "status status-error";
+        status.textContent = err.message;
+    }
+}
+
+document.getElementById("op-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    sendOperator("POST", { user: document.getElementById("op_user").value.trim(), password: document.getElementById("op_password").value });
+});
+document.getElementById("op-delete-btn").addEventListener("click", () => {
+    if (!document.getElementById("op_admin").value) {
+        const status = document.getElementById("op-status");
+        status.hidden = false; status.className = "status status-error";
+        status.textContent = "Saisis le mot de passe administrateur actuel pour supprimer le compte.";
+        return;
+    }
+    if (confirm("Supprimer le compte exploitant ? Les sessions exploitant ouvertes sont fermees.")) sendOperator("DELETE", {});
+});
+loadOperator();
 if (location.hash === "#identifiants") {
     document.getElementById("identifiants").scrollIntoView();
 }

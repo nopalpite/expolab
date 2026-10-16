@@ -106,3 +106,23 @@ def test_concurrent_change_is_refused(admin):
     finally:
         admin._cred_lock.release()
     assert post(admin).status_code == 200  # le verrou est bien libere ensuite
+
+
+# --- compte exploitant ----------------------------------------------------------------------
+
+def test_operator_account_needs_the_admin_password(admin):
+    body = {"current_password": "faux-mdp", "user": "exploitant", "password": "Mdp-exploit-1"}
+    assert admin.client.post("/api/operator", json=body).status_code == 403
+    assert admin.client.get("/api/operator").get_json() == {"user": ""}
+    body["current_password"] = "ancien-mdp-123"
+    res = admin.client.post("/api/operator", json=body)
+    assert res.status_code == 200 and res.get_json()["user"] == "exploitant"
+    assert admin.client.get("/api/operator").get_json() == {"user": "exploitant"}
+    assert admin.events == []   # ni Dockhand ni Bastion : l'exploitant n'y a pas de compte
+    assert admin.client.delete("/api/operator", json={"current_password": "faux"}).status_code == 403
+    assert admin.client.delete("/api/operator", json={"current_password": "ancien-mdp-123"}).get_json()["user"] == ""
+
+
+def test_operator_account_same_name_as_admin_refused(admin):
+    res = admin.client.post("/api/operator", json={"current_password": "ancien-mdp-123", "user": "admin", "password": "Mdp-exploit-1"})
+    assert res.status_code == 400 and "different" in res.get_json()["error"]

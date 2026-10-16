@@ -6,6 +6,9 @@
 #                   sessions s'il change : jamais regenere)
 #   services.yaml   copie de server/services.yaml (titres, groupes...) - voir
 #                   la note du compose sur le bind-mount de fichier
+#   operator.env    compte exploitant (identifiant + hash), gere depuis caddy-admin ;
+#                   toujours present (vide = pas de compte) : un bind-mount de
+#                   fichier absent creerait un dossier
 
 setup_dashboard() {
     local dir="$SCRIPT_DIR/stacks/dashboard"
@@ -17,6 +20,11 @@ setup_dashboard() {
         echo "[+] Generation de la cle de session du portail (server/stacks/dashboard/portal.env, non versionne)..."
         echo "PORTAL_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')" > "$dir/portal.env"
         chmod 600 "$dir/portal.env"
+    fi
+
+    if [ ! -f "$dir/operator.env" ]; then
+        : > "$dir/operator.env"
+        chmod 600 "$dir/operator.env"
     fi
 
     sync_portal_services

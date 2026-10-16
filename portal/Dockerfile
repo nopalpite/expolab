@@ -7,7 +7,7 @@ RUN apt-get update -qq && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY app.py .
+COPY app.py plans.py ./
 COPY templates/ templates/
 COPY static/ static/
 

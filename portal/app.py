@@ -11,6 +11,11 @@ Trois roles dans un seul petit service :
 Les identifiants sont ceux de l'installation (stacks/caddy/auth.env, monte en
 lecture seule) : un seul couple pour tout. Le hash bcrypt est celui que Caddy
 utilisait pour son basic auth.
+
+Second compte, facultatif : l'EXPLOITANT (stacks/dashboard/operator.env, gere depuis
+caddy-admin). Il ne voit que l'interface d'exploitation - plans des salles en lecture
+seule (plans.py) et preparation des cartes SD (page /exploitation du flasheur) ; tout le
+reste lui est refuse, y compris par /auth/verify pour Caddy.
 """
 import base64
 import hashlib
@@ -25,11 +30,14 @@ from urllib.parse import quote, urlparse
 
 import bcrypt
 import yaml
-from flask import Flask, Response, jsonify, redirect, render_template, request
+from flask import Flask, Response, jsonify, redirect, render_template, request, send_file
+
+import plans
 
 app = Flask(__name__)
 
 AUTH_ENV = Path(os.environ.get("PORTAL_AUTH_ENV", "/config/auth.env"))
+OPERATOR_ENV = Path(os.environ.get("PORTAL_OPERATOR_ENV", "/config/operator.env"))
 SERVICES_FILE = Path(os.environ.get("PORTAL_SERVICES_FILE", "/config/services.yaml"))
 CA_FILE = Path(os.environ.get("PORTAL_CA_FILE", "/caddy-data/caddy/pki/authorities/local/root.crt"))
 DOMAIN = os.environ.get("PORTAL_DOMAIN", "web.expolab.lan")
@@ -43,11 +51,16 @@ LOGIN_WINDOW = 300       # ...par IP sur cette fenetre (secondes)
 BASIC_CACHE_SECONDS = 300
 STATUS_CACHE_SECONDS = 10
 PORTAL_NAME = "dashboard"  # le portail lui-meme : jamais dans sa propre liste
+ADMIN, OPERATOR = "admin", "exploitant"
+# Ce que l'exploitant peut atteindre derriere Caddy : la page d'exploitation du flasheur.
+OPERATOR_SERVICE = "sd-flasher"
+OPERATOR_PATHS = ("/exploitation", "/api/exploitation/", "/static/")
 
 _failures: dict[str, list[float]] = {}
 _basic_cache: dict[str, float] = {}
 _status_cache: dict = {"at": 0.0, "values": {}}
 _creds_cache: dict = {"mtime": None, "value": None}
+_operator_cache: dict = {"mtime": None, "value": None}
 
 
 # --- identifiants ----------------------------------------------------------
@@ -68,6 +81,27 @@ def credentials() -> tuple[str, str] | None:
         user, pw_hash = values.get("BASIC_AUTH_USER"), values.get("BASIC_AUTH_HASH")
         _creds_cache.update(mtime=mtime, value=(user, pw_hash) if user and pw_hash else None)
     return _creds_cache["value"]
+
+
+def operator_credentials() -> tuple[str, str] | None:
+    """(utilisateur, hash bcrypt) du compte exploitant, None s'il n'y en a pas."""
+    try:
+        mtime = OPERATOR_ENV.stat().st_mtime
+    except OSError:
+        return None
+    if _operator_cache["mtime"] != mtime:
+        values = {}
+        for line in OPERATOR_ENV.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                key, _, value = line.partition("=")
+                values[key.strip()] = value.strip()
+        user, pw_hash = values.get("OPERATOR_USER"), values.get("OPERATOR_HASH")
+        _operator_cache.update(mtime=mtime, value=(user, pw_hash) if user and pw_hash else None)
+    return _operator_cache["value"]
+
+
+def creds_for(role: str) -> tuple[str, str] | None:
+    return credentials() if role == ADMIN else operator_credentials() if role == OPERATOR else None
 
 
 def password_ok(user: str, password: str, creds: tuple[str, str]) -> bool:
@@ -96,27 +130,43 @@ def _signing_key(creds: tuple[str, str]) -> bytes:
     return hmac.new(_secret(), creds[1].encode(), hashlib.sha256).digest()
 
 
-def make_token(user: str, creds: tuple[str, str], now: float | None = None) -> str:
+def make_token(user: str, creds: tuple[str, str], now: float | None = None, role: str = ADMIN) -> str:
+    """Le role est dans le jeton, signe avec le hash du mot de passe DE CE ROLE : changer le
+    mot de passe de l'exploitant ne ferme que les sessions exploitant."""
     now = time.time() if now is None else now
-    payload = json.dumps({"u": user, "exp": int(now) + SESSION_SECONDS}, separators=(",", ":")).encode()
+    payload = json.dumps({"u": user, "r": role, "exp": int(now) + SESSION_SECONDS}, separators=(",", ":")).encode()
     body = base64.urlsafe_b64encode(payload).rstrip(b"=").decode()
     sig = hmac.new(_signing_key(creds), body.encode(), hashlib.sha256).hexdigest()
     return f"{body}.{sig}"
 
 
 def read_token(token: str, creds: tuple[str, str], now: float | None = None) -> str | None:
+    """Jeton ADMINISTRATEUR valide pour `creds` -> utilisateur (compatibilite : sans role = admin)."""
+    session = read_session(token, now, admin=creds, operator=None)
+    return session[0] if session and session[1] == ADMIN else None
+
+
+def read_session(token: str, now: float | None = None, admin=None, operator=None) -> tuple[str, str] | None:
+    """(utilisateur, role) si le jeton est valide, None sinon. Le role annonce choisit la cle de
+    verification : un jeton exploitant ne peut pas se faire passer pour un jeton administrateur."""
     now = time.time() if now is None else now
     body, _, sig = token.partition(".")
-    expected = hmac.new(_signing_key(creds), body.encode(), hashlib.sha256).hexdigest()
-    if not body or not hmac.compare_digest(sig, expected):
+    if not body:
         return None
     try:
         payload = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
     except (ValueError, TypeError):
         return None
-    if not isinstance(payload, dict) or payload.get("exp", 0) < now or payload.get("u") != creds[0]:
+    if not isinstance(payload, dict):
         return None
-    return payload["u"]
+    role = payload.get("r", ADMIN)
+    creds = admin if role == ADMIN else operator if role == OPERATOR else None
+    if creds is None:
+        return None
+    expected = hmac.new(_signing_key(creds), body.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected) or payload.get("exp", 0) < now or payload.get("u") != creds[0]:
+        return None
+    return payload["u"], role
 
 
 def basic_ok(header: str, creds: tuple[str, str]) -> bool:
@@ -139,14 +189,31 @@ def basic_ok(header: str, creds: tuple[str, str]) -> bool:
 
 
 def authenticated_user(creds: tuple[str, str]) -> str | None:
+    """Administrateur connecte (cookie ou basic auth) -> son identifiant."""
+    session = current_session(creds)
+    return session[0] if session and session[1] == ADMIN else None
+
+
+def current_session(creds: tuple[str, str] | None = None) -> tuple[str, str] | None:
+    """(utilisateur, role) de la requete : cookie (administrateur ou exploitant) ou basic
+    auth (administrateur seulement : curl, clients git)."""
+    creds = credentials() if creds is None else creds
     token = request.cookies.get(COOKIE_NAME)
     if token:
-        user = read_token(token, creds)
-        if user:
-            return user
-    if basic_ok(request.headers.get("Authorization", ""), creds):
-        return creds[0]
+        session = read_session(token, admin=creds, operator=operator_credentials())
+        if session:
+            return session
+    if creds and basic_ok(request.headers.get("Authorization", ""), creds):
+        return creds[0], ADMIN
     return None
+
+
+def operator_may_reach(host: str, uri: str) -> bool:
+    """L'exploitant, derriere Caddy : uniquement la page d'exploitation du flasheur."""
+    path = urlparse(uri or "/").path or "/"
+    if "/../" in path or path.endswith("/.."):
+        return False
+    return host.lower() == f"{OPERATOR_SERVICE}.{DOMAIN}" and (path == "/exploitation" or path.startswith(OPERATOR_PATHS))
 
 
 # --- limitation des tentatives --------------------------------------------
@@ -228,8 +295,16 @@ def auth_verify():
     creds = credentials()
     if creds is None:
         return Response("Identifiants d'administration introuvables", 503)  # ferme par defaut
-    if authenticated_user(creds):
+    session = current_session(creds)
+    if session and session[1] == ADMIN:
         return Response("", 204)
+    wants_page_ = "text/html" in request.headers.get("Accept", "") and request.headers.get("X-Forwarded-Method", "GET") == "GET"
+    if session:   # exploitant : seulement l'interface d'exploitation
+        if operator_may_reach(request.headers.get("X-Forwarded-Host", ""), request.headers.get("X-Forwarded-Uri", "/")):
+            return Response("", 204)
+        if wants_page_:
+            return redirect(f"https://{portal_host()}/", 302)
+        return Response("Acces reserve a l'administrateur\n", 403)
     wants_page = "text/html" in request.headers.get("Accept", "") and request.headers.get("X-Forwarded-Method", "GET") == "GET"
     if wants_page:
         return redirect(login_url(original_url()), 302)
@@ -256,12 +331,18 @@ def login():
             _failures.pop(ip, None)
             resp = redirect(next_url, 303)
             return set_session_cookie(resp, make_token(creds[0], creds))
+        elif operator_credentials() and password_ok(request.form.get("username", ""), request.form.get("password", ""), operator_credentials()):
+            _failures.pop(ip, None)
+            op = operator_credentials()
+            # Toujours vers l'accueil d'exploitation : jamais vers une page d'administration demandee avant.
+            return set_session_cookie(redirect("/", 303), make_token(op[0], op, role=OPERATOR))
         else:
             record_failure(ip)
             error = "Identifiant ou mot de passe incorrect."
         return render_template("login.html", error=error, next_url=next_url, tls_mode=TLS_MODE), 401
-    if creds is not None and authenticated_user(creds):
-        return redirect(next_url, 302)
+    session = current_session(creds) if creds is not None else None
+    if session:
+        return redirect(next_url if session[1] == ADMIN else "/", 302)
     return render_template("login.html", error=None, next_url=next_url, tls_mode=TLS_MODE)
 
 
@@ -324,6 +405,7 @@ def public_service(svc: dict) -> dict:
 
 
 def require_login():
+    """Administrateur connecte -> ses identifiants ; None sinon (exploitant compris)."""
     creds = credentials()
     if creds is None or not authenticated_user(creds):
         return None
@@ -332,10 +414,36 @@ def require_login():
 
 @app.route("/")
 def index():
-    creds = require_login()
-    if creds is None:
+    creds = credentials()
+    session = current_session(creds) if creds is not None else None
+    if session is None:
         return redirect("/login", 302)
+    if session[1] == OPERATOR:
+        return render_template("exploitant.html", user=session[0], domain=DOMAIN,
+                               flasher_url=f"https://{OPERATOR_SERVICE}.{DOMAIN}/exploitation")
     return render_template("index.html", user=creds[0], domain=DOMAIN, has_ca=TLS_MODE == "internal")
+
+
+# --- plans des salles (administrateur et exploitant) ----------------------------
+
+@app.route("/api/plans")
+def api_plans():
+    if current_session() is None:
+        return jsonify({"error": "Authentification requise"}), 401
+    rooms, machines = plans.load_bastion()
+    return jsonify(plans.build_plans(rooms, machines, plans.fetch_presence()))
+
+
+@app.route("/plans/image/<name>")
+def plan_image(name):
+    if current_session() is None:
+        return jsonify({"error": "Authentification requise"}), 401
+    rooms, _machines = plans.load_bastion()
+    if not plans.map_image_allowed(name, rooms) or not (plans.BASTION_MAPS / name).is_file():
+        return Response("Plan introuvable\n", 404)
+    resp = send_file(plans.BASTION_MAPS / name, max_age=300)
+    resp.headers["Cache-Control"] = "private, max-age=300"
+    return resp
 
 
 @app.route("/api/services")

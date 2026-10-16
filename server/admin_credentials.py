@@ -125,3 +125,38 @@ def apply_credentials(
     except Exception as exc:  # noqa: BLE001
         raise CredentialsError(f"Bastion : {exc}", done) from exc
     return done
+
+
+# --- compte exploitant ------------------------------------------------------------------------
+# Un second compte, limite par le portail a l'interface d'exploitation (plans des salles, cartes
+# SD). Fichier SEPARE d'auth.env (reecrit en entier a chaque changement du couple d'administration)
+# et monte dans le portail : stacks/dashboard/operator.env, toujours present (vide = pas de compte),
+# ecrit SUR PLACE pour la meme raison qu'auth.env.
+
+def operator_env_path(server_dir: Path) -> Path:
+    return server_dir / "stacks" / "dashboard" / "operator.env"
+
+
+def operator_user(server_dir: Path) -> str:
+    return env_value(operator_env_path(server_dir), "OPERATOR_USER")
+
+
+def set_operator(server_dir: Path, user: str, password: str, rounds: int = BCRYPT_ROUNDS) -> None:
+    """Cree ou change le compte exploitant. Leve CredentialsError si invalide."""
+    error = check_user(user) or check_password(password)
+    if not error and user == env_value(server_dir / "stacks" / "caddy" / "auth.env", "BASIC_AUTH_USER"):
+        error = "L'identifiant de l'exploitant doit etre different de celui de l'administrateur."
+    if error:
+        raise CredentialsError(error)
+    path = operator_env_path(server_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:   # sur place (meme inode) : le portail voit le changement
+        f.write(f"OPERATOR_USER={user}\nOPERATOR_HASH={hash_password(password, rounds)}\n")
+
+
+def clear_operator(server_dir: Path) -> None:
+    """Supprime le compte exploitant (le fichier reste, vide)."""
+    path = operator_env_path(server_dir)
+    if path.exists():
+        with open(path, "w", encoding="utf-8"):
+            pass

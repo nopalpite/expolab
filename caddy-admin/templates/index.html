@@ -65,6 +65,29 @@
             <p id="cred-status" class="status" hidden></p>
         </section>
 
+        <section class="panel" id="operator-panel">
+            <h2>Compte exploitant</h2>
+            <p class="subtitle">Pour l'exploitant de l'exposition : il se connecte au meme portail mais ne voit que les plans des salles (lecture seule) et la preparation des cartes SD, avec l'image et les reglages choisis ici par l'administrateur. Aucun acces au reste.</p>
+            <p class="subtitle" id="op-current">Aucun compte exploitant.</p>
+            <form id="op-form">
+                <div class="field">
+                    <label for="op_admin">Mot de passe administrateur actuel</label>
+                    <input type="password" id="op_admin" autocomplete="current-password" required>
+                </div>
+                <div class="field">
+                    <label for="op_user">Identifiant de l'exploitant</label>
+                    <input type="text" id="op_user" autocomplete="off" placeholder="exploitant" required>
+                </div>
+                <div class="field">
+                    <label for="op_password">Mot de passe (8 caracteres minimum)</label>
+                    <input type="password" id="op_password" autocomplete="new-password" required>
+                </div>
+                <button type="submit" id="op-save-btn">Enregistrer le compte exploitant</button>
+                <button type="button" id="op-delete-btn" class="secondary" hidden>Supprimer le compte</button>
+            </form>
+            <p id="op-status" class="status" hidden></p>
+        </section>
+
         <section class="panel">
             <h2>Certificat TLS</h2>
             <p class="subtitle">Mode global, s'applique a tous les services ci-dessous.</p>

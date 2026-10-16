@@ -100,6 +100,7 @@ def load_settings() -> dict:
         "locale": data.get("locale", DEFAULT_LOCALE),
         "timezone": data.get("timezone", DEFAULT_TIMEZONE),
         "packages": [p for p in data.get("packages", []) if isinstance(p, str)],
+        "operator_image": data.get("operator_image", "") if isinstance(data.get("operator_image", ""), str) else "",
     }
 
 
@@ -156,6 +157,7 @@ def public_settings() -> dict:
         "locale": s["locale"],
         "timezone": s["timezone"],
         "packages": s["packages"],
+        "operator_image": s["operator_image"],
         "extra_keys": s["extra_keys"],
         "use_automation_key": s["use_automation_key"],
         "automation_key_available": bool(automation_key()),
@@ -575,6 +577,7 @@ def api_settings_put():
         "locale": str(body.get("locale", current["locale"])).strip(),
         "timezone": str(body.get("timezone", current["timezone"])).strip(),
         "packages": parse_packages(body.get("packages", current["packages"])),
+        "operator_image": str(body.get("operator_image", current["operator_image"])).strip(),
     }
     if body.get("wifi_psk"):  # vide = on garde l'actuel
         new["wifi_psk"] = str(body["wifi_psk"])
@@ -592,6 +595,8 @@ def api_settings_put():
                                 "locale": new["locale"], "timezone": new["timezone"], "packages": new["packages"]})
     except flasher.FlashError as exc:
         return jsonify({"error": str(exc)}), 400
+    if new["operator_image"] and new["operator_image"] not in {i["name"] for i in flasher.list_images(IMAGES_DIR)}:
+        return jsonify({"error": "Image de l'exploitant introuvable dans la liste des images."}), 400
     save_settings(new)
     audit("settings", wifi_ssid=new["wifi_ssid"], keys=len(new["extra_keys"]), user=new["user_name"])
     return jsonify(public_settings())
@@ -636,7 +641,6 @@ def api_preview():
 
 @app.route("/api/flash", methods=["POST"])
 def api_flash():
-    global _job
     body = request.get_json(silent=True) or {}
     device, hostname = body.get("device", ""), body.get("hostname", "")
     try:
@@ -646,13 +650,19 @@ def api_flash():
     if body.get("confirm") != hostname:
         return jsonify({"error": "La confirmation ne correspond pas au hostname."}), 400
 
+    image = pick_image(body.get("image"))
+    if image is None:
+        return jsonify({"error": "Aucune image master disponible."}), 409
+    return _start_flash(device, hostname, image, actor="administrateur")
+
+
+def _start_flash(device: str, hostname: str, image: Path, actor: str):
+    """Lance un flash (administrateur ou exploitant) apres les verifications communes."""
+    global _job
     # Le peripherique doit etre dans la liste ACTUELLE des disques eligibles : jamais un chemin pris tel quel.
     eligible = {d["path"]: d for d in read_devices().get("eligible", [])}
     if device not in eligible:
         return jsonify({"error": "Carte introuvable ou non eligible (retiree ? deja utilisee par le serveur ?)."}), 409
-    image = pick_image(body.get("image"))
-    if image is None:
-        return jsonify({"error": "Aucune image master disponible."}), 409
     settings = effective_settings()
     try:
         flasher.check_settings(settings)
@@ -666,7 +676,7 @@ def api_flash():
                 "device": device, "model": eligible[device]["model"], "image": image.name, "started": int(time.time()),
                 "steps": [{"id": s, "label": flasher.STEP_LABELS[s]} for s in flasher.STEPS]}
     audit("flash-start", device=device, model=eligible[device]["model"], serial=eligible[device]["serial"],
-          hostname=hostname, image=image.name, dry_run=DRY_RUN)
+          hostname=hostname, image=image.name, actor=actor, dry_run=DRY_RUN)
     threading.Thread(target=_run, args=(image, device, hostname, settings, eligible[device]), daemon=True).start()
     return jsonify(_job), 202
 
@@ -703,6 +713,71 @@ def _run(image: Path, device: str, hostname: str, settings: dict, expected: dict
     except Exception as exc:  # jamais de thread silencieusement morte : l'interface doit voir l'echec
         _update(state="error", error=f"Erreur inattendue : {exc}")
         audit("flash-error", device=device, hostname=hostname, error=repr(exc))
+
+
+# --- interface d'exploitation (compte exploitant, voir le portail) ----------------------------
+# Seules ces routes sont ouvertes a l'exploitant (le portail le verifie pour Caddy) : il choisit
+# une machine parmi les reservations, l'image et TOUS les reglages sont ceux fixes ici par
+# l'administrateur ; rien n'est lu du navigateur d'autre que la carte et le nom de la machine.
+
+def operator_image() -> Path | None:
+    name = load_settings()["operator_image"]
+    return pick_image(name) if name else None
+
+
+def operator_job() -> dict:
+    """Ce que l'exploitant voit de l'operation en cours (jamais les details de l'administrateur)."""
+    job = _job
+    if job.get("state", "idle") == "idle":
+        return {"state": "idle"}
+    if job.get("kind") != "flash":
+        return {"state": "busy"} if job.get("state") == "running" else {"state": "idle"}
+    keep = ("kind", "state", "step", "percent", "hostname", "model", "steps", "ip")
+    out = {k: job[k] for k in keep if k in job}
+    if job.get("state") == "error":
+        out["error"] = job.get("error", "")
+    return out
+
+
+@app.route("/exploitation")
+def exploitation():
+    return render_template("exploitation.html")
+
+
+@app.route("/api/exploitation/status")
+def api_exploitation_status():
+    devices = read_devices()
+    return jsonify({
+        "devices": [{"path": d["path"], "model": d["model"], "size": d["size"]} for d in devices.get("eligible", [])],
+        "machines": machine_names(),
+        "job": operator_job(),
+        "image_ready": operator_image() is not None,
+        "dry_run": DRY_RUN,
+    })
+
+
+@app.route("/api/exploitation/flash", methods=["POST"])
+def api_exploitation_flash():
+    body = request.get_json(silent=True) or {}
+    hostname, device = str(body.get("hostname", "")), str(body.get("device", ""))
+    if hostname not in {m["hostname"] for m in machine_names()}:
+        return jsonify({"error": "Machine inconnue : choisis-la dans la liste."}), 400
+    image = operator_image()
+    if image is None:
+        return jsonify({"error": "Aucune image n'a ete choisie par l'administrateur pour l'exploitation."}), 409
+    res = _start_flash(device, hostname, image, actor="exploitant")
+    if isinstance(res, tuple) and res[1] == 202:
+        return jsonify(operator_job()), 202
+    return res
+
+
+@app.route("/api/exploitation/dismiss", methods=["POST"])
+def api_exploitation_dismiss():
+    global _job
+    with _job_lock:
+        if _job.get("kind") == "flash" and _job.get("state") in ("done", "error"):
+            _job = {"state": "idle"}
+    return jsonify(operator_job())
 
 
 @app.route("/api/job/dismiss", methods=["POST"])

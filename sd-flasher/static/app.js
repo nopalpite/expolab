@@ -115,8 +115,34 @@ function renderImages() {
     });
     table.appendChild(tbody);
     body.appendChild(table);
+    renderOperatorImage(images);
     const current = images.find((i) => i.name === pick.value) || images[0];
     $("image-info").textContent = `Image : ${current.name} (${formatBytes(current.size)}${images.length > 1 ? "" : ", la plus récente"}).`;
+}
+
+// --- image de l'exploitant ------------------------------------------------------------------
+
+let operatorImage = "";
+
+function renderOperatorImage(images) {
+    const sel = $("operator-image");
+    if (document.activeElement === sel) return;   // pas pendant que l'administrateur choisit
+    sel.textContent = "";
+    sel.appendChild(el("option", { value: "", text: "— aucune (l'exploitant ne peut pas flasher) —" }));
+    images.forEach((i) => sel.appendChild(el("option", { value: i.name, text: i.name })));
+    sel.value = images.some((i) => i.name === operatorImage) ? operatorImage : "";
+}
+
+async function saveOperatorImage() {
+    const status = $("operator-image-status");
+    try {
+        const s = await api("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" },
+                                               body: JSON.stringify({ operator_image: $("operator-image").value }) });
+        operatorImage = s.operator_image;
+        showStatus(status, operatorImage ? `L'exploitant flashera ${operatorImage}.` : "L'exploitant ne peut plus flasher (aucune image).", "ok");
+    } catch (err) {
+        showStatus(status, err.message, "error");
+    }
 }
 
 // --- envoi et suppression d'images ----------------------------------------------------------
@@ -476,6 +502,7 @@ async function loadSettings() {
     $("locale").value = s.locale;
     $("timezone").value = s.timezone;
     $("packages").value = s.packages.join("\n");
+    operatorImage = s.operator_image || "";
     $("user-name").value = s.user_name;
     $("user-password").value = "";
     $("user-password").placeholder = s.has_user_password ? "(inchangé)" : "";
@@ -564,6 +591,7 @@ $("upload-name").addEventListener("input", validateUpload);
 $("upload-btn").addEventListener("click", startUpload);
 $("upload-cancel").addEventListener("click", () => uploadRequest && uploadRequest.abort());
 $("flash-btn").addEventListener("click", startFlash);
+$("operator-image").addEventListener("change", saveOperatorImage);
 $("capture-btn").addEventListener("click", startCapture);
 $("capture-name").addEventListener("input", () => state.status && renderCapture());
 $("fetch-url").addEventListener("input", () => {

@@ -15,6 +15,7 @@ bcrypt = pytest.importorskip("bcrypt")
 pytest.importorskip("yaml")
 
 APP_PATH = Path(__file__).resolve().parent.parent / "portal" / "app.py"
+sys.path.insert(0, str(APP_PATH.parent))  # plans.py, importe par app.py
 USER = "gestion.expo"
 PASSWORD = "Mdp-de-test-123"
 
@@ -42,6 +43,7 @@ def portal(tmp_path, monkeypatch):
     monkeypatch.setenv("PORTAL_CA_FILE", str(ca))
     monkeypatch.setenv("PORTAL_DOMAIN", "web.expolab.lan")
     monkeypatch.setenv("PORTAL_TLS_MODE", "internal")
+    monkeypatch.setenv("PORTAL_OPERATOR_ENV", str(tmp_path / "operator.env"))
     spec = importlib.util.spec_from_file_location("portal_app", APP_PATH)
     module = importlib.util.module_from_spec(spec)
     sys.modules["portal_app"] = module  # Flask retrouve templates/ et static/ via le module
@@ -218,3 +220,138 @@ def test_root_certificate_download(portal):
     assert res.status_code == 200 and b"BEGIN CERTIFICATE" in res.data
     portal.TLS_MODE = "signed"
     assert portal.client.get("/ca.crt").status_code == 404
+
+
+# --- compte exploitant : role, acces limite, plans -----------------------------------------------
+
+OP_USER, OP_PASSWORD = "exploitant", "Mdp-exploit-1"
+
+
+def set_operator(portal, tmp_path, password=OP_PASSWORD):
+    pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=4)).decode()
+    (tmp_path / "operator.env").write_text(f"OPERATOR_USER={OP_USER}\nOPERATOR_HASH={pw_hash}\n")
+    portal._operator_cache.update(mtime=None, value=None)
+
+
+def op_cookie(portal):
+    res = login(portal, password=OP_PASSWORD, user=OP_USER, next="https://dockhand.web.expolab.lan/")
+    assert res.status_code == 303 and res.headers["Location"] == "/"   # jamais vers une page d'administration
+    return {"headers": {"Cookie": session_cookie(res)}}
+
+
+def verify(portal, auth, host, uri="/", accept="application/json"):
+    headers = {**auth["headers"], "X-Forwarded-Host": host, "X-Forwarded-Uri": uri, "X-Forwarded-Proto": "https", "Accept": accept}
+    return portal.client.get("/auth/verify", headers=headers)
+
+
+def test_no_operator_account_means_no_operator_login(portal):
+    assert login(portal, password=OP_PASSWORD, user=OP_USER).status_code == 401
+
+
+def test_operator_reaches_only_the_exploitation_pages(portal, tmp_path):
+    set_operator(portal, tmp_path)
+    auth = op_cookie(portal)
+    flasher = "sd-flasher.web.expolab.lan"
+    for uri in ("/exploitation", "/exploitation?machine=rpi-test", "/api/exploitation/status", "/api/exploitation/flash", "/static/exploitation.js"):
+        assert verify(portal, auth, flasher, uri).status_code == 204, uri
+    for host, uri in ((flasher, "/"), (flasher, "/api/flash"), (flasher, "/api/settings"), (flasher, "/api/images/x.img/file"),
+                      (flasher, "/exploitation/../api/settings"), ("dockhand.web.expolab.lan", "/exploitation"),
+                      ("bastion.web.expolab.lan", "/"), ("dnsmasq.web.expolab.lan", "/api/topology")):
+        assert verify(portal, auth, host, uri).status_code == 403, (host, uri)
+    page = verify(portal, auth, "dockhand.web.expolab.lan", "/", accept="text/html")
+    assert page.status_code == 302 and page.headers["Location"] == "https://dashboard.web.expolab.lan/"
+    assert portal.client.get("/api/services", **auth).status_code == 401
+    assert portal.client.get("/api/status", **auth).status_code == 401
+    home = portal.client.get("/", **auth)
+    assert home.status_code == 200 and b"Plans des salles" in home.data and b"https://sd-flasher.web.expolab.lan/exploitation" in home.data
+    assert b"drawer" not in home.data   # pas le tiroir des services de l'administrateur
+
+
+def test_admin_is_unchanged(portal, tmp_path):
+    set_operator(portal, tmp_path)
+    auth = logged_in(portal)
+    assert verify(portal, auth, "dockhand.web.expolab.lan", "/").status_code == 204
+    assert verify(portal, auth, "sd-flasher.web.expolab.lan", "/api/settings").status_code == 204
+    assert b"drawer" in portal.client.get("/", **auth).data
+
+
+def test_an_operator_token_cannot_pass_for_an_admin(portal, tmp_path):
+    set_operator(portal, tmp_path)
+    op = portal.operator_credentials()
+    forged = portal.make_token(USER, op, role=portal.ADMIN)   # signe avec la cle de l'exploitant
+    headers = {"Cookie": f"expolab_session={forged}", "X-Forwarded-Host": "dockhand.web.expolab.lan", "X-Forwarded-Uri": "/"}
+    assert portal.client.get("/auth/verify", headers=headers).status_code == 401
+    other = portal.make_token(OP_USER, op, role="superadmin")
+    assert portal.read_session(other, admin=portal.credentials(), operator=op) is None
+
+
+def test_changing_the_operator_password_closes_only_operator_sessions(portal, tmp_path):
+    set_operator(portal, tmp_path)
+    op_auth, admin_auth = op_cookie(portal), logged_in(portal)
+    set_operator(portal, tmp_path, password="Autre-mdp-2")
+    assert portal.client.get("/", **op_auth).status_code == 302           # renvoye a la connexion
+    assert verify(portal, admin_auth, "dockhand.web.expolab.lan").status_code == 204
+
+
+def test_old_admin_tokens_without_role_stay_valid(portal):
+    creds = portal.credentials()
+    payload = base64.urlsafe_b64encode(b'{"u":"%s","exp":%d}' % (USER.encode(), int(time.time()) + 600)).rstrip(b"=").decode()
+    import hashlib
+    import hmac as _hmac
+    sig = _hmac.new(portal._signing_key(creds), payload.encode(), hashlib.sha256).hexdigest()
+    assert portal.read_token(f"{payload}.{sig}", creds) == USER
+
+
+def test_plans_api_and_image_whitelist(portal, tmp_path, monkeypatch):
+    set_operator(portal, tmp_path)
+    maps = tmp_path / "maps"
+    maps.mkdir()
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + (1001).to_bytes(4, "big") + (563).to_bytes(4, "big") + b"\x08\x06\x00\x00\x00"
+    (maps / "expo.png").write_bytes(png)
+    (maps / "secret.txt").write_text("non")
+    cfg = tmp_path / "machines.yaml"
+    cfg.write_text("""rooms:
+- {id: expo, name: Expo, map_image: expo.png}
+machines:
+- id: a
+  name: rpi-test.expolab.lan
+  host: 10.42.0.134
+  room: expo
+  position: {x: 57.04, y: 76.47}
+  credentials: {password: SECRET-DE-BASTION}
+- {id: b, name: projo, host: projo.expolab.lan, room: expo, position: {x: 40, y: 46}}
+- {id: c, name: borne, host: 10.42.0.200, room: expo}
+""")
+    monkeypatch.setattr(portal.plans, "BASTION_CONFIG", cfg)
+    monkeypatch.setattr(portal.plans, "BASTION_MAPS", maps)
+    topology = {"presence_ok": True, "now": 1000, "machines": [
+        {"hostname": "rpi-test", "ip": "10.42.0.134", "state": "online", "since": 900},
+        {"hostname": "projo", "ip": "10.42.0.150", "state": "offline", "since": 960},
+    ]}
+    monkeypatch.setattr(portal.plans, "fetch_presence", lambda: topology)
+    auth = op_cookie(portal)
+    data = portal.client.get("/api/plans", **auth).get_json()
+    room = data["rooms"][0]
+    assert room["ratio"] == [1001, 563] and room["ratio_known"] and room["unplaced"] == 1
+    assert [(m["label"], m["x"], m["y"], m["state"]) for m in room["machines"]] == [("rpi-test", 57.04, 76.47, "up"), ("projo", 40.0, 46.0, "down")]
+    assert b"SECRET-DE-BASTION" not in portal.client.get("/api/plans", **auth).data
+    assert portal.client.get("/plans/image/expo.png", **auth).data == png
+    assert portal.client.get("/plans/image/secret.txt", **auth).status_code == 404
+    assert portal.client.get("/plans/image/..%2Fmachines.yaml", **auth).status_code == 404
+    assert portal.client.get("/api/plans").status_code == 401
+
+
+sys.path.insert(0, str(APP_PATH.parent))
+import plans as _plans_module  # noqa: E402
+
+
+def test_plans_unknown_presence_and_jpeg_size(tmp_path):
+    jpg = tmp_path / "plan.jpg"
+    jpg.write_bytes(b"\xff\xd8" + b"\xff\xe0\x00\x04xx" + b"\xff\xc0\x00\x11\x08" + (300).to_bytes(2, "big") + (640).to_bytes(2, "big") + b"\x00" * 12)
+    assert _plans_module.image_size(jpg) == (640, 300)
+    assert _plans_module.image_size(tmp_path / "absent.png") is None
+    rooms = [{"id": "r", "name": "R", "map_image": "plan.svg"}]
+    machines = [{"id": "a", "name": "a", "host": "10.42.0.9", "room": "r", "position": {"x": 1, "y": 2}}]
+    data = _plans_module.build_plans(rooms, machines, None, tmp_path)
+    assert data["presence_ok"] is False and data["rooms"][0]["machines"][0]["state"] == "unknown"
+    assert data["rooms"][0]["ratio"] == list(_plans_module.DEFAULT_RATIO) and not data["rooms"][0]["ratio_known"]

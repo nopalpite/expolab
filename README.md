@@ -378,6 +378,36 @@ est idempotent aussi : relancez-le apres avoir modifie `server/services.yaml`
 ou le code d'une application pour regenerer le Caddyfile et redeployer les
 stacks concernees via l'API Dockhand.
 
+## Interface d'exploitation (compte exploitant)
+
+Pour l'exploitant de l'exposition : un **second compte**, cree par l'administrateur dans
+le portail (**Compte > Identifiants**, section "Compte exploitant", mot de passe
+administrateur exige ; fichier `server/stacks/dashboard/operator.env`, separe
+d'`auth.env`). Il se connecte au meme portail et ne voit que **deux onglets** :
+
+- **Plans des salles** (lecture seule, servi par le portail, `portal/plans.py`) : les
+  plans de Bastion avec chaque machine a sa position, point vert / rouge clignotant / gris
+  (en ligne / ne repond plus / inconnue) d'apres la presence de dnsmasq-admin (Topologie),
+  rafraichi toutes les 5 s. **Meme technique de placement que Bastion** : le cadre du
+  plan a exactement le rapport largeur/hauteur de l'image, les positions sont en % de ce
+  cadre et centrees, la taille des points suit la largeur affichee - un point reste au
+  meme endroit du plan sur telephone, tablette, avec zoom ou non. Donnees de Bastion lues
+  en lecture seule (`config/machines.yaml`, `maps/`), en liste blanche : aucun identifiant
+  n'en sort. Un clic sur une machine : etat, adresse, et "Preparer une carte" pour elle.
+- **Cartes SD** (page `/exploitation` du flasheur, dans un cadre) : carte detectee, menu
+  des machines (reservations par nom), un bouton, une confirmation, la progression, "Carte
+  prete". L'image est celle choisie par l'administrateur (**"Image utilisee par
+  l'exploitant"**, section Image master du flasheur ; aucune = rien a flasher) et tous les
+  reglages sont ceux de l'administrateur : l'API d'exploitation ne prend du navigateur que
+  la carte et le nom de la machine (reservee). Journal d'audit : `actor: exploitant`.
+
+**Controle d'acces** : la session porte un role, signe avec le hash du mot de passe de ce
+role (changer le mot de passe exploitant ne ferme que ses sessions ; un jeton exploitant ne
+peut pas passer pour un administrateur). Pour l'exploitant, `/auth/verify` (Caddy) ne
+laisse passer QUE `sd-flasher.<domaine>/exploitation`, `/api/exploitation/*` et
+`/static/*` ; tout le reste repond 403 (ou renvoie a son accueil). Le portail lui refuse
+aussi la liste des services. Le basic auth (curl, git) reste reserve a l'administrateur.
+
 ## Securite des UIs d'administration
 
 - **Identifiants d'administration : un seul couple, choisi par toi.** A la

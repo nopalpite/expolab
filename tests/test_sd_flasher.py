@@ -1147,3 +1147,43 @@ def test_install_script_retries_until_success_then_stops(tmp_path):
     calls = log.read_text().count("\n")
     assert subprocess.run(["sh", str(script)], env=env).returncode == 0
     assert log.read_text().count("\n") == calls   # deja fait : apt n'est plus jamais appele
+
+
+# --- interface d'exploitation ------------------------------------------------------------------
+
+def test_exploitation_needs_an_image_chosen_by_the_admin(api):
+    st = api.client.get("/api/exploitation/status").get_json()
+    assert st["image_ready"] is False and st["job"] == {"state": "idle"}
+    assert {m["hostname"] for m in st["machines"]} == {"module-01", "module-02"}
+    assert api.client.post("/api/exploitation/flash", json={"device": "/dev/sda", "hostname": "module-02"}).status_code == 409
+    assert api.client.put("/api/settings", json={"operator_image": "inconnue.img"}).status_code == 400
+    assert api.client.put("/api/settings", json={"operator_image": "master.img"}).get_json()["operator_image"] == "master.img"
+    assert api.client.get("/api/exploitation/status").get_json()["image_ready"] is True
+
+
+def test_exploitation_flashes_only_a_reserved_machine_with_the_admin_image(api):
+    api.client.put("/api/settings", json={"operator_image": "master-xz.img.xz"})
+    post = lambda body: api.client.post("/api/exploitation/flash", json=body)  # noqa: E731
+    assert post({"device": "/dev/sda", "hostname": "pas-reservee"}).status_code == 400
+    assert post({"device": "/dev/sdz", "hostname": "module-02"}).status_code == 409
+    res = post({"device": "/dev/sda", "hostname": "module-02", "image": "master.img"})   # l'image demandee est ignoree
+    assert res.status_code == 202 and res.get_json()["kind"] == "flash"
+    job = wait_done(api)
+    assert job["state"] == "done" and job["image"] == "master-xz.img.xz"
+    seen = api.client.get("/api/exploitation/status").get_json()["job"]
+    assert seen["state"] == "done" and seen["hostname"] == "module-02" and "image" not in seen and "result" not in seen
+    audit = api.client.get("/api/audit").get_json()
+    assert any(a["event"] == "flash-start" and a.get("actor") == "exploitant" for a in audit)
+    assert api.client.post("/api/exploitation/dismiss").get_json() == {"state": "idle"}
+
+
+def test_exploitation_hides_an_admin_capture(api):
+    api._job = {"kind": "capture", "state": "running", "image": "secret.img.zst", "device": "/dev/sda"}
+    assert api.client.get("/api/exploitation/status").get_json()["job"] == {"state": "busy"}
+    assert api.client.post("/api/exploitation/dismiss").get_json() == {"state": "busy"}   # jamais annulee par l'exploitant
+    api._job = {"state": "idle"}
+
+
+def test_exploitation_page_is_served(api):
+    res = api.client.get("/exploitation")
+    assert res.status_code == 200 and b"exploitation.js" in res.data
