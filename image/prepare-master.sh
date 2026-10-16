@@ -195,7 +195,8 @@ if [ "$REMOVE_ACCOUNTS" -eq 1 ]; then
     rm -f "$ROOT/etc/apt/apt.conf.d/01expolab-proxy" \
           "$ROOT/etc/chrony/sources.d/expolab.sources" "$ROOT/etc/chrony/conf.d/expolab.conf" \
           "$ROOT/usr/local/sbin/expolab-install-packages" "$ROOT/etc/systemd/system/expolab-packages.service" \
-          "$ROOT/etc/systemd/system/multi-user.target.wants/expolab-packages.service" "$ROOT/var/lib/expolab/packages.done"
+          "$ROOT/etc/systemd/system/multi-user.target.wants/expolab-packages.service" "$ROOT/var/lib/expolab/packages.done" \
+          "$ROOT/etc/systemd/system/expolab-packages.timer" "$ROOT/etc/systemd/system/timers.target.wants/expolab-packages.timer"
 fi
 
 # --- fin : compte temporaire et extinction ---------------------------------------------------------

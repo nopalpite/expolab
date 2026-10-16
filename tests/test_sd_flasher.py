@@ -1076,12 +1076,17 @@ def test_seed_installs_packages_through_a_retrying_service():
     files = files_by_path(user)
     script = files[flasher.PACKAGES_SCRIPT]
     assert script["permissions"] == "0755" and script["content"].startswith("#!/bin/sh\n")
-    assert "apt-get install -y -q --no-install-recommends avahi-daemon htop" in script["content"]
+    assert "install -y -q --no-install-recommends avahi-daemon htop" in script["content"]
     unit = files[flasher.PACKAGES_UNIT]["content"]
-    for line in ("After=network-online.target cloud-final.service", f"ConditionPathExists=!{flasher.PACKAGES_DONE}",
-                 "Restart=on-failure", "StartLimitIntervalSec=0", "WantedBy=multi-user.target"):
-        assert line in unit
-    assert ["systemctl", "enable", "--now", "--no-block", "expolab-packages.service"] in user["runcmd"]
+    assert "After=network-online.target\n" in unit and f"ConditionPathExists=!{flasher.PACKAGES_DONE}" in unit
+    # Jamais rattache au demarrage ni ordonne apres cloud-final : boucle avec multi-user.target, que
+    # systemd cassait en annulant le service (constate sur une vraie carte).
+    assert "cloud-final" not in unit and "[Install]" not in unit and "multi-user" not in unit
+    timer = files[flasher.PACKAGES_TIMER]["content"]
+    for line in ("OnBootSec=1min", "OnUnitInactiveSec=2min", "Unit=expolab-packages.service", "WantedBy=timers.target"):
+        assert line in timer
+    assert "DPkg::Lock::Timeout=300" in script["content"] and "systemctl disable --now expolab-packages.timer" in script["content"]
+    assert ["systemctl", "enable", "--now", "expolab-packages.timer"] in user["runcmd"]
     assert "packages" not in user   # jamais le module cloud-init, qui ne reessaie pas
 
 
@@ -1113,16 +1118,18 @@ def test_api_packages_from_text_deduplicated_and_shown_in_preview(api):
 
 def test_flash_cleans_package_service_and_stamp_of_a_captured_image(tmp_path):
     root = tmp_path / "racine"
-    for rel in (flasher.PACKAGES_SCRIPT, flasher.PACKAGES_UNIT, flasher.PACKAGES_WANTS, flasher.PACKAGES_DONE):
+    for rel in (flasher.PACKAGES_SCRIPT, flasher.PACKAGES_UNIT, flasher.PACKAGES_WANTS, flasher.PACKAGES_DONE,
+                flasher.PACKAGES_TIMER, flasher.PACKAGES_TIMER_WANTS):
         (root / rel.lstrip("/")).parent.mkdir(parents=True, exist_ok=True)
         (root / rel.lstrip("/")).write_text("de l'image")
     # Paquets demandes : seule la marque "deja fait" part (sinon l'installation ne se ferait jamais).
     flasher.remove_unset_files(root, {"apt_proxy": PROXY, "time_server": "x", "packages": ["htop"]})
     assert not (root / flasher.PACKAGES_DONE.lstrip("/")).exists()
-    assert (root / flasher.PACKAGES_UNIT.lstrip("/")).exists()
+    assert not (root / flasher.PACKAGES_WANTS.lstrip("/")).exists()   # ancien lien (boucle) : toujours retire
+    assert (root / flasher.PACKAGES_UNIT.lstrip("/")).exists() and (root / flasher.PACKAGES_TIMER.lstrip("/")).exists()
     # Aucun paquet demande : le service de l'image part aussi.
     flasher.remove_unset_files(root, {"apt_proxy": PROXY, "time_server": "x"})
-    for rel in (flasher.PACKAGES_SCRIPT, flasher.PACKAGES_UNIT, flasher.PACKAGES_WANTS):
+    for rel in (flasher.PACKAGES_SCRIPT, flasher.PACKAGES_UNIT, flasher.PACKAGES_TIMER, flasher.PACKAGES_TIMER_WANTS):
         assert not (root / rel.lstrip("/")).exists()
 
 
@@ -1135,15 +1142,16 @@ def test_install_script_retries_until_success_then_stops(tmp_path):
     fakes = tmp_path / "bin"
     fakes.mkdir()
     log = tmp_path / "calls.log"
-    for tool in ("apt-get", "dpkg"):
-        (fakes / tool).write_text(f'#!/bin/sh\necho "{tool} $*" >> "{log}"\n[ "$1" = install ] && [ -f "{tmp_path}/fail" ] && exit 100\nexit 0\n')
+    for tool in ("apt-get", "dpkg", "systemctl"):
+        (fakes / tool).write_text(f'#!/bin/sh\necho "{tool} $*" >> "{log}"\ncase " $* " in *" install "*) [ -f "{tmp_path}/fail" ] && exit 100;; esac\nexit 0\n')
         (fakes / tool).chmod(0o755)
     env = dict(os.environ, PATH=f"{fakes}:{os.environ['PATH']}")
     (tmp_path / "fail").write_text("")   # cache injoignable : l'installation echoue
     assert subprocess.run(["sh", str(script)], env=env).returncode != 0 and not stamp.exists()
     (tmp_path / "fail").unlink()
     assert subprocess.run(["sh", str(script)], env=env).returncode == 0 and stamp.exists()
-    assert "apt-get install -y -q --no-install-recommends avahi-daemon htop" in log.read_text()
+    assert "apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends avahi-daemon htop" in log.read_text()
+    assert "systemctl disable --now expolab-packages.timer" in log.read_text()   # le minuteur s'arrete
     calls = log.read_text().count("\n")
     assert subprocess.run(["sh", str(script)], env=env).returncode == 0
     assert log.read_text().count("\n") == calls   # deja fait : apt n'est plus jamais appele

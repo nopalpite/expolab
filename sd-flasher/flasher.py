@@ -70,6 +70,10 @@ TIME_SERVER_FILES = ("/etc/chrony/sources.d/expolab.sources", "/etc/chrony/conf.
 # Installation des paquets demandes (voir packages_files) : script, service, et marque "fait".
 PACKAGES_SCRIPT = "/usr/local/sbin/expolab-install-packages"
 PACKAGES_UNIT = "/etc/systemd/system/expolab-packages.service"
+PACKAGES_TIMER = "/etc/systemd/system/expolab-packages.timer"
+PACKAGES_TIMER_WANTS = "/etc/systemd/system/timers.target.wants/expolab-packages.timer"
+# Ancienne version (service rattache a multi-user.target) : encore presente sur des cartes ou des
+# images faites avant, retiree au nettoyage.
 PACKAGES_WANTS = "/etc/systemd/system/multi-user.target.wants/expolab-packages.service"
 PACKAGES_DONE = "/var/lib/expolab/packages.done"
 PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]{1,62}$")   # nom de paquet Debian
@@ -344,23 +348,30 @@ def check_settings(settings: dict) -> None:
 
 
 def packages_files(packages: list[str]) -> list[dict]:
-    """Script + service systemd qui installent `packages` via apt - donc par le cache du serveur
-    (proxy apt). Pas le module `packages` de cloud-init : il tourne au PREMIER demarrage seulement,
-    or une carte en Wi-Fi n'a pas encore de reseau a ce moment (redemarrage unique, voir
-    power_state), et un echec n'est jamais retente. Le service, lui, attend le reseau, reessaie
-    toutes les minutes et a chaque demarrage jusqu'a reussir, puis ne se relance plus jamais."""
+    """Script + service + minuteur systemd qui installent `packages` via apt - donc par le cache du
+    serveur (proxy apt). Pas le module `packages` de cloud-init : il tourne au PREMIER demarrage
+    seulement, or une carte en Wi-Fi n'a pas encore de reseau a ce moment (redemarrage unique, voir
+    power_state), et un echec n'est jamais retente.
+
+    Un MINUTEUR, pas un service rattache au demarrage : ordonne apres cloud-final (pour ne pas
+    disputer apt a cloud-init) et voulu par multi-user.target, le service formait une boucle -
+    cloud-final attend multi-user, qui attendait le service - que systemd cassait en annulant le
+    service a chaque demarrage (constate sur une vraie carte : rien n'etait jamais installe). Le
+    minuteur lance l'installation 1 min apres le demarrage puis toutes les 2 min jusqu'a reussite,
+    sans retarder le demarrage ; apt attend le verrou au lieu d'echouer."""
     script = (
         "#!/bin/sh\n"
         "# Ecrit par sd-flasher : installe les paquets demandes au flash, par le cache apt du serveur.\n"
-        "# Lance par expolab-packages.service jusqu'a reussite ; journal : journalctl -u expolab-packages\n"
+        "# Lance par expolab-packages.timer jusqu'a reussite ; journal : journalctl -u expolab-packages\n"
         "set -u\n"
         f"STAMP={PACKAGES_DONE}\n"
         "[ -f \"$STAMP\" ] && exit 0\n"
         "export DEBIAN_FRONTEND=noninteractive\n"
         "dpkg --configure -a || true   # une installation interrompue (redemarrage) est reprise\n"
-        "apt-get update -q || exit 1\n"
-        f"apt-get install -y -q --no-install-recommends {' '.join(packages)} || exit 1\n"
+        "apt-get -o DPkg::Lock::Timeout=300 update -q || exit 1\n"
+        f"apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends {' '.join(packages)} || exit 1\n"
         "mkdir -p \"$(dirname \"$STAMP\")\" && date > \"$STAMP\"\n"
+        "systemctl disable --now expolab-packages.timer 2>/dev/null || true   # plus rien a faire\n"
         "echo \"expolab : paquets installes\"\n"
     )
     unit = (
@@ -368,21 +379,29 @@ def packages_files(packages: list[str]) -> list[dict]:
         "[Unit]\n"
         "Description=expolab : installation des paquets demandes au flash (cache apt du serveur)\n"
         "Wants=network-online.target\n"
-        "After=network-online.target cloud-final.service\n"
+        "After=network-online.target\n"
         f"ConditionPathExists=!{PACKAGES_DONE}\n"
-        "StartLimitIntervalSec=0\n"
         "\n"
         "[Service]\n"
         "Type=oneshot\n"
         f"ExecStart={PACKAGES_SCRIPT}\n"
-        "Restart=on-failure\n"
-        "RestartSec=60\n"
+    )
+    timer = (
+        "# Ecrit par sd-flasher : voir " + PACKAGES_SCRIPT + "\n"
+        "[Unit]\n"
+        "Description=expolab : essais d'installation des paquets demandes au flash\n"
+        "\n"
+        "[Timer]\n"
+        "OnBootSec=1min\n"
+        "OnUnitInactiveSec=2min\n"
+        "Unit=expolab-packages.service\n"
         "\n"
         "[Install]\n"
-        "WantedBy=multi-user.target\n"
+        "WantedBy=timers.target\n"
     )
     return [{"path": PACKAGES_SCRIPT, "permissions": "0755", "content": script},
-            {"path": PACKAGES_UNIT, "permissions": "0644", "content": unit}]
+            {"path": PACKAGES_UNIT, "permissions": "0644", "content": unit},
+            {"path": PACKAGES_TIMER, "permissions": "0644", "content": timer}]
 
 
 def hash_password(password: str, run=subprocess.run) -> str:
@@ -478,13 +497,12 @@ def render_seed(hostname: str, settings: dict, now: int | None = None, hasher=ha
             "content": f'Acquire::http::Proxy "{apt_proxy}";\n',
         })
 
-    # Paquets demandes : installes par un service qui reessaie (voir packages_files), demarre sans
-    # attendre (--no-block : il est ordonne apres cloud-final, qui execute justement ce runcmd).
+    # Paquets demandes : installes par un service lance par un minuteur (voir packages_files).
     packages = settings.get("packages") or []
     if packages:
         user["write_files"] += packages_files(packages)
         user["runcmd"] += [["systemctl", "daemon-reload"],
-                           ["systemctl", "enable", "--now", "--no-block", "expolab-packages.service"]]
+                           ["systemctl", "enable", "--now", "expolab-packages.timer"]]
 
     # Clavier et langue : l'image Ubuntu est en qwerty / anglais, inutilisable au clavier
     # branche sur une machine de l'expo. Modules keyboard et locale de cloud-init.
@@ -648,7 +666,8 @@ def remove_unset_files(root: Path, settings: dict) -> list[str]:
     # maintenant ; sans paquets demandes, le service de l'image n'a plus rien a faire.
     unset.append(PACKAGES_DONE)
     if not settings.get("packages"):
-        unset += [PACKAGES_SCRIPT, PACKAGES_UNIT, PACKAGES_WANTS]
+        unset += [PACKAGES_SCRIPT, PACKAGES_UNIT, PACKAGES_TIMER, PACKAGES_TIMER_WANTS]
+    unset.append(PACKAGES_WANTS)   # ancienne version, a l'origine d'une boucle au demarrage : toujours retiree
     removed = []
     for rel in unset:
         path = root / rel.lstrip("/")
