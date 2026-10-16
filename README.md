@@ -501,8 +501,11 @@ Si la carte neuve est branchee **avant** cette liberation, elle recoit d'abord u
 IP de repli ; dnsmasq-admin libere alors les deux baux des qu'il le voit. Deux
 durees de bail font le reste :
 - les adresses de la **plage dynamique** (donc l'IP de repli) ont un bail de
-  **2 min** (`dnsmasq.conf`) : la carte la redemande au bout d'une minute, dnsmasq
-  refuse (NAK) et elle repart sur son adresse reservee ;
+  **2 min** (`dnsmasq.conf`). La carte la redemande au bout d'une minute et dnsmasq
+  refuse (NAK) - mais `systemd-networkd` (Ubuntu) **ignore ce refus** pendant un
+  renouvellement. C'est l'**expiration** du bail, 2 min au plus tard, qui la fait
+  repartir de zero et prendre son adresse reservee. Verifie sur une vraie carte :
+  retour seul en 1 min 20 s ;
 - les **reservations** gardent un bail de **12 h**, ecrit sur chaque ligne de
   `reservations.conf` par dnsmasq-admin (`nom,ip,12h` ; les anciennes lignes sont
   completees a son demarrage) : une panne du serveur ne leur fait pas perdre leur

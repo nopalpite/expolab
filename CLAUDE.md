@@ -84,6 +84,11 @@ de secret ici (ni mot de passe, ni jeton, ni clé privée).
 - **chrony sur Ubuntu 26.04 :** il ignore un serveur sans authentification NTS
   (comme celui du lab) tant que des sources NTS existent. Il faut
   `authselectmode ignore` et `makestep 1 -1`, que le flasheur écrit déjà.
+- **DHCP, carte sur une IP de repli :** `systemd-networkd` (Ubuntu) ignore un NAK pendant
+  un renouvellement ; seule l'expiration du bail le fait repartir. D'ou le bail de 2 min
+  de la plage dynamique (et 12 h ecrit sur chaque reservation) : ne pas l'allonger. Changer
+  l'IP d'une reservation laisse la machine sur l'ancienne jusqu'a 6 h : `networkctl
+  reconfigure <interface>` sur la machine la deplace tout de suite.
 - **Secrets dans l'espace libre d'une image :** effacer ou remplacer un fichier ne vide
   pas ses blocs. La capture (`sd-flasher/capture.py`) copie la partition ext4 par
   `e2image` (blocs utilisés seulement : rien ne fuit) mais la partition de démarrage
