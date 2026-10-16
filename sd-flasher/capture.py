@@ -25,17 +25,23 @@ import os
 import shutil
 import struct
 import subprocess
+import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
 
 CHUNK = 4 * 1024 * 1024
 EXT_MAGIC = 0xEF53
 COMPRESSIONS = {"zst": ".img.zst", "xz": ".img.xz", "none": ".img"}
-STEPS = ("read", "shrink", "compress", "checksum")
-STEP_LABELS = {"read": "Lecture de la carte", "shrink": "Reduction", "compress": "Compression", "checksum": "Verification et empreinte"}
-STEP_SPAN = {"read": (0, 45), "shrink": (45, 60), "compress": (60, 95), "checksum": (95, 100)}
+STEPS = ("read", "prepare", "shrink", "compress", "checksum")
+STEP_LABELS = {"read": "Lecture de la carte", "prepare": "Preparation master", "shrink": "Reduction",
+               "compress": "Compression", "checksum": "Verification et empreinte"}
+STEP_SPAN = {"read": (0, 40), "prepare": (40, 47), "shrink": (47, 60), "compress": (60, 95), "checksum": (95, 100)}
+# Options de image/prepare-master.sh pour une copie hors ligne : sans confirmation, sans compte
+# "temporaire" a deviner, et suppression de tous les comptes ordinaires.
+PREPARE_ARGS = ("--yes", "--keep-user", "--remove-accounts")
 
 
 class CaptureError(Exception):
@@ -170,6 +176,65 @@ def wipe_fat_free_space(head: bytearray, start: int, size: int) -> str | None:
         boot.release()
 
 
+# --- preparation master de la copie ---------------------------------------------------------------
+
+@contextmanager
+def loop_mount(path: Path, fstype: str):
+    """Monte un fichier (copie de partition) en boucle, en lecture-ecriture, sans rien faire
+    confiance de ce qu'il contient (nosuid, nodev). Jamais la carte : seulement la copie."""
+    mountpoint = tempfile.mkdtemp(prefix="expolab-capture-")
+    try:
+        result = subprocess.run(["mount", "-t", fstype, "-o", "loop,rw,nosuid,nodev", str(path), mountpoint],
+                                capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise CaptureError(f"Montage de la copie ({fstype}) impossible : {result.stderr.strip() or 'erreur inconnue'}")
+        try:
+            yield Path(mountpoint)
+        finally:
+            subprocess.run(["sync"], timeout=120)
+            unmounted = subprocess.run(["umount", mountpoint], capture_output=True, text=True, timeout=120)
+            if unmounted.returncode != 0:
+                # Jamais de suppression recursive : tant que c'est monte, ce dossier EST la copie.
+                raise CaptureError(f"Demontage de la copie impossible : {unmounted.stderr.strip() or 'erreur inconnue'}")
+    finally:
+        try:
+            os.rmdir(mountpoint)   # ne retire qu'un dossier VIDE (donc demonte)
+        except OSError:
+            pass
+
+
+def prepare_copy(*, head: bytearray, plan: dict, part: Path, work_dir: Path, script: Path,
+                 run=subprocess.run, mount=loop_mount) -> list[str]:
+    """Fait de la COPIE une image master, avec image/prepare-master.sh (la meme preparation que
+    sur une machine, ici hors ligne) : graine du flasheur neutre, cloud-init remis a neuf, identite,
+    menage, comptes ordinaires et fichiers du flasheur supprimes. La partition de demarrage est
+    extraite de `head`, montee, puis remise dans `head`. Retourne le compte rendu du script."""
+    if not script.is_file():
+        raise CaptureError(f"Script de preparation introuvable ({script}).")
+    boot_file = None
+    if plan["boot_start"] is not None:
+        offset, size = plan["boot_start"] * plan["sector"], plan["boot_sectors"] * plan["sector"]
+        boot_file = work_dir / "demarrage.fat"
+        boot_file.write_bytes(head[offset:offset + size])
+
+    def call(root: Path, boot: Path) -> list[str]:
+        # Chemins en forme POSIX (identique sous Linux ; necessaire pour lancer les tests sous Windows).
+        env = dict(os.environ, PREPARE_MASTER_ROOT=root.as_posix(), PREPARE_MASTER_BOOT=boot.as_posix(), PREPARE_MASTER_DRY="1")
+        result = run(["bash", script.as_posix(), *PREPARE_ARGS], capture_output=True, text=True, env=env, timeout=600)
+        _check(result, "La preparation master (prepare-master.sh)")
+        return [line[4:] for line in (result.stdout or "").splitlines() if line.startswith("[+] ")]
+
+    with mount(part, "ext4") as root:
+        if boot_file is None:
+            log = call(root, root / "boot" / "firmware")   # pas de partition de demarrage : rien a y nettoyer
+        else:
+            with mount(boot_file, "vfat") as boot:
+                log = call(root, boot)
+    if boot_file is not None:
+        head[offset:offset + size] = boot_file.read_bytes()
+    return log
+
+
 # --- pipeline -------------------------------------------------------------------------------
 
 def _allocated(path: Path) -> int:
@@ -274,9 +339,11 @@ def verify_image(path: Path, compression: str, expected: str, on_read: Callable[
 
 
 def run_capture(*, source: str, work_dir: Path, output: Path, compression: str,
-                update: Callable[..., None], run=subprocess.run, free_bytes: int | None = None) -> dict:
+                update: Callable[..., None], run=subprocess.run, free_bytes: int | None = None,
+                prepare_script: Path | None = None, mount=loop_mount) -> dict:
     """Capture `source` (carte ou fichier) dans `output` (ecrit sous output.part puis
-    renomme). `update(step=, percent=, message=)` rend compte. Leve CaptureError."""
+    renomme). `prepare_script` : prepare la copie en image master (prepare-master.sh) ;
+    None = copie brute. `update(step=, percent=, message=)` rend compte. Leve CaptureError."""
     if compression not in COMPRESSIONS:
         raise CaptureError("Compression inconnue (zst, xz ou none).")
 
@@ -298,13 +365,6 @@ def run_capture(*, source: str, work_dir: Path, output: Path, compression: str,
             head = bytearray(f.read(plan["head_bytes"]))
         if len(head) != plan["head_bytes"]:
             raise CaptureError("Lecture du debut de la carte incomplete.")
-        # La partition de demarrage est copiee telle quelle : on y vide les clusters libres (restes de la
-        # graine du flasheur : mot de passe Wi-Fi, hache du compte). Sur la COPIE seulement.
-        wipe_note = None
-        if plan["boot_start"] is not None:
-            wipe_note = wipe_fat_free_space(head, plan["boot_start"] * plan["sector"], plan["boot_sectors"] * plan["sector"])
-            progress("read", 0.03, "Espace libre de la partition de demarrage efface" if wipe_note is None
-                     else f"Espace libre de la partition de demarrage NON efface : {wipe_note}")
         progress("read", 0.05, f"Copie des donnees utilisees ({plan['used_bytes'] / 1e9:.1f} Go)")
         stop = threading.Event()
         watcher = threading.Thread(target=_watch, args=(part, plan["used_bytes"], lambda x: progress("read", 0.05 + 0.95 * x, "Copie des donnees utilisees"), stop), daemon=True)
@@ -316,6 +376,23 @@ def run_capture(*, source: str, work_dir: Path, output: Path, compression: str,
             watcher.join()
         _check(result, "La copie de la partition systeme (e2image)")
         progress("read", 1, "Carte lue")
+
+        # 1 bis. preparation master (sur la COPIE), puis effacement de l'espace libre de la partition
+        # de demarrage : la graine du flasheur (mot de passe Wi-Fi, hache du compte) vient d'y etre
+        # remplacee, ses anciens clusters liberes gardent leur contenu.
+        prepare_log = []
+        if prepare_script is not None:
+            progress("prepare", 0, "Preparation de la copie en image master")
+            prepare_log = prepare_copy(head=head, plan=plan, part=part, work_dir=work_dir, script=prepare_script,
+                                       run=run, mount=mount)
+            progress("prepare", 0.9, "Copie preparee : " + " ; ".join(prepare_log)[:300])
+        else:
+            progress("prepare", 0.9, "Copie brute (pas de preparation master)")
+        wipe_note = None
+        if plan["boot_start"] is not None:
+            wipe_note = wipe_fat_free_space(head, plan["boot_start"] * plan["sector"], plan["boot_sectors"] * plan["sector"])
+        progress("prepare", 1, "Espace libre de la partition de demarrage efface" if wipe_note is None
+                 else f"Espace libre de la partition de demarrage NON efface : {wipe_note}")
 
         # 2. reduction (sur la COPIE)
         progress("shrink", 0, "Verification du systeme de fichiers")
@@ -361,7 +438,8 @@ def run_capture(*, source: str, work_dir: Path, output: Path, compression: str,
         progress("checksum", 1, "Terminee")
         return {"name": output.name, "bytes": output.stat().st_size, "image_bytes": image_bytes, "sha256": digest,
                 "used_bytes": plan["used_bytes"], "seconds": round(time.monotonic() - started),
-                "boot_wiped": plan["boot_start"] is not None and wipe_note is None, "boot_wipe_note": wipe_note}
+                "boot_wiped": plan["boot_start"] is not None and wipe_note is None, "boot_wipe_note": wipe_note,
+                "prepared": prepare_script is not None, "prepare_log": prepare_log}
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
         final_part.unlink(missing_ok=True)

@@ -60,7 +60,13 @@ TIMEZONE_RE = re.compile(r"^(UTC|[A-Z][A-Za-z_]+(/[A-Z][A-Za-z0-9_+-]+){1,2})$")
 USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")  # noms de comptes Linux usuels
 RESERVED_USERS = {"root"}
 SSH_KEY_RE = re.compile(r"^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp\d+|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/=]+( .*)?$")
-SEED_FILES = ("user-data", "network-config", "meta-data")  # graine cloud-init (NoCloud) sur la partition de demarrage
+SEED_FILES = ("user-data", "network-config", "meta-data")
+# Fichiers que le flasheur ecrit sur la carte (graine cloud-init, render_seed), par reglage. Un
+# reglage VIDE au flash suivant ne les reecrit pas : ils sont alors supprimes de la carte, sinon une
+# image capturee garderait l'ancienne valeur (voir remove_unset_files). Memes chemins dans
+# image/prepare-master.sh --remove-accounts.
+APT_PROXY_FILE = "/etc/apt/apt.conf.d/01expolab-proxy"
+TIME_SERVER_FILES = ("/etc/chrony/sources.d/expolab.sources", "/etc/chrony/conf.d/expolab.conf")  # graine cloud-init (NoCloud) sur la partition de demarrage
 
 
 class FlashError(Exception):
@@ -394,12 +400,12 @@ def render_seed(hostname: str, settings: dict, now: int | None = None, hasher=ha
     time_server = (settings.get("time_server") or "").strip()
     if time_server:
         user["write_files"].append({
-            "path": "/etc/chrony/sources.d/expolab.sources",
+            "path": TIME_SERVER_FILES[0],
             "permissions": "0644",
             "content": f"# Ecrit par sd-flasher : serveur de temps du lab\nserver {time_server} iburst prefer\n",
         })
         user["write_files"].append({
-            "path": "/etc/chrony/conf.d/expolab.conf",
+            "path": TIME_SERVER_FILES[1],
             "permissions": "0644",
             "content": CHRONY_EXPO_CONF,
         })
@@ -410,7 +416,7 @@ def render_seed(hostname: str, settings: dict, now: int | None = None, hasher=ha
     apt_proxy = (settings.get("apt_proxy") or "").strip()
     if apt_proxy:
         user["write_files"].append({
-            "path": "/etc/apt/apt.conf.d/01expolab-proxy",
+            "path": APT_PROXY_FILE,
             "permissions": "0644",
             "content": f'Acquire::http::Proxy "{apt_proxy}";\n',
         })
@@ -564,6 +570,24 @@ def reset_identity(root: Path, hostname: str) -> list[str]:
     return done
 
 
+def remove_unset_files(root: Path, settings: dict) -> list[str]:
+    """Supprime de la carte les fichiers du flasheur dont le reglage est VIDE (proxy apt, serveur
+    de temps). Utile surtout pour une image capturee qui les contient deja. Retourne ce qui a ete
+    retire (pour le journal)."""
+    unset = []
+    if not (settings.get("apt_proxy") or "").strip():
+        unset.append(APT_PROXY_FILE)
+    if not (settings.get("time_server") or "").strip():
+        unset += TIME_SERVER_FILES
+    removed = []
+    for rel in unset:
+        path = root / rel.lstrip("/")
+        if path.is_file() or path.is_symlink():   # un lien n'est jamais suivi : on retire le lien lui-meme
+            path.unlink()
+            removed.append(f"{rel} retire (reglage vide)")
+    return removed
+
+
 def eject(device: str) -> None:
     """Retire proprement le disque (apres sync) : equivalent d'un 'ejecter' - le
     peripherique disparait du systeme, la carte peut etre retiree."""
@@ -622,13 +646,13 @@ def run_flash(*, image_path: Path, target: str, hostname: str, settings: dict, d
         boot_dir.mkdir(parents=True, exist_ok=True)
         write_seed(boot_dir, seed)
         progress("customize", 0.5, "Identite de la machine")
-        actions = reset_identity(root_dir, hostname)
+        actions = reset_identity(root_dir, hostname) + remove_unset_files(root_dir, settings)
     else:
         with boot_mount(target) as boot_dir:
             write_seed(boot_dir, seed)
         progress("customize", 0.5, "Identite de la machine")
         with root_mount(target) as root_dir:
-            actions = reset_identity(root_dir, hostname)
+            actions = reset_identity(root_dir, hostname) + remove_unset_files(root_dir, settings)
     progress("customize", 1, f"Hostname {hostname} ecrit")
 
     progress("eject", 0, "Ejection")

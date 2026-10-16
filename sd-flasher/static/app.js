@@ -323,7 +323,8 @@ async function startCapture() {
         await api("/api/capture", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ device: dev.path, name: $("capture-name").value.trim(), compression: $("capture-compression").value }),
+            body: JSON.stringify({ device: dev.path, name: $("capture-name").value.trim(), compression: $("capture-compression").value,
+                                   prepare: $("capture-prepare").checked }),
         });
         $("capture-status").hidden = true;
         $("card-panel").scrollIntoView({ behavior: "smooth" });
@@ -427,7 +428,8 @@ function renderJob(job) {
     $("dismiss-btn").textContent = capturing ? "Fermer" : "Carte suivante";
     if (job.state === "done" && capturing) {
         const r = job.result || {};
-        $("done-text").textContent = `Image ${job.image} prête : ${formatBytes(r.bytes)} (${formatBytes(r.used_bytes)} de données, image décompressée ${formatBytes(r.image_bytes)}). Tu peux retirer la carte.`;
+        const kind = r.prepared ? "préparée en master" : "copie brute";
+        $("done-text").textContent = `Image ${job.image} prête (${kind}) : ${formatBytes(r.bytes)} (${formatBytes(r.used_bytes)} de données, image décompressée ${formatBytes(r.image_bytes)}). Tu peux retirer la carte.`;
     } else if (job.state === "done") {
         const where = job.ip ? ` — ${job.hostname} / ${job.ip}` : ` — ${job.hostname}`;
         $("done-text").textContent = `Carte prête. Tu peux la retirer${where}.` + (job.result && job.result.dry_run ? " (simulation)" : "");

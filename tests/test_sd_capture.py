@@ -4,6 +4,7 @@ d'une image depuis un lien et du telechargement d'une image stockee.
 Le pipeline complet tourne sur une vraie petite image (MBR + FAT + ext4) construite
 pendant le test : il faut sfdisk, mkfs.ext4, e2image, e2fsck, resize2fs et zstd
 (presents sur le runner de CI ; test saute sinon). Le reste n'a besoin d'aucun outil."""
+import contextlib
 import hashlib
 import http.server
 import importlib.util
@@ -282,13 +283,15 @@ def test_capture_api_dry_run_without_simulated_card_reports_an_error(api):
 def test_capture_api_end_to_end_in_dry_run(api):
     (api.tmp / "sim").mkdir()
     shutil.copy(build_card(api.tmp), api.tmp / "sim" / "sda")
-    assert api.client.post("/api/capture", json={"device": "/dev/sda", "name": "rpi-test"}).status_code == 202
+    # Copie brute : la preparation master monte la copie (root + loop), testee a part.
+    assert api.client.post("/api/capture", json={"device": "/dev/sda", "name": "rpi-test", "prepare": False}).status_code == 202
     assert api.client.post("/api/capture", json={"device": "/dev/sda", "name": "autre"}).status_code in (202, 409)
     wait(lambda: api._job["state"] != "running", timeout=60)
     assert api._job["state"] == "done", api._job.get("error")
     names = [i["name"] for i in api.client.get("/api/status").get_json()["images"]]
     assert "rpi-test.img.zst" in names
     assert (api.IMAGES_DIR / "rpi-test.img.zst.sha256").read_text().strip() == api._job["result"]["sha256"]
+    assert api._job["result"]["prepared"] is False
 
 
 # --- import depuis un lien -----------------------------------------------------------------------
@@ -642,3 +645,150 @@ def test_a_tampered_archive_is_refused_and_leaves_nothing(tmp_path, monkeypatch)
     with pytest.raises(capture.CaptureError):
         capture.run_capture(source=str(src), work_dir=tmp_path / "images" / ".w", output=out, compression="zst", update=lambda **k: None)
     assert not out.exists() and not Path(str(out) + ".part").exists()
+
+
+# --- preparation master de la copie ------------------------------------------------------------
+
+PREPARE_SCRIPT = Path(__file__).resolve().parent.parent / "image" / "prepare-master.sh"
+needs_bash = pytest.mark.skipif(shutil.which("bash") is None or os.name == "nt",
+                                reason="bash Linux requis (sous Windows, subprocess trouve celui de WSL)")
+
+
+def fake_system(root: Path, boot: Path) -> None:
+    """Arborescence d'une carte deja demarree : compte pi avec mot de passe et cles, graine du
+    flasheur avec le Wi-Fi en clair, fichiers poses par le flasheur."""
+    for d in ("etc/ssh", "etc/sudoers.d", "etc/netplan", "etc/apt/apt.conf.d", "etc/chrony/sources.d",
+              "home/pi/.ssh", "var/lib/cloud/instances/x", "opt/app"):
+        (root / d).mkdir(parents=True, exist_ok=True)
+    (root / "etc/passwd").write_text("root:x:0:0::/root:/bin/bash\npi:x:1000:1000::/home/pi:/bin/bash\n")
+    (root / "etc/shadow").write_text("root:*:1::::::\npi:$6$sel$HACHE-PI:1::::::\n")
+    (root / "etc/group").write_text("root:x:0:\nsudo:x:27:pi\npi:x:1000:\n")
+    (root / "home/pi/.ssh/authorized_keys").write_text("ssh-ed25519 AAAA cle-de-rpi-test\n")
+    (root / "etc/sudoers.d/90-cloud-init-users").write_text("pi ALL=(ALL) NOPASSWD:ALL\n")
+    (root / "etc/netplan/50-cloud-init.yaml").write_text("password: WIFI-EN-CLAIR\n")
+    (root / "etc/apt/apt.conf.d/01expolab-proxy").write_text('Acquire::http::Proxy "http://10.42.0.1:3142";\n')
+    (root / "etc/chrony/sources.d/expolab.sources").write_text("server 10.42.0.1 iburst prefer\n")
+    (root / "etc/machine-id").write_text("0123456789abcdef\n")
+    (root / "etc/ssh/ssh_host_ed25519_key").write_text("cle")
+    (root / "opt/app/programme").write_text("installe dans le master")
+    boot.mkdir(parents=True, exist_ok=True)
+    (boot / "user-data").write_text("#cloud-config\npasswd: $6$sel$HACHE-PI\n")
+    (boot / "network-config").write_text("password: WIFI-EN-CLAIR\n")
+    (boot / "meta-data").write_text("instance-id: expolab-rpi-test-1\n")
+
+
+@needs_bash
+def test_prepare_copy_runs_prepare_master_on_the_mounted_copy(tmp_path):
+    root, boot = tmp_path / "racine", tmp_path / "demarrage"
+    fake_system(root, boot)
+    mounted = []
+
+    @contextlib.contextmanager
+    def fake_mount(path, fstype):   # pas de vrai montage : les dossiers jouent les partitions de la copie
+        mounted.append(fstype)
+        yield root if fstype == "ext4" else boot
+
+    head = bytearray(b"\0" * (2048 * 512) + b"FAT!" * 128 + b"\0" * (512 * 1024 - 512))
+    plan = {"boot_start": 2048, "boot_sectors": 1024, "sector": 512}
+    log = capture.prepare_copy(head=head, plan=plan, part=tmp_path / "systeme.ext", work_dir=tmp_path,
+                               script=PREPARE_SCRIPT, mount=fake_mount)
+    assert mounted == ["ext4", "vfat"]
+    assert any("Comptes ordinaires supprimes : pi" in line for line in log)
+    assert "pi:" not in (root / "etc/passwd").read_text() and not (root / "home/pi").exists()
+    assert not (root / "etc/sudoers.d/90-cloud-init-users").exists()
+    assert not (root / "etc/netplan/50-cloud-init.yaml").exists() and not (root / "var/lib/cloud/instances").exists()
+    assert not (root / "etc/apt/apt.conf.d/01expolab-proxy").exists() and not (root / "etc/chrony/sources.d/expolab.sources").exists()
+    assert (root / "etc/machine-id").read_text() == "" and not (root / "etc/ssh/ssh_host_ed25519_key").exists()
+    assert (root / "opt/app/programme").read_text() == "installe dans le master"   # ce qui est installe reste
+    assert (boot / "user-data").read_text().strip() == "#cloud-config" and not (boot / "meta-data").exists()
+    for f in list(root.rglob("*")) + list(boot.rglob("*")):
+        if f.is_file():
+            assert b"HACHE-PI" not in f.read_bytes() and b"WIFI-EN-CLAIR" not in f.read_bytes(), f
+    assert head[2048 * 512:2048 * 512 + 4] == b"FAT!"   # le fichier "partition" relu tel quel (faux montage)
+
+
+def test_prepare_copy_reports_a_failing_script(tmp_path):
+    def broken_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 2, stdout="", stderr="refus simule")
+
+    @contextlib.contextmanager
+    def fake_mount(path, fstype):
+        yield tmp_path
+
+    script = tmp_path / "prepare.sh"
+    script.write_text("exit 0")
+    plan = {"boot_start": None, "boot_sectors": None, "sector": 512}
+    with pytest.raises(capture.CaptureError, match="refus simule"):
+        capture.prepare_copy(head=bytearray(512), plan=plan, part=tmp_path / "p", work_dir=tmp_path,
+                             script=script, run=broken_run, mount=fake_mount)
+    with pytest.raises(capture.CaptureError, match="introuvable"):
+        capture.prepare_copy(head=bytearray(512), plan=plan, part=tmp_path / "p", work_dir=tmp_path,
+                             script=tmp_path / "absent.sh", mount=fake_mount)
+
+
+def test_capture_api_prepares_by_default(api, monkeypatch):
+    seen = {}
+
+    def fake_capture(**kwargs):
+        seen.update(kwargs)
+        raise capture.CaptureError("arret volontaire")
+
+    monkeypatch.setattr(api.capture, "run_capture", fake_capture)
+    (api.tmp / "sim").mkdir()
+    (api.tmp / "sim" / "sda").write_bytes(b"x")
+    for body, expected in (({}, api.PREPARE_SCRIPT), ({"prepare": False}, None)):
+        assert api.client.post("/api/capture", json={"device": "/dev/sda", "name": "x", **body}).status_code == 202
+        wait(lambda: api._job["state"] != "running")
+        assert seen["prepare_script"] == expected
+        api._job = {"state": "idle"}
+
+
+needs_root_loop = pytest.mark.skipif(
+    os.name == "nt" or not hasattr(os, "geteuid") or os.geteuid() != 0
+    or not all(shutil.which(t) for t in TOOLS + ("mkfs.vfat", "mount", "losetup")),
+    reason="capture preparee : root, montage en boucle et dosfstools requis")
+
+
+@needs_root_loop
+def test_real_prepared_capture_has_no_account_or_secret_left(tmp_path):
+    """Pipeline complet avec preparation master, sur une vraie image (FAT + ext4, montages en boucle)."""
+    img = tmp_path / "carte.img"
+    with open(img, "wb") as f:
+        f.truncate(96 * 1024 * 1024)
+    subprocess.run(["sfdisk", "-q", str(img)], input="label: dos\n2048,16384,c\n18432,,83\n", text=True, check=True)
+    root, boot = tmp_path / "rootfs", tmp_path / "boot"
+    fake_system(root, boot)
+    fat = tmp_path / "boot.fat"
+    with open(fat, "wb") as f:
+        f.truncate(16384 * 512)
+    subprocess.run(["mkfs.vfat", "-F", "16", "-s", "1", str(fat)], check=True, capture_output=True)
+    with capture.loop_mount(fat, "vfat") as mnt:
+        for f in boot.iterdir():
+            shutil.copy(f, mnt / f.name)
+    with open(img, "r+b") as f:
+        f.seek(2048 * 512)
+        f.write(fat.read_bytes())
+    size_kib = (96 * 1024 * 1024 - 18432 * 512) // 1024
+    subprocess.run(["mkfs.ext4", "-F", "-q", "-d", str(root), "-E", f"offset={18432 * 512}", str(img), f"{size_kib}k"], check=True)
+    src_hash = hashlib.sha256(img.read_bytes()).hexdigest()
+
+    out = tmp_path / "images" / "master.img"
+    out.parent.mkdir()
+    result = capture.run_capture(source=str(img), work_dir=tmp_path / "images" / ".capture-x", output=out,
+                                 compression="none", update=lambda **k: None, prepare_script=PREPARE_SCRIPT)
+    assert hashlib.sha256(img.read_bytes()).hexdigest() == src_hash   # la carte n'a pas bouge
+    assert result["prepared"] and any("pi" in line for line in result["prepare_log"])
+    raw = out.read_bytes()
+    for secret in (b"HACHE-PI", b"WIFI-EN-CLAIR", b"cle-de-rpi-test"):
+        assert secret not in raw, secret                                # ni fichier vivant, ni reste
+    start, sectors = struct.unpack_from("<II", raw, 446 + 16 + 8)
+    part = tmp_path / "part.ext4"
+    part.write_bytes(raw[start * 512:(start + sectors) * 512])
+    assert subprocess.run(["e2fsck", "-fn", str(part)], capture_output=True).returncode == 0
+    passwd = subprocess.run(["debugfs", "-R", "cat /etc/passwd", str(part)], capture_output=True, text=True).stdout
+    assert "pi:" not in passwd and "root:" in passwd
+    app = subprocess.run(["debugfs", "-R", "cat /opt/app/programme", str(part)], capture_output=True, text=True).stdout
+    assert app == "installe dans le master"
+    bootpart = tmp_path / "boot-out.fat"
+    bootpart.write_bytes(raw[2048 * 512:(2048 + 16384) * 512])
+    assert subprocess.run(["fsck.vfat", "-n", str(bootpart)], capture_output=True).returncode == 0

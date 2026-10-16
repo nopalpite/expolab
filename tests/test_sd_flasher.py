@@ -1045,3 +1045,21 @@ def test_a_flash_writes_the_expo_servers_to_the_card(api):
     user = yaml.safe_load((api.tmp / "sim" / "module-02-boot" / "user-data").read_text())
     paths = {f["path"] for f in user["write_files"]}
     assert {"/etc/chrony/sources.d/expolab.sources", "/etc/apt/apt.conf.d/01expolab-proxy"} <= paths
+
+
+def test_flash_removes_files_of_settings_left_empty(tmp_path):
+    root = tmp_path / "racine"
+    for rel in (flasher.APT_PROXY_FILE, *flasher.TIME_SERVER_FILES):
+        (root / rel.lstrip("/")).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel.lstrip("/")).write_text("ancienne valeur de l'image")
+    done = flasher.remove_unset_files(root, {"apt_proxy": "", "time_server": "10.42.0.1"})
+    assert done == [f"{flasher.APT_PROXY_FILE} retire (reglage vide)"]
+    assert not (root / flasher.APT_PROXY_FILE.lstrip("/")).exists()
+    assert all((root / rel.lstrip("/")).exists() for rel in flasher.TIME_SERVER_FILES)   # reglage rempli : reecrit par cloud-init
+    assert len(flasher.remove_unset_files(root, {})) == 2 and flasher.remove_unset_files(root, {}) == []
+
+
+def test_seed_writes_the_files_that_remove_unset_files_knows():
+    _files, user, _net = seed(settings={"apt_proxy": "http://10.42.0.1:3142", "time_server": "10.42.0.1"})
+    paths = {f["path"] for f in user["write_files"]}
+    assert {flasher.APT_PROXY_FILE, *flasher.TIME_SERVER_FILES} <= paths

@@ -34,7 +34,7 @@ Tout le reste (logiciels propres à un rôle : GPIO, affichage, applications) re
    sudo reboot
    ```
    Après le redémarrage, vérifier que tout va bien : `systemctl status avahi-daemon`, `chronyc sources`, `cloud-init status --long`.
-3. **Remettre la carte à neuf**, depuis ce compte temporaire. Copier le script depuis le serveur (`scp pi@<serveur>:~/expolab/image/prepare-master.sh .`), puis :
+3. **Remettre la carte à neuf.** Le plus simple : **rien à faire sur la machine**. Éteins-la (`sudo poweroff`) et passe directement à l'étape 4 en laissant cochée « Préparer en image master » : le flasheur applique ce même script à la copie, et supprime en plus tous les comptes (donc le compte temporaire). À la main, si tu préfères, depuis ce compte temporaire : copier le script depuis le serveur (`scp pi@<serveur>:~/expolab/image/prepare-master.sh .`), puis :
    ```
    sudo bash prepare-master.sh
    ```

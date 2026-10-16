@@ -78,7 +78,7 @@
         <section class="panel" id="capture-panel">
             <h2>Capturer une carte</h2>
             <p class="subtitle">Copie une carte (Raspberry Pi OS, Ubuntu) en image <strong>réduite</strong> : seules les données utilisées sont copiées, puis la partition système est ramenée à sa taille minimale. La carte est seulement lue, jamais modifiée. L'image rejoint la liste ci-dessous et peut servir de master.</p>
-            <p class="hint">Pour un master propre, lance d'abord <code>image/prepare-master.sh</code> sur la machine. Une image Raspberry Pi OS déjà démarrée ne ré-agrandit pas seule sa partition après le flash (Ubuntu oui, par cloud-init).</p>
+            <p class="hint">Une image Raspberry Pi OS déjà démarrée ne ré-agrandit pas seule sa partition après le flash (Ubuntu oui, par cloud-init).</p>
             <p class="waiting" id="capture-waiting">Aucune carte détectée.</p>
             <div id="capture-form" hidden>
                 <div class="field" id="capture-device-pick">
@@ -99,6 +99,8 @@
                         </select>
                     </div>
                 </div>
+                <label class="check"><input type="checkbox" id="capture-prepare" checked> Préparer en image master</label>
+                <p class="hint">Sur la copie seulement : comptes (<code>pi</code>…), leurs dossiers personnels et leurs clés supprimés, mot de passe Wi-Fi retiré, cloud-init remis à neuf, identité, journaux et historiques effacés. Chaque carte flashée reçoit alors exactement les réglages ci-dessous, comme une Ubuntu neuve ; ce qui est installé hors de <code>/home</code> est conservé. Décoche pour une copie brute exacte.</p>
                 <div class="actions">
                     <button id="capture-btn" type="button" disabled>Capturer la carte</button>
                 </div>

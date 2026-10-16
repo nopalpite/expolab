@@ -19,6 +19,12 @@
 #   - compte temporaire supprime, puis extinction. NE PAS redemarrer ensuite : un demarrage
 #     refabriquerait l'identite que ce script vient d'effacer.
 #
+# --remove-accounts (copie HORS LIGNE uniquement, PREPARE_MASTER_ROOT obligatoire) : supprime
+#   aussi tous les comptes ordinaires (UID 1000 a 59999) avec leur dossier personnel, leurs droits
+#   sudo poses par cloud-init, les cles SSH de root, et les fichiers que le flasheur ecrit lui-meme
+#   (proxy apt, serveur de temps). Utilise par le flasheur a la capture d'une carte : l'image se
+#   comporte alors comme une Ubuntu neuve, le flasheur cree le compte et applique TOUS ses reglages.
+#
 # Variables (surtout pour les tests) : PREPARE_MASTER_ROOT (prefixe toutes les ecritures),
 # PREPARE_MASTER_BOOT (partition de demarrage, defaut <racine>/boot/firmware),
 # PREPARE_MASTER_DRY=1 (aucune commande systeme : cloud-init, apt, journalctl, extinction...).
@@ -29,14 +35,20 @@ BOOT="${PREPARE_MASTER_BOOT:-$ROOT/boot/firmware}"
 DRY="${PREPARE_MASTER_DRY:-}"
 ASSUME_YES=0
 KEEP_USER=0
-
+REMOVE_ACCOUNTS=0
 for arg in "$@"; do
     case "$arg" in
         --yes) ASSUME_YES=1 ;;
         --keep-user) KEEP_USER=1 ;;
-        *) echo "Option inconnue : $arg" >&2; echo "Usage : sudo $0 [--yes] [--keep-user]" >&2; exit 2 ;;
+        --remove-accounts) REMOVE_ACCOUNTS=1 ;;
+        *) echo "Option inconnue : $arg" >&2; echo "Usage : sudo $0 [--yes] [--keep-user] [--remove-accounts]" >&2; exit 2 ;;
     esac
 done
+if [ "$REMOVE_ACCOUNTS" -eq 1 ] && [ -z "$ROOT" ]; then
+    # Jamais sur la machine en marche : on y supprimerait le compte de la session en cours.
+    echo "--remove-accounts ne s'utilise que sur une copie hors ligne (PREPARE_MASTER_ROOT)." >&2
+    exit 2
+fi
 
 say() { echo "[+] $*"; }
 
@@ -143,6 +155,46 @@ for home in "$ROOT"/home/* "$ROOT/root"; do
     rm -f "$home"/.bash_history "$home"/.viminfo "$home"/.lesshst "$home"/.python_history
     rm -rf "$home"/.cache
 done
+
+# --- comptes (copie hors ligne) -------------------------------------------------------------------
+if [ "$REMOVE_ACCOUNTS" -eq 1 ]; then
+    accounts=""
+    if [ -f "$ROOT/etc/passwd" ]; then
+        accounts="$(awk -F: '$3 >= 1000 && $3 <= 59999 {print $1}' "$ROOT/etc/passwd")"
+    fi
+    say "Comptes ordinaires supprimes : ${accounts:-aucun}"
+    for name in $accounts; do
+        home="$(awk -F: -v u="$name" '$1 == u {print $6}' "$ROOT/etc/passwd")"
+        # Seulement un dossier /home/<nom> : jamais un chemin inattendu (/, /root, /srv...).
+        if [[ "$home" =~ ^/home/[A-Za-z0-9._-]+$ ]]; then
+            rm -rf "$ROOT$home"
+        fi
+        rm -f "$ROOT/var/mail/$name" "$ROOT/var/spool/mail/$name"
+    done
+    if [ -n "$accounts" ]; then
+        names="$(printf '%s,' $accounts)"
+        # Fichier par fichier, reecrit en place (memes droits) : lignes des comptes retires, groupes
+        # personnels portant leur nom, et leur nom retire des listes de membres des autres groupes.
+        clean() {   # clean <fichier> <programme awk>
+            [ -f "$1" ] || return 0
+            awk -F: -v OFS=: -v names="$names" "$2" "$1" > "$1.expolab-tmp" && cat "$1.expolab-tmp" > "$1" && rm -f "$1.expolab-tmp"
+        }
+        members='function strip(list,   n, i, a, out) { n = split(list, a, ","); out = ""; for (i = 1; i <= n; i++) if (a[i] != "" && !gone[a[i]]) out = out (out == "" ? "" : ",") a[i]; return out }
+                 BEGIN { n = split(names, a, ","); for (i = 1; i <= n; i++) if (a[i] != "") gone[a[i]] = 1 }'
+        clean "$ROOT/etc/passwd"  "$members"' !gone[$1]'
+        clean "$ROOT/etc/shadow"  "$members"' !gone[$1]'
+        clean "$ROOT/etc/group"   "$members"' !gone[$1] { $4 = strip($4); print }'
+        clean "$ROOT/etc/gshadow" "$members"' !gone[$1] { $3 = strip($3); $4 = strip($4); print }'
+        clean "$ROOT/etc/subuid"  "$members"' !gone[$1]'
+        clean "$ROOT/etc/subgid"  "$members"' !gone[$1]'
+    fi
+    # Droits sudo et cles poses par cloud-init / le flasheur, cles de root.
+    rm -f "$ROOT/etc/sudoers.d/90-cloud-init-users" "$ROOT/root/.ssh/authorized_keys"
+    # Fichiers que le flasheur ecrit (sd-flasher/flasher.py) : il les reecrit a chaque flash ; laisses
+    # dans l'image, ils garderaient l'ancienne valeur si le reglage est vide au flash suivant.
+    rm -f "$ROOT/etc/apt/apt.conf.d/01expolab-proxy" \
+          "$ROOT/etc/chrony/sources.d/expolab.sources" "$ROOT/etc/chrony/conf.d/expolab.conf"
+fi
 
 # --- fin : compte temporaire et extinction ---------------------------------------------------------
 

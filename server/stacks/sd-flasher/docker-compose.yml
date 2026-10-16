@@ -29,5 +29,8 @@ services:
       - ${REPO_ROOT}/server/stacks/sd-flasher/data:/data
       # Cle publique d'automatisation Ansible (un dossier, pas un fichier).
       - ${REPO_ROOT}/server/stacks/sd-flasher/keys:/keys:ro
+      # Preparation master d'une carte capturee : le script du depot, lance sur la copie
+      # (une seule implementation, la meme que sur une machine).
+      - ${REPO_ROOT}/image/prepare-master.sh:/app/prepare-master.sh:ro
       # Reservations DHCP (lecture seule) : liste des noms de machines.
       - ${REPO_ROOT}/server/stacks/dnsmasq/admin-config:/dnsmasq-admin-config:ro

@@ -106,4 +106,61 @@ if [ "$(id -u)" -ne 0 ]; then
     if env -u PREPARE_MASTER_DRY bash "$SCRIPT" --yes > /dev/null 2>&1; then fail "lance sans etre root"; fi
 fi
 
+# --- --remove-accounts : copie hors ligne preparee par le flasheur a la capture ----------------------
+
+build_tree
+mkdir -p "$R/home/pi/.ssh" "$R/home/autre" "$R/etc/sudoers.d" "$R/root/.ssh" "$R/etc/apt/apt.conf.d" \
+         "$R/etc/chrony/sources.d" "$R/etc/chrony/conf.d" "$R/var/mail" "$R/srv/expo"
+cat > "$R/etc/passwd" <<'EOT'
+root:x:0:0:root:/root:/bin/bash
+_chrony:x:105:110::/var/lib/chrony:/usr/sbin/nologin
+pi:x:1000:1000:pi:/home/pi:/bin/bash
+autre:x:1001:1001::/home/autre:/bin/bash
+bizarre:x:1002:1002::/srv/expo:/bin/bash
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+EOT
+printf 'root:*:1:0:99999:7:::\npi:$6$sel$HACHE:1:0:99999:7:::\nautre:!:1:0:99999:7:::\nbizarre:!:1:0:99999:7:::\n' > "$R/etc/shadow"
+cat > "$R/etc/group" <<'EOT'
+root:x:0:
+sudo:x:27:pi,autre
+video:x:44:pi
+pi:x:1000:
+autre:x:1001:
+bizarre:x:1002:
+staff:x:50:
+EOT
+printf 'root:*::\nsudo:*::pi,autre\npi:!::\nautre:!::\nbizarre:!::\nstaff:*:pi:\n' > "$R/etc/gshadow"
+printf 'pi:100000:65536\nautre:165536:65536\n' > "$R/etc/subuid"; cp "$R/etc/subuid" "$R/etc/subgid"
+echo "ssh-ed25519 AAAA cle-personnelle" > "$R/home/pi/.ssh/authorized_keys"
+echo "pi ALL=(ALL) NOPASSWD:ALL" > "$R/etc/sudoers.d/90-cloud-init-users"
+echo "garde" > "$R/etc/sudoers.d/README"
+echo "ssh-ed25519 AAAA cle-root" > "$R/root/.ssh/authorized_keys"
+echo 'Acquire::http::Proxy "http://10.42.0.1:3142";' > "$R/etc/apt/apt.conf.d/01expolab-proxy"
+echo "server 10.42.0.1 iburst prefer" > "$R/etc/chrony/sources.d/expolab.sources"
+echo "authselectmode ignore" > "$R/etc/chrony/conf.d/expolab.conf"
+echo "courrier" > "$R/var/mail/pi"; echo "application" > "$R/srv/expo/app"
+
+bash "$SCRIPT" --yes --keep-user --remove-accounts > "$WORK/out.log" 2>&1 || fail "--remove-accounts en echec : $(cat "$WORK/out.log")"
+grep -q "Comptes ordinaires supprimes : pi" "$WORK/out.log" || fail "comptes supprimes non annonces"
+[ "$(cut -d: -f1 "$R/etc/passwd" | tr '\n' ' ')" = "root _chrony nobody " ] || fail "passwd : $(cut -d: -f1 "$R/etc/passwd" | tr '\n' ' ')"
+[ "$(cut -d: -f1 "$R/etc/shadow" | tr '\n' ' ')" = "root " ] || fail "shadow non nettoye"
+grep -qx "sudo:x:27:" "$R/etc/group" && grep -qx "video:x:44:" "$R/etc/group" || fail "membres des groupes non retires : $(cat "$R/etc/group")"
+! grep -q "^pi:\|^autre:\|^bizarre:" "$R/etc/group" || fail "groupes personnels conserves"
+grep -qx "staff:x:50:" "$R/etc/group" && grep -qx "root:x:0:" "$R/etc/group" || fail "un groupe systeme a ete touche"
+grep -qx "sudo:\*::" "$R/etc/gshadow" && grep -qx "staff:\*::" "$R/etc/gshadow" || fail "gshadow non nettoye : $(cat "$R/etc/gshadow")"
+[ ! -s "$R/etc/subuid" ] && [ ! -s "$R/etc/subgid" ] || fail "subuid/subgid non nettoyes"
+[ ! -e "$R/home/pi" ] && [ ! -e "$R/home/autre" ] || fail "dossiers personnels conserves"
+[ -f "$R/srv/expo/app" ] || fail "un dossier personnel hors /home a ete supprime (chemin inattendu : jamais touche)"
+[ ! -e "$R/var/mail/pi" ] || fail "courrier du compte conserve"
+[ ! -e "$R/etc/sudoers.d/90-cloud-init-users" ] && [ -f "$R/etc/sudoers.d/README" ] || fail "sudoers mal nettoye"
+[ ! -e "$R/root/.ssh/authorized_keys" ] || fail "cles SSH de root conservees"
+[ ! -e "$R/etc/apt/apt.conf.d/01expolab-proxy" ] && [ ! -e "$R/etc/chrony/sources.d/expolab.sources" ] && [ ! -e "$R/etc/chrony/conf.d/expolab.conf" ] \
+    || fail "fichiers du flasheur conserves"
+! grep -rq "HACHE\|cle-personnelle\|cle-root" "$R" || fail "un secret de compte est encore dans la copie"
+bash "$SCRIPT" --yes --keep-user --remove-accounts > /dev/null 2>&1 || fail "--remove-accounts : second passage en echec"
+
+# Jamais sur la machine en marche (sans PREPARE_MASTER_ROOT) : refuse avant de rien toucher.
+if env -u PREPARE_MASTER_ROOT bash "$SCRIPT" --yes --remove-accounts > "$WORK/out.log" 2>&1; then fail "--remove-accounts accepte sans copie hors ligne"; fi
+grep -q "hors ligne" "$WORK/out.log" || fail "refus sans explication"
+
 echo "OK : image/prepare-master.sh"

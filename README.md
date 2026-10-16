@@ -610,8 +610,23 @@ necessaire verifiee avant de commencer (~2 x les donnees utilisees). Disposition
 acceptee : MBR, partition systeme ext2/3/4 primaire et derniere ; le reste est refuse.
 Une capture et un flash ne tournent jamais en meme temps (meme lecteur). A savoir : une
 image Ubuntu re-agrandit sa partition au premier demarrage (cloud-init), une image
-Raspberry Pi OS deja demarree non ; pour un master propre, `image/prepare-master.sh`
-sur la machine avant la capture.
+Raspberry Pi OS deja demarree non.
+
+**Preparer en image master** (case cochee par defaut) : apres la copie et avant la
+reduction, la copie (jamais la carte) est montee en boucle et passee a
+`image/prepare-master.sh --remove-accounts` - le meme script que sur une machine, ici hors
+ligne : graine du flasheur neutre, cloud-init remis a neuf (dont le netplan qui contenait le
+Wi-Fi en clair), identite, menage, et **tous les comptes ordinaires** supprimes avec leur
+dossier personnel, leurs cles et leurs droits sudo, ainsi que les fichiers que le flasheur
+ecrit (proxy apt, serveur de temps). L'image se comporte alors comme une Ubuntu neuve : le
+flasheur cree le compte et applique **tous** ses reglages, sans reste de la machine
+d'origine. Ce qui est installe hors de `/home` (`/opt`, `/usr/local`, paquets...) est
+conserve. Decocher pour une copie brute exacte (comptes, cles et historique gardes). Le
+script est monte dans le conteneur depuis le depot (`/app/prepare-master.sh`).
+
+**Au flash**, un reglage **vide** (proxy apt, serveur de temps) supprime le fichier
+correspondant sur la carte s'il existe (cas d'une image capturee brute), au lieu de laisser
+l'ancienne valeur.
 
 Aucun secret ne doit rester dans l'image, y compris dans l'espace LIBRE : un fichier efface
 ou remplace garde son contenu dans ses anciens blocs. Cote systeme ext4, `e2image` ne copie
@@ -789,7 +804,7 @@ network/
   teardown.sh                # defait setup.sh
 image/
   machine-setup.sh            # preparation de l'image type (cle d'automatisation, sudo, proxy apt, NTP)
-  prepare-master.sh           # remet une machine a neuf avant de la capturer comme master (graine, identite, menage, compte temporaire)
+  prepare-master.sh           # remet une machine a neuf comme master (graine, identite, menage, compte temporaire) ; --remove-accounts : sur la copie, a la capture
   README-master.md            # preparer l'image master Ubuntu (cloud-init) - contrat avec sd-flasher
 server/
   deploy-server.sh             # orchestration : installe Docker, demarre Dockhand, cree/redeploie les stacks via son API

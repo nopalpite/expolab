@@ -43,6 +43,9 @@ MAX_BYTES = int(os.environ.get("SD_FLASHER_MAX_GB", "256")) * 1000**3
 DRY_RUN = os.environ.get("SD_FLASHER_DRY_RUN") == "1"
 DRY_RUN_DIR = Path(os.environ.get("SD_FLASHER_DRY_RUN_DIR", "/tmp/sd-flasher-dry-run"))
 DEVICES_FILE = os.environ.get("SD_FLASHER_DEVICES_FILE")
+# image/prepare-master.sh, monte depuis le depot (voir la stack) : la meme preparation master
+# que sur une machine, appliquee hors ligne a la copie d'une carte capturee.
+PREPARE_SCRIPT = Path(os.environ.get("SD_FLASHER_PREPARE_SCRIPT", "/app/prepare-master.sh"))
 
 UPLOAD_RESERVE = int(os.environ.get("SD_FLASHER_UPLOAD_RESERVE_MB", "1024")) * 1024 * 1024  # espace laisse libre au serveur
 # + = @ , : presents dans les noms d'images officiels (ubuntu-...-arm64+raspi.img.xz) et sans risque dans un nom de fichier
@@ -486,6 +489,7 @@ def api_capture():
     global _job
     body = request.get_json(silent=True) or {}
     device, compression = body.get("device", ""), body.get("compression", "zst")
+    prepare = body.get("prepare", True) is not False   # preparation master par defaut
     name, error = capture_name(str(body.get("name", "")), compression)
     if error:
         return jsonify({"error": error}), 400
@@ -500,15 +504,15 @@ def api_capture():
         if _job.get("state") == "running":
             return jsonify({"error": "Une operation sur une carte est deja en cours."}), 409
         _job = {"kind": "capture", "state": "running", "step": "read", "percent": 0, "message": "Demarrage",
-                "device": device, "model": eligible[device]["model"], "image": name, "started": int(time.time()),
+                "device": device, "model": eligible[device]["model"], "image": name, "prepare": prepare, "started": int(time.time()),
                 "steps": [{"id": s, "label": capture.STEP_LABELS[s]} for s in capture.STEPS]}
     audit("capture-start", device=device, model=eligible[device]["model"], serial=eligible[device]["serial"],
-          image=name, compression=compression, dry_run=DRY_RUN)
-    threading.Thread(target=_run_capture, args=(device, name, compression, eligible[device]), daemon=True).start()
+          image=name, compression=compression, prepare=prepare, dry_run=DRY_RUN)
+    threading.Thread(target=_run_capture, args=(device, name, compression, eligible[device], prepare), daemon=True).start()
     return jsonify(_job), 202
 
 
-def _run_capture(device: str, name: str, compression: str, expected: dict) -> None:
+def _run_capture(device: str, name: str, compression: str, expected: dict, prepare: bool = True) -> None:
     source = device
     try:
         if DRY_RUN:
@@ -521,7 +525,8 @@ def _run_capture(device: str, name: str, compression: str, expected: dict) -> No
             if not now or now["serial"] != expected["serial"] or now["size"] != expected["size"]:
                 raise capture.CaptureError("La carte a change ou a ete retiree depuis la verification : rien n'a ete lu.")
         result = capture.run_capture(source=source, work_dir=IMAGES_DIR / f".capture-{name}", output=IMAGES_DIR / name,
-                                     compression=compression, update=_update, free_bytes=free_for_images())
+                                     compression=compression, update=_update, free_bytes=free_for_images(),
+                                     prepare_script=PREPARE_SCRIPT if prepare else None)
         sha_path(name).write_text(result["sha256"] + "\n")
         if not DRY_RUN:
             flasher.eject(device)
