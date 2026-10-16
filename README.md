@@ -378,6 +378,31 @@ est idempotent aussi : relancez-le apres avoir modifie `server/services.yaml`
 ou le code d'une application pour regenerer le Caddyfile et redeployer les
 stacks concernees via l'API Dockhand.
 
+## Prises connectees Matter (essai)
+
+Stack `matter` : **python-matter-server**, le controleur Matter qu'utilise Home Assistant,
+seul (pas de Home Assistant). Tout est local ; seule la verification d'authenticite d'une
+prise a son ajout consulte le registre Matter (le serveur doit alors avoir internet).
+`network_mode: host`, ecoute sur `127.0.0.1:5580` (API WebSocket), Bluetooth du Pi par D-Bus
+pour approvisionner les prises. Etat (fabric, prises) dans `server/stacks/matter/data/` : a
+sauvegarder, le perdre oblige a reinitialiser chaque prise.
+
+Prerequis reseau : **IPv6 en lien local** sur `expo-lan` (Matter dialogue en IPv6 local et
+mDNS) - pose par `network/setup.sh` (relance sans coupure : `nmcli device reapply`). Prises :
+Matter **en Wi-Fi** (2,4 GHz), avec mesure de consommation exposee en Matter ; valider un
+modele avant d'en acheter plusieurs.
+
+En attendant la page d'administration, `sudo ./server/matter.sh` :
+
+```bash
+sudo ./server/matter.sh info              # controleur pret ?
+sudo ./server/matter.sh wifi              # Wi-Fi de l'expo (reglages du flasheur) -> controleur, une fois
+sudo ./server/matter.sh ajouter 34970112332   # prise neuve branchee pres du serveur (ou MT:...)
+sudo ./server/matter.sh prises            # etat, puissance (W), energie (Wh)
+sudo ./server/matter.sh brut              # tous les attributs : ce que la prise expose vraiment
+sudo ./server/matter.sh eteindre 1        # / allumer 1 / identifier 1 / retirer 1
+```
+
 ## Interface d'exploitation (compte exploitant)
 
 Pour l'exploitant de l'exposition : un **second compte**, cree par l'administrateur dans

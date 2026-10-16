@@ -37,6 +37,7 @@ case "$*" in
         name=$(sed -n 's/.*con-name \([^ ]*\).*/\1/p' <<< "$*"); echo "$*" > "$NM_DIR/$name" ;;
     "connection modify "*) echo "$*" >> "$NM_DIR/$3" ;;
     "connection up expo-lan-port") [ -z "${FAKE_NO_CARRIER:-}" ] ;;
+    "device reapply "*) [ -n "${FAKE_BRIDGE_ACTIVE:-}" ] ;;   # seulement sur un pont deja actif
     "connection delete "*) rm -f "$NM_DIR/$3" ;;
 esac
 EOT
@@ -59,6 +60,7 @@ grep -q -- "--force" "$WORK/out.log" || fail "--force non suggere"
 : > "$NM_LOG"
 FAKE_NO_CARRIER=1 bash "$SETUP" eth1 > "$WORK/out.log" 2>&1 || fail "setup.sh eth1 a echoue"
 grep -q "type bridge ifname expo-lan con-name expo-lan .*ipv4.addresses 10.42.0.1/24 ipv4.never-default yes" "$NM_DIR/expo-lan" || fail "pont mal configure"
+grep -q "ipv6.method link-local" "$NM_DIR/expo-lan" || fail "IPv6 lien local absent (prises Matter)"
 grep -q "bridge.stp no" "$NM_DIR/expo-lan" || fail "STP non desactive"
 grep -q "type ethernet ifname eth1 con-name expo-lan-port master expo-lan slave-type bridge" "$NM_DIR/expo-lan-port" || fail "port mal configure"
 grep -q "rejoindra le pont" "$WORK/out.log" || fail "cable debranche non signale"
@@ -90,6 +92,12 @@ bash "$SETUP" --sans-carte > "$WORK/out.log" 2>&1 || fail "--sans-carte a echoue
 grep -q "ipv4.addresses 10.42.0.1/24 ipv4.never-default yes" "$NM_DIR/expo-lan" || fail "pont --sans-carte mal configure"
 [ ! -e "$NM_DIR/expo-lan-port" ] || fail "port cree malgre --sans-carte"
 grep -q "^connection up expo-lan$" "$NM_LOG" || fail "pont non active"
+
+# Pont deja actif (relance pour un reglage) : applique sans le desactiver, pas de coupure.
+: > "$NM_LOG"
+FAKE_BRIDGE_ACTIVE=1 bash "$SETUP" --sans-carte > "$WORK/out.log" 2>&1 || fail "relance sur pont actif en echec"
+grep -q "^device reapply expo-lan$" "$NM_LOG" || fail "reglage non applique au pont actif"
+! grep -q "^connection up expo-lan$" "$NM_LOG" || fail "pont reactive (coupure du reseau de l'expo)"
 ! grep -q "^connection \(add\|modify\|up\).*expo-lan-port" "$NM_LOG" || fail "--sans-carte a touche au port"
 grep -q "SANS carte" "$WORK/out.log" || fail "mode sans carte non annonce"
 

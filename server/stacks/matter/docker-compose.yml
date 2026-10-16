@@ -1,0 +1,38 @@
+# Stack Dockhand "matter" - controleur Matter des prises connectees de l'expo
+# (python-matter-server, le controleur qu'utilise Home Assistant, publie seul).
+# Tout est LOCAL : ni cloud ni internet une fois les prises approvisionnees (seule la
+# verification d'authenticite d'une prise, a son ajout, consulte le registre Matter).
+#
+# network_mode: host : Matter dialogue en IPv6 lien local et mDNS sur expo-lan (voir
+# network/setup.sh), et approvisionne les prises par le Bluetooth du Pi (BlueZ, via
+# D-Bus). N'ecoute QUE sur 127.0.0.1:5580 (API WebSocket) : seul le serveur lui parle
+# (server/matter.sh, puis la page d'administration des prises).
+services:
+  matter:
+    image: ghcr.io/home-assistant-libs/python-matter-server:stable
+    container_name: expolab-matter
+    restart: unless-stopped
+    network_mode: host
+    # Bluetooth par D-Bus (BlueZ de l'hote) : le profil AppArmor par defaut le bloque.
+    security_opt:
+      - apparmor=unconfined
+    volumes:
+      # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
+      - /etc/localtime:/etc/localtime:ro
+      # Etat Matter (fabric, prises approvisionnees, certificats) - non versionne, A
+      # SAUVEGARDER : le perdre oblige a reinitialiser et reapprovisionner chaque prise.
+      - ${REPO_ROOT}/server/stacks/matter/data:/data
+      - /run/dbus:/run/dbus:ro
+      # Petit client de l'API (server/matter_cmd.py), lance par server/matter.sh.
+      - ${REPO_ROOT}/server/matter_cmd.py:/expolab/matter_cmd.py:ro
+    command:
+      - --storage-path
+      - /data
+      - --paa-root-cert-dir
+      - /data/credentials
+      - --listen-address
+      - 127.0.0.1
+      - --primary-interface
+      - expo-lan
+      - --bluetooth-adapter
+      - "0"

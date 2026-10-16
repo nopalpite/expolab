@@ -88,3 +88,6 @@ server/stacks/sd-flasher/keys/
 server/stacks/ntp/config/
 server/stacks/ntp/data/
 server/stacks/ntp/run/
+
+# Etat Matter (fabric, prises approvisionnees) : propre a chaque installation, a sauvegarder.
+server/stacks/matter/data/

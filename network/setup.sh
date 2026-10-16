@@ -107,9 +107,12 @@ else
     fi
 fi
 
-echo "[+] Pont $BRIDGE ($ADDRESS, sans passerelle ni IPv6)..."
+echo "[+] Pont $BRIDGE ($ADDRESS, sans passerelle ; IPv6 en lien local seulement)..."
+# IPv6 en LIEN LOCAL seulement (fe80::, aucune adresse routable, aucune annonce de routeur) : les
+# prises connectees Matter (stack matter) dialoguent avec le serveur en IPv6 local. Sans IPv6 sur le
+# pont, le serveur ne les joint pas.
 if nmcli connection show "$BRIDGE" &>/dev/null; then
-    nmcli connection modify "$BRIDGE" ipv4.method manual ipv4.addresses "$ADDRESS"
+    nmcli connection modify "$BRIDGE" ipv4.method manual ipv4.addresses "$ADDRESS" ipv6.method link-local
 else
     # stp no : un seul port, rien a proteger, et pas de delai de 30 s avant
     # que la carte ne transmette (le premier DHCP d'une machine attendrait).
@@ -117,11 +120,12 @@ else
     nmcli connection add type bridge ifname "$BRIDGE" con-name "$BRIDGE" \
         bridge.stp no \
         ipv4.method manual ipv4.addresses "$ADDRESS" ipv4.never-default yes \
-        ipv6.method disabled \
+        ipv6.method link-local \
         connection.autoconnect yes >/dev/null
 fi
 
-nmcli connection up "$BRIDGE" >/dev/null
+# Pont deja actif : changements appliques SANS le desactiver (pas de coupure du reseau de l'expo).
+nmcli device reapply "$BRIDGE" >/dev/null 2>&1 || nmcli connection up "$BRIDGE" >/dev/null
 
 if [ "$NO_PORT" -eq 0 ]; then
     echo "[+] Carte $IFACE rattachee au pont..."
