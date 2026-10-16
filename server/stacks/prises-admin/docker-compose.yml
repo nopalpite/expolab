@@ -3,7 +3,7 @@
 # proprement un module par SSH avant de couper sa prise.
 #
 # network_mode: host : joint le controleur en local et les machines de l'expo en SSH.
-# N'ecoute que sur 127.0.0.1:5058 : joignable uniquement via Caddy, derriere le portail.
+# N'ecoute que sur 127.0.0.1:5059 : joignable uniquement via Caddy, derriere le portail.
 services:
   prises-admin:
     build: ${REPO_ROOT}/prises-admin

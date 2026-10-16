@@ -394,7 +394,7 @@ modele avant d'en acheter plusieurs.
 
 ### Page Prises (portail, groupe Infrastructure)
 
-Stack `prises-admin` (Flask, `127.0.0.1:5058`, derriere l'authentification du portail),
+Stack `prises-admin` (Flask, `127.0.0.1:5059`, derriere l'authentification du portail),
 qui ne fait que parler au controleur :
 
 - **Approvisionnement** : code d'appairage saisi ou **QR code scanne** (camera arriere d'un

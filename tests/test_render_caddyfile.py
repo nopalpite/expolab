@@ -133,3 +133,13 @@ def test_repo_services_yaml_renders_in_both_modes(tmp_path):
         protected = [s["name"] for s in data["services"] if s.get("auth")]
         assert protected, "aucun service protege dans services.yaml ?"
         assert result.stdout.count("forward_auth") == len(protected)
+
+
+def test_repo_services_have_distinct_backend_ports():
+    """Deux services sur le meme port : le second ne demarre pas (cas vecu : prises / ntp)."""
+    data = yaml.safe_load((REPO / "server" / "services.yaml").read_text(encoding="utf-8"))
+    seen = {}
+    for s in data["services"]:
+        key = (s.get("backend_host", "localhost"), s["backend_port"])
+        assert key not in seen, f"{s['name']} et {seen[key]} sur le meme port {key[1]}"
+        seen[key] = s["name"]

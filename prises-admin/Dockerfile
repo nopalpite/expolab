@@ -11,5 +11,5 @@ COPY app.py plugs.py matter_client.py ./
 COPY templates/ templates/
 COPY static/ static/
 
-EXPOSE 5058
+EXPOSE 5059
 CMD ["python3", "/app/app.py"]

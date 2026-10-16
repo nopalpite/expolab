@@ -66,7 +66,7 @@ services:
     description: Paquets, journal, miroirs HTTPS
   - name: prises
     auth: true
-    backend_port: 5058
+    backend_port: 5059
     title: Prises
     group: Infrastructure
     icon: play
