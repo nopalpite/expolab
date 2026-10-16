@@ -1076,7 +1076,7 @@ def test_seed_installs_packages_through_a_retrying_service():
     files = files_by_path(user)
     script = files[flasher.PACKAGES_SCRIPT]
     assert script["permissions"] == "0755" and script["content"].startswith("#!/bin/sh\n")
-    assert "install -y -q --no-install-recommends avahi-daemon htop" in script["content"]
+    assert 'WANTED="avahi-daemon htop"' in script["content"] and "install -y -q --no-install-recommends $FOUND" in script["content"]
     unit = files[flasher.PACKAGES_UNIT]["content"]
     assert "After=network-online.target\n" in unit and f"ConditionPathExists=!{flasher.PACKAGES_DONE}" in unit
     # Jamais rattache au demarrage ni ordonne apres cloud-final : boucle avec multi-user.target, que
@@ -1133,7 +1133,46 @@ def test_flash_cleans_package_service_and_stamp_of_a_captured_image(tmp_path):
         assert not (root / rel.lstrip("/")).exists()
 
 
-@pytest.mark.skipif(os.name == "nt" or shutil.which("sh") is None, reason="sh Linux requis")
+def fake_tools(fakes, log, tmp_path, missing=()):
+    """Faux apt-get / dpkg / systemctl / apt-cache : journalisent leurs appels ; `install` echoue
+    tant que tmp_path/fail existe ; apt-cache policy n'a pas de candidat pour `missing`."""
+    for tool in ("apt-get", "dpkg", "systemctl"):
+        (fakes / tool).write_text(f'#!/bin/sh\necho "{tool} $*" >> "{log}"\ncase " $* " in *" install "*) [ -f "{tmp_path}/fail" ] && exit 100;; esac\nexit 0\n')
+        (fakes / tool).chmod(0o755)
+    cases = "".join(f'    {m}) echo "  Candidate: (none)"; exit 0;;\n' for m in missing)
+    (fakes / "apt-cache").write_text(f'#!/bin/sh\ncase "$2" in\n{cases}esac\necho "$2:"; echo "  Installed: (none)"; echo "  Candidate: 1.0-1"\n')
+    (fakes / "apt-cache").chmod(0o755)
+
+
+needs_sh = pytest.mark.skipif(os.name == "nt" or shutil.which("sh") is None, reason="sh Linux requis")
+
+
+@needs_sh
+def test_install_script_skips_packages_missing_from_the_repositories(tmp_path):
+    files = {f["path"]: f["content"] for f in flasher.packages_files(["cowsay", "neofetch"])}
+    stamp = tmp_path / "packages.done"
+    script = tmp_path / "install.sh"
+    script.write_text(files[flasher.PACKAGES_SCRIPT].replace(flasher.PACKAGES_DONE, str(stamp)))
+    fakes, log = tmp_path / "bin", tmp_path / "calls.log"
+    fakes.mkdir()
+    fake_tools(fakes, log, tmp_path, missing=("neofetch",))
+    env = dict(os.environ, PATH=f"{fakes}:{os.environ['PATH']}")
+    out = subprocess.run(["sh", str(script)], env=env, capture_output=True, text=True)
+    assert out.returncode == 0 and stamp.exists()   # un paquet qui n'existe pas ne bloque pas les autres
+    assert "paquet introuvable dans les depots, ignore : neofetch" in out.stdout
+    assert "ignores (introuvables) : neofetch" in out.stdout
+    installs = [line for line in log.read_text().splitlines() if " install " in line]
+    assert installs == ["apt-get -o DPkg::Lock::Timeout=300 install -y -q --no-install-recommends cowsay"]
+
+    # Plus rien d'installable : c'est fini aussi (pas d'essais toutes les 2 min pour rien).
+    stamp.unlink()
+    log.write_text("")
+    fake_tools(fakes, log, tmp_path, missing=("cowsay", "neofetch"))
+    out = subprocess.run(["sh", str(script)], env=env, capture_output=True, text=True)
+    assert out.returncode == 0 and stamp.exists() and " install " not in log.read_text()
+
+
+@needs_sh
 def test_install_script_retries_until_success_then_stops(tmp_path):
     files = {f["path"]: f["content"] for f in flasher.packages_files(["avahi-daemon", "htop"])}
     stamp = tmp_path / "expolab" / "packages.done"
@@ -1142,9 +1181,7 @@ def test_install_script_retries_until_success_then_stops(tmp_path):
     fakes = tmp_path / "bin"
     fakes.mkdir()
     log = tmp_path / "calls.log"
-    for tool in ("apt-get", "dpkg", "systemctl"):
-        (fakes / tool).write_text(f'#!/bin/sh\necho "{tool} $*" >> "{log}"\ncase " $* " in *" install "*) [ -f "{tmp_path}/fail" ] && exit 100;; esac\nexit 0\n')
-        (fakes / tool).chmod(0o755)
+    fake_tools(fakes, log, tmp_path)
     env = dict(os.environ, PATH=f"{fakes}:{os.environ['PATH']}")
     (tmp_path / "fail").write_text("")   # cache injoignable : l'installation echoue
     assert subprocess.run(["sh", str(script)], env=env).returncode != 0 and not stamp.exists()
