@@ -53,7 +53,8 @@ LEASE_TIME_RE = re.compile(r"^(\d+[smhdw]?|infinite)$")
 # Liberation automatique des baux orphelins (voir reconcile_once).
 AUTO_RELEASE = os.environ.get("DNSMASQ_AUTO_RELEASE", "1") != "0"
 RECONCILE_INTERVAL = int(os.environ.get("DNSMASQ_RECONCILE_INTERVAL", "10"))
-STALE_AFTER_CHECKS = 3  # verifications consecutives sans reponse avant liberation
+STALE_AFTER_CHECKS = 3  # verifications consecutives sans reponse avant liberation...
+STALE_AFTER_SECONDS = int(os.environ.get("DNSMASQ_STALE_AFTER", "60"))  # ...ET au moins cette duree de silence
 _events: collections.deque = collections.deque(maxlen=50)
 _reconcile_now = threading.Event()   # reveille la reconciliation des qu'un bail change
 
@@ -345,13 +346,14 @@ def log_event(kind: str, message: str) -> None:
     notify_change()
 
 
-def reconcile_once(misses: dict) -> None:
+def reconcile_once(misses: dict, now: float | None = None) -> None:
     """Remplacement de carte sans intervention : pour chaque reservation PAR
     NOM (sans MAC), l'IP appartient au nom, pas a une carte. Deux situations
     bloquent sinon la carte neuve (meme nom, autre MAC) :
 
     - le bail de la morte tient encore l'IP : il est libere des qu'il ne
-      repond plus en ARP pendant STALE_AFTER_CHECKS verifications de suite.
+      repond plus en ARP pendant STALE_AFTER_CHECKS verifications de suite ET
+      au moins STALE_AFTER_SECONDS secondes.
       Sans danger si la machine n'etait qu'eteinte : a son retour elle
       retrouve la meme IP (la reservation la lui redonne). Quand la carte
       neuve demarre, l'IP est deja libre et elle la prend d'emblee.
@@ -363,6 +365,7 @@ def reconcile_once(misses: dict) -> None:
 
     Un detenteur qui repond en ARP n'est JAMAIS libere (deux machines vivantes
     pour un meme nom : conflit signale, a trancher par un humain)."""
+    now = time.time() if now is None else now
     reservations = [r for r in load_reservations() if not r["mac"]]
     leases = load_leases()
     by_ip = {l["ip"]: l for l in leases}
@@ -405,8 +408,13 @@ def reconcile_once(misses: dict) -> None:
         if alive is None or alive:
             misses.pop(ip, None)
             continue
-        misses[ip] = misses.get(ip, 0) + 1
-        if misses[ip] >= STALE_AFTER_CHECKS:
+        miss = misses.setdefault(ip, {"since": now, "count": 0})
+        miss["count"] += 1
+        # Une DUREE de silence, pas un nombre de passages : la reconciliation est aussi
+        # reveillee a chaque changement de bail (une fois par minute par appareil non
+        # reserve), et le Wi-Fi rate parfois des requetes ARP. Liberer le bail d'une
+        # machine vivante ferait disparaitre son nom du DNS jusqu'a son renouvellement.
+        if miss["count"] >= STALE_AFTER_CHECKS and now - miss["since"] >= STALE_AFTER_SECONDS:
             ok, err = release_lease(holder)
             log_event(
                 "liberation" if ok else "erreur",

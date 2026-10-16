@@ -490,8 +490,10 @@ les anciennes lignes MAC d'une machine qu'on gere par nom.
 
 **Liberation automatique des baux.** dnsmasq-admin verifie toutes les 10 s (et
 aussitot qu'un bail change), pour chaque reservation par nom, que la machine qui
-tient l'IP repond encore en ARP ; apres 3 verifications sans reponse (~30 s) son
-bail est libere. La carte neuve, qui demarre ensuite, prend directement l'IP. Une
+tient l'IP repond encore en ARP ; apres 3 verifications sans reponse ET au moins
+60 s de silence (`DNSMASQ_STALE_AFTER`) son bail est libere. Une duree et non un
+nombre de passages : le Wi-Fi rate parfois des requetes ARP, et liberer le bail d'une
+machine vivante ferait disparaitre son nom du DNS jusqu'a son renouvellement. La carte neuve, qui demarre ensuite, prend directement l'IP. Une
 machine simplement eteinte retrouve elle aussi sa place a son retour. Un detenteur
 qui repond encore n'est **jamais** libere : deux machines vivantes pour un meme nom
 donnent un conflit, signale dans `docker logs expolab-dnsmasq-admin` et sur

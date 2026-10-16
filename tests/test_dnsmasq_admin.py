@@ -192,13 +192,33 @@ class Lab:
 NAME_RESERVATION = [{"mac": "", "ip": "10.42.0.60", "hostname": "pi-03"}]
 
 
-def test_dead_holder_released_after_three_failed_checks(monkeypatch):
+def test_dead_holder_released_after_three_failed_checks_and_a_minute(monkeypatch):
     lab = Lab(monkeypatch, NAME_RESERVATION, [lease(MAC_OLD, "10.42.0.60", "pi-03")], {"10.42.0.60": False})
     misses = {}
-    da.reconcile_once(misses)
-    da.reconcile_once(misses)
+    da.reconcile_once(misses, now=1000)
+    da.reconcile_once(misses, now=1020)
+    da.reconcile_once(misses, now=1040)
+    assert lab.released == []          # 3 echecs mais 40 s de silence seulement
+    da.reconcile_once(misses, now=1060)
+    assert lab.released == [MAC_OLD]
+
+
+def test_rapid_passes_never_shorten_the_silence_needed(monkeypatch):
+    # Reveils frequents (un renouvellement de bail par minute et par appareil non reserve) :
+    # plein de passages en quelques secondes ne doivent pas suffire a liberer une machine
+    # dont le Wi-Fi a rate quelques ARP.
+    lab = Lab(monkeypatch, NAME_RESERVATION, [lease(MAC_OLD, "10.42.0.60", "pi-03")], {"10.42.0.60": False})
+    misses = {}
+    for t in range(10):
+        da.reconcile_once(misses, now=2000 + t)
     assert lab.released == []
-    da.reconcile_once(misses)
+    lab.alive["10.42.0.60"] = True     # elle repond de nouveau : le compte repart de zero
+    da.reconcile_once(misses, now=2015)
+    lab.alive["10.42.0.60"] = False
+    for t in (2030, 2050, 2070):
+        da.reconcile_once(misses, now=t)
+    assert lab.released == []          # 40 s depuis le dernier signe de vie
+    da.reconcile_once(misses, now=2090)
     assert lab.released == [MAC_OLD]
 
 
