@@ -99,6 +99,10 @@ de secret ici (ni mot de passe, ni jeton, ni clé privée).
   `e2image` (blocs utilisés seulement : rien ne fuit) mais la partition de démarrage
   FAT telle quelle : elle y met à zéro les clusters libres. Toute capture manuelle
   (`dd`, PiShrink) laisse le mot de passe Wi-Fi de la graine dans l'image.
+- **Redemarrage depuis le plan :** le portail ne detient jamais la cle SSH : il transmet un NOM de
+  machine placee sur un plan a `prises-admin` (`/api/machines/restart`), seul a pouvoir agir, et
+  l'API n'accepte ni adresse ni commande libres. Toute nouvelle action sur une machine suit le
+  meme chemin (liste blanche, delai entre deux demandes, journal).
 - **Compte exploitant :** tout nouvel acces qu'on veut lui ouvrir passe par
   `OPERATOR_PATHS` / `operator_may_reach` du portail (liste blanche) ; par defaut il n'a acces
   a rien. Ne jamais lui faire confiance pour l'image ou les reglages du flash : le serveur les

@@ -367,3 +367,62 @@ def test_plans_unknown_presence_and_jpeg_size(tmp_path):
     data = _plans_module.build_plans(rooms, machines, None, tmp_path)
     assert data["presence_ok"] is False and data["rooms"][0]["machines"][0]["state"] == "unknown"
     assert data["rooms"][0]["ratio"] == list(_plans_module.DEFAULT_RATIO) and not data["rooms"][0]["ratio_known"]
+
+
+# --- redemarrage d'une machine depuis le plan ---------------------------------------------------
+
+def restart_setup(portal, tmp_path, monkeypatch, status=202, body=None):
+    set_operator(portal, tmp_path)
+    cfg = tmp_path / "machines.yaml"
+    cfg.write_text("""rooms:
+- {id: expo, name: Expo}
+machines:
+- {id: a, name: rpi-test.expolab.lan, host: 10.42.0.134, room: expo, position: {x: 10, y: 20}}
+- {id: c, name: borne, host: 10.42.0.200, room: expo}
+""")
+    monkeypatch.setattr(portal.plans, "BASTION_CONFIG", cfg)
+    sent = []
+    monkeypatch.setattr(portal, "call_restart_service", lambda name, actor: (sent.append((name, actor)), (status, body or {"ok": True}))[1])
+    return sent
+
+
+XHR = {"X-Requested-With": "expolab"}
+
+
+def test_restart_needs_a_session_and_the_custom_header(portal, tmp_path, monkeypatch):
+    sent = restart_setup(portal, tmp_path, monkeypatch)
+    assert portal.client.post("/api/machines/a/restart", headers=XHR).status_code == 401
+    op = op_cookie(portal)["headers"]
+    assert portal.client.post("/api/machines/a/restart", headers=op).status_code == 403      # sans l'en-tete
+    assert sent == []
+
+
+def test_operator_and_admin_can_restart_a_placed_machine(portal, tmp_path, monkeypatch):
+    sent = restart_setup(portal, tmp_path, monkeypatch)
+    res = portal.client.post("/api/machines/a/restart", headers={**op_cookie(portal)["headers"], **XHR})
+    assert res.status_code == 202 and res.get_json() == {"ok": True}
+    admin = portal.client.post("/api/machines/a/restart", headers={**logged_in(portal)["headers"], **XHR})
+    assert admin.status_code == 202
+    assert [n for n, _ in sent] == ["rpi-test", "rpi-test"]                  # nom court, jamais d'adresse ni de commande
+    assert sent[0][1].startswith(f"{portal.OPERATOR}:") and sent[1][1].startswith(f"{portal.ADMIN}:")
+
+
+def test_restart_refuses_unknown_or_unplaced_machines(portal, tmp_path, monkeypatch):
+    sent = restart_setup(portal, tmp_path, monkeypatch)
+    headers = {**op_cookie(portal)["headers"], **XHR}
+    for machine_id in ("c", "inconnue", "..%2Fx"):                              # c : pas placee sur le plan
+        assert portal.client.post(f"/api/machines/{machine_id}/restart", headers=headers).status_code == 404
+    assert sent == []
+
+
+def test_restart_passes_the_service_answer_through(portal, tmp_path, monkeypatch):
+    restart_setup(portal, tmp_path, monkeypatch, status=409, body={"error": "La machine ne repond pas : redemarrage impossible depuis ici."})
+    res = portal.client.post("/api/machines/a/restart", headers={**op_cookie(portal)["headers"], **XHR})
+    assert res.status_code == 409 and "ne repond pas" in res.get_json()["error"]
+
+
+def test_restart_service_unreachable_is_a_clean_502(portal, monkeypatch):
+    def boom(*a, **k):
+        raise OSError("refused")
+    monkeypatch.setattr(portal.urllib.request, "urlopen", boom)
+    assert portal.call_restart_service("rpi-test", "admin:x") == (502, {"error": "Le service de redemarrage ne repond pas."})

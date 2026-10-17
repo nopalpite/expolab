@@ -455,7 +455,7 @@ le portail (**Compte > Identifiants**, section "Compte exploitant", mot de passe
 administrateur exige ; fichier `server/stacks/dashboard/operator.env`, separe
 d'`auth.env`). Il se connecte au meme portail et ne voit que **deux onglets** :
 
-- **Plans des salles** (lecture seule, servi par le portail, `portal/plans.py`) : les
+- **Plans des salles** (servi par le portail, `portal/plans.py`) : les
   plans de Bastion avec chaque machine a sa position, point vert / rouge clignotant / gris
   (en ligne / ne repond plus / inconnue) d'apres la presence de dnsmasq-admin (Topologie),
   rafraichi toutes les 5 s. **Meme technique de placement que Bastion** : le cadre du
@@ -463,7 +463,15 @@ d'`auth.env`). Il se connecte au meme portail et ne voit que **deux onglets** :
   cadre et centrees, la taille des points suit la largeur affichee - un point reste au
   meme endroit du plan sur telephone, tablette, avec zoom ou non. Donnees de Bastion lues
   en lecture seule (`config/machines.yaml`, `maps/`), en liste blanche : aucun identifiant
-  n'en sort. Un clic sur une machine : etat, adresse, et "Preparer une carte" pour elle.
+  n'en sort. Un clic sur une machine : etat, adresse et, si elle est en ligne, **Redemarrer**
+  (avec confirmation). C'est un redemarrage DOUX : `sudo systemctl reboot` par SSH (cle
+  d'automatisation), execute par `prises-admin` (qui detient deja la cle) ; le portail ne
+  porte ni cle ni commande, il transmet un NOM de machine placee sur un plan, apres avoir
+  verifie la session et un en-tete anti-requete-forgee. Une machine qui ne repond pas n'est
+  pas touchee (la fiche explique comment la remplacer : onglet Cartes SD) ; un delai de 60 s
+  s'applique entre deux redemarrages d'une meme machine ; chaque demande est journalisee
+  (`server/stacks/prises-admin/data/audit.log`, avec l'exploitant). Le point devient orange
+  pendant le redemarrage, puis la fiche confirme le retour en ligne (3 minutes au plus).
 - **Cartes SD** (page `/exploitation` du flasheur, dans un cadre) : carte detectee, menu
   des machines (reservations par nom), un bouton, une confirmation, la progression, "Carte
   prete". L'image est celle choisie par l'administrateur (**"Image utilisee par

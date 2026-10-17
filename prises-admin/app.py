@@ -39,6 +39,7 @@ POLL_SECONDS = int(os.environ.get("PRISES_POLL_SECONDS", "5"))
 HISTORY_SECONDS = 60
 SHUTDOWN_WAIT = 90        # secondes au plus pour que la machine s'eteigne avant la coupure
 SHUTDOWN_GRACE = 10       # marge apres l'arret du SSH (fin de l'ecriture sur la carte SD)
+RESTART_COOLDOWN = 60     # secondes entre deux redemarrages demandes pour une meme machine
 
 _lock = threading.Lock()
 _state: dict = {"controller": None, "nodes": [], "error": None, "updated": 0}
@@ -46,6 +47,7 @@ _job: dict = {"state": "idle"}          # ajout d'une prise : idle | running | d
 _busy: dict = {}                        # node_id -> message (extinction propre en cours)
 _notices: dict = {}                     # node_id -> message (echec d'une extinction, jusqu'a la prochaine action)
 _history: P.History | None = None
+_restarts: dict = {}                    # ip -> instant de la derniere demande de redemarrage
 
 
 # --- association prise -> module (data/plugs.json) ------------------------------------------
@@ -290,6 +292,70 @@ def clean_off(node_id: int, ip: str) -> None:
         _notices[node_id] = f"Extinction interrompue : {exc}"
     finally:
         _busy.pop(node_id, None)
+
+
+def audit(event: str, **fields) -> None:
+    """Journal des actions sur les machines (une ligne JSON par evenement)."""
+    line = json.dumps({"time": int(time.time()), "event": event, **fields}, ensure_ascii=False)
+    print(line, flush=True)
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with open(DATA_DIR / "audit.log", "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def restart_ok(result) -> bool:
+    """`systemctl reboot` rend la main tout de suite (0), ou la connexion est coupee par la machine
+    qui redemarre deja (255 'closed by remote host') ; tout autre echec (sudo, cle, reseau) est une erreur."""
+    if result is None:   # delai depasse : la session SSH est restee pendue pendant l'arret
+        return True
+    if result.returncode == 0:
+        return True
+    err = (result.stderr or "").lower()
+    return result.returncode == 255 and any(t in err for t in ("closed by remote host", "connection reset", "connection closed"))
+
+
+@app.route("/api/machines/restart", methods=["POST"])
+def api_machine_restart():
+    """Redemarrage DOUX d'une machine (vue exploitant) : `sudo systemctl reboot` par SSH, cle
+    d'automatisation. Seul un NOM de machine connue est accepte (reservation DHCP ou Bastion) :
+    jamais d'adresse ni de commande saisies. Une machine qui ne repond pas n'est pas touchee."""
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("name", "")).split(".")[0].strip().lower()
+    actor = str(body.get("actor", ""))[:60]
+    mods = modules()
+    if not name or name not in mods:
+        return jsonify({"error": "Machine inconnue."}), 404
+    ip = mods[name]
+    if not ip:
+        return jsonify({"error": "Adresse de la machine inconnue."}), 409
+    now = time.time()
+    wait = RESTART_COOLDOWN - (now - _restarts.get(ip, 0.0))
+    if wait > 0:
+        return jsonify({"error": f"Redemarrage deja demande : patienter {int(wait) + 1} s.", "retry_after": int(wait) + 1}), 429
+    if not ssh_up(ip):
+        audit("restart-refused", name=name, ip=ip, actor=actor, reason="ssh injoignable")
+        return jsonify({"error": "La machine ne repond pas : redemarrage impossible depuis ici."}), 409
+    _restarts[ip] = now
+    try:
+        result = subprocess.run(["ssh", "-i", str(SSH_KEY), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+                                 "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=8", f"{SSH_USER}@{ip}",
+                                 "sudo -n systemctl reboot"], capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        result = None
+    except (subprocess.SubprocessError, OSError) as exc:
+        _restarts.pop(ip, None)
+        audit("restart-error", name=name, ip=ip, actor=actor, error=str(exc))
+        return jsonify({"error": "Le redemarrage a echoue."}), 502
+    if not restart_ok(result):
+        _restarts.pop(ip, None)   # rien n'est parti : on peut reessayer tout de suite
+        detail = ((result.stderr or "").strip().splitlines() or [""])[0][:200]
+        audit("restart-error", name=name, ip=ip, actor=actor, error=detail)
+        return jsonify({"error": "Le redemarrage a echoue (droits ou connexion SSH)."}), 502
+    audit("restart", name=name, ip=ip, actor=actor)
+    return jsonify({"ok": True, "name": name}), 202
 
 
 @app.route("/api/plugs/<int:node_id>/power", methods=["POST"])

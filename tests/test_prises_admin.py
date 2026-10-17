@@ -197,3 +197,73 @@ def test_update_and_remove(app):
     assert app.client.delete("/api/plugs/7").status_code == 200
     assert 7 not in app.fake.nodes and 7 not in app.load_meta()
     assert app.client.delete("/api/plugs/42").status_code == 404
+
+
+# --- redemarrage doux d'une machine (vue exploitant) -----------------------------------------
+
+class Ran:
+    def __init__(self, returncode=0, stderr=""):
+        self.returncode, self.stderr = returncode, stderr
+
+
+def restart(app, name="rpi-test", actor="operator:expo"):
+    return app.client.post("/api/machines/restart", json={"name": name, "actor": actor})
+
+
+def test_restart_runs_a_soft_reboot_over_ssh_and_is_audited(app, monkeypatch):
+    calls = []
+    monkeypatch.setattr(app.subprocess, "run", lambda cmd, **kw: (calls.append(cmd), Ran())[1])
+    monkeypatch.setattr(app, "ssh_up", lambda ip: True)
+    res = restart(app, "rpi-test.expolab.lan")          # un nom long est ramene au nom court
+    assert res.status_code == 202 and res.get_json() == {"ok": True, "name": "rpi-test"}
+    assert calls[0][-2:] == ["pi@10.42.0.134", "sudo -n systemctl reboot"]
+    line = json.loads((app.DATA_DIR / "audit.log").read_text().splitlines()[-1])
+    assert (line["event"], line["name"], line["actor"]) == ("restart", "rpi-test", "operator:expo")
+
+
+def test_restart_refuses_unknown_names_and_never_runs_a_free_command(app, monkeypatch):
+    monkeypatch.setattr(app.subprocess, "run", lambda *a, **k: pytest.fail("rien ne doit etre execute"))
+    monkeypatch.setattr(app, "ssh_up", lambda ip: True)
+    for name in ("", "inconnue", "rpi-test; rm -rf /", "10.42.0.134", "$(id)"):
+        assert restart(app, name).status_code == 404
+
+
+def test_restart_leaves_an_unreachable_machine_alone(app, monkeypatch):
+    monkeypatch.setattr(app.subprocess, "run", lambda *a, **k: pytest.fail("rien ne doit etre execute"))
+    monkeypatch.setattr(app, "ssh_up", lambda ip: False)
+    res = restart(app)
+    assert res.status_code == 409 and "ne repond pas" in res.get_json()["error"]
+    assert json.loads((app.DATA_DIR / "audit.log").read_text().splitlines()[-1])["event"] == "restart-refused"
+
+
+def test_restart_cooldown_blocks_a_second_request(app, monkeypatch):
+    monkeypatch.setattr(app.subprocess, "run", lambda *a, **k: Ran())
+    monkeypatch.setattr(app, "ssh_up", lambda ip: True)
+    assert restart(app).status_code == 202
+    second = restart(app)
+    assert second.status_code == 429 and 0 < second.get_json()["retry_after"] <= app.RESTART_COOLDOWN
+
+
+def test_restart_failure_is_reported_and_can_be_retried(app, monkeypatch):
+    results = [Ran(1, "sudo: a password is required"), Ran()]
+    monkeypatch.setattr(app.subprocess, "run", lambda *a, **k: results.pop(0))
+    monkeypatch.setattr(app, "ssh_up", lambda ip: True)
+    assert restart(app).status_code == 502
+    assert restart(app).status_code == 202              # rien n'etait parti : pas de delai d'attente
+
+
+@pytest.mark.parametrize("result", [Ran(255, "Connection to 10.42.0.134 closed by remote host."), None])
+def test_restart_accepts_a_connection_cut_by_the_rebooting_machine(app, monkeypatch, result):
+    def fake_run(*a, **k):
+        if result is None:
+            raise app.subprocess.TimeoutExpired("ssh", 20)
+        return result
+    monkeypatch.setattr(app.subprocess, "run", fake_run)
+    monkeypatch.setattr(app, "ssh_up", lambda ip: True)
+    assert restart(app).status_code == 202
+
+
+def test_restart_refuses_a_machine_without_address(app, monkeypatch):
+    (app.RESERVATIONS).write_text("projo,10.42.0.151,12h\n")
+    app.BASTION_CONFIG.write_text("machines:\n- {name: sansip.expolab.lan, host: sansip.expolab.lan}\n")
+    assert restart(app, "sansip").status_code == 409

@@ -24,6 +24,8 @@ import json
 import os
 import socket
 import time
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import quote, urlparse
@@ -446,6 +448,45 @@ def api_plans():
         return jsonify({"error": "Authentification requise"}), 401
     rooms, machines = plans.load_bastion()
     return jsonify(plans.build_plans(rooms, machines, plans.fetch_presence()))
+
+
+PRISES_URL = os.environ.get("PORTAL_PRISES_URL", "http://127.0.0.1:5059")
+
+
+def call_restart_service(name: str, actor: str) -> tuple[int, dict]:
+    """Demande le redemarrage doux d'une machine au service qui detient la cle SSH (prises-admin,
+    local a l'hote). Le portail ne porte lui-meme ni cle ni commande : il transmet un NOM."""
+    req = urllib.request.Request(f"{PRISES_URL}/api/machines/restart", method="POST",
+                                 data=json.dumps({"name": name, "actor": actor}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            return resp.status, json.load(resp)
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.code, json.load(exc)
+        except ValueError:
+            return exc.code, {"error": "Le redemarrage a echoue."}
+    except (OSError, ValueError):
+        return 502, {"error": "Le service de redemarrage ne repond pas."}
+
+
+@app.route("/api/machines/<machine_id>/restart", methods=["POST"])
+def api_machine_restart(machine_id):
+    """Redemarrage doux d'une machine PLACEE sur un plan de Bastion (administrateur et exploitant)."""
+    session = current_session()
+    if session is None:
+        return jsonify({"error": "Authentification requise"}), 401
+    # En-tete personnalise : un autre site ne peut pas l'envoyer sans autorisation (CORS), ce qui ferme
+    # la porte a une requete forgee meme si le navigateur presente le cookie ou la basic auth.
+    if request.headers.get("X-Requested-With") != "expolab":
+        return jsonify({"error": "Requete refusee."}), 403
+    _rooms, machines = plans.load_bastion()
+    machine = next((m for m in machines if m["id"] == machine_id and m["position"]), None)
+    if machine is None:
+        return jsonify({"error": "Machine inconnue ou pas placee sur un plan."}), 404
+    status, body = call_restart_service(plans.short_name(machine["name"]), f"{session[1]}:{session[0]}")
+    return jsonify(body), status
 
 
 @app.route("/plans/image/<name>")
