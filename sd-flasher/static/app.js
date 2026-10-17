@@ -512,6 +512,9 @@ async function loadSettings() {
     $("use-automation").checked = s.use_automation_key;
     $("use-automation").disabled = !s.automation_key_available;
     $("automation-hint").textContent = s.automation_key_available ? "" : "Clé d'automatisation introuvable sur le serveur.";
+    $("use-access").checked = s.use_access_key;
+    $("use-access").disabled = !s.access_key_available;
+    $("access-hint").textContent = s.access_key_available ? "" : "Clé d'accès de Bastion introuvable sur le serveur (relancer deploy-server.sh).";
 }
 
 async function saveSettings(extra = {}) {
@@ -522,7 +525,7 @@ async function saveSettings(extra = {}) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 wifi_ssid: $("wifi-ssid").value, wifi_psk: $("wifi-psk").value, wifi_country: $("wifi-country").value,
-                use_automation_key: $("use-automation").checked,
+                use_automation_key: $("use-automation").checked, use_access_key: $("use-access").checked,
                 time_server: $("time-server").value, apt_proxy: $("apt-proxy").value,
                 keyboard_layout: $("keyboard-layout").value, locale: $("locale").value, timezone: $("timezone").value,
                 packages: $("packages").value,

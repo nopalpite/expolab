@@ -210,6 +210,22 @@ setup_sd_flasher
 [ -d "$FLASH/images" ] && [ -d "$FLASH/data" ] || fail "dossiers sd-flasher absents"
 contains "$FLASH/keys/automation.pub" "expolab-automation"
 [ ! -e "$FLASH/keys/automation_ed25519" ] || fail "cle privee copiee dans sd-flasher"
+# Cle d'acces de Bastion : seconde paire, distincte de celle d'Ansible, jamais regeneree.
+setup_access_key
+ACCESS="$SCRIPT_DIR/stacks/bastion/access_key/bastion_ed25519"
+[ -f "$ACCESS" ] && [ -f "$ACCESS.pub" ] || fail "cle d'acces de Bastion non generee"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *)   # pas de modes Unix sous Windows
+    [ "$(stat -c %a "$ACCESS")" = "600" ] || fail "cle privee d'acces lisible par d'autres" ;;
+esac
+contains "$ACCESS.pub" "expolab-bastion"
+contains "$SCRIPT_DIR/stacks/bastion/access_key/access.env" "BASTION_DEFAULT_SSH_USER=pi"
+! cmp -s "$ACCESS.pub" "$SCRIPT_DIR/stacks/ansible-web/automation_key/automation_ed25519.pub" || fail "meme cle pour Bastion et Ansible"
+before="$(cat "$ACCESS.pub")"
+setup_access_key
+[ "$(cat "$ACCESS.pub")" = "$before" ] || fail "cle d'acces regeneree"
+setup_sd_flasher
+contains "$FLASH/keys/access.pub" "expolab-bastion"
+[ ! -e "$FLASH/keys/bastion_ed25519" ] || fail "cle privee d'acces copiee dans sd-flasher"
 echo "master" > "$FLASH/images/master.img"
 setup_sd_flasher
 [ "$(cat "$FLASH/images/master.img")" = "master" ] || fail "image sd-flasher ecrasee"

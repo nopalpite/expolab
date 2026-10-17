@@ -37,6 +37,7 @@ bootstrap_dockhand
 
 setup_tls
 setup_bastion_secrets
+setup_access_key
 setup_caddy_basic_auth
 render_caddyfile
 setup_dnsmasq_files

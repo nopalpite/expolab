@@ -98,6 +98,10 @@ de secret ici (ni mot de passe, ni jeton, ni clé privée).
   `OPERATOR_PATHS` / `operator_may_reach` du portail (liste blanche) ; par defaut il n'a acces
   a rien. Ne jamais lui faire confiance pour l'image ou les reglages du flash : le serveur les
   impose (`/api/exploitation/flash`).
+- **Deux paires de cles SSH, volontairement distinctes :** `ansible-web/automation_key/`
+  (taches Ansible) et `bastion/access_key/` (sessions humaines ouvertes par Bastion). Ne
+  jamais les fusionner : une connexion avec la premiere doit toujours etre un job. Aucune
+  n'est regeneree si elle existe, et leur perte coupe l'acces aux cartes deja flashees.
 - **API Dockhand :** `/api/` sur le port 3000, avec l'en-tête
   `Authorization: Bearer dh_...` (jeton dans `server/dockhand.env`). Les opérations
   longues renvoient un `jobId` ; avec l'en-tête `Accept: application/json`, le

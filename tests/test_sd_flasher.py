@@ -154,6 +154,7 @@ def test_writing_never_creates_a_missing_device(tmp_path):
 # --- reglages et fichier de configuration ----------------------------------------------------------
 
 GOOD_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIexample expolab-automation"
+ACCESS_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIaccess expolab-bastion"
 
 
 def seed(hostname="module-02", settings=None, now=1_800_000_000):
@@ -470,6 +471,24 @@ def test_automation_key_can_be_switched_off(api):
     assert api.effective_settings()["authorized_keys"] == [GOOD_KEY]
     api.client.put("/api/settings", json={"use_automation_key": False})
     assert api.effective_settings()["authorized_keys"] == []
+
+
+def test_access_key_is_injected_after_the_automation_key(api, tmp_path, monkeypatch):
+    # pas de cle d'acces sur le serveur : rien d'injecte, la case est signalee indisponible
+    assert api.client.get("/api/settings").get_json()["access_key_available"] is False
+    (tmp_path / "access").write_text(ACCESS_KEY + "\n")
+    monkeypatch.setattr(api, "ACCESS_PUB", tmp_path / "access")
+    data = api.client.get("/api/settings").get_json()
+    assert data["access_key_available"] is True and data["use_access_key"] is True
+    # ordre : automatisation, acces Bastion, puis les cles saisies
+    extra = GOOD_KEY.replace("example", "perso")
+    api.client.put("/api/settings", json={"extra_keys": [extra]})
+    assert api.effective_settings()["authorized_keys"] == [GOOD_KEY, ACCESS_KEY, extra]
+    # chacune se coupe independamment
+    api.client.put("/api/settings", json={"use_access_key": False})
+    assert api.effective_settings()["authorized_keys"] == [GOOD_KEY, extra]
+    api.client.put("/api/settings", json={"use_access_key": True, "use_automation_key": False})
+    assert api.effective_settings()["authorized_keys"] == [ACCESS_KEY, extra]
 
 
 def test_preview_summarises_without_secrets(api):

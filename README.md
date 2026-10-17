@@ -86,7 +86,20 @@ chaque service comme **stack Dockhand independante** via son API REST
   `deploy-server.sh` dans `server/stacks/bastion/bastion.env` (non
   versionne) ; inventaire de machines et donnees persistees dans
   `server/stacks/bastion/{config,maps}/` (egalement non versionne, propre
-  a chaque lab)
+  a chaque lab). **Cle SSH d'acces** : `deploy-server.sh` genere une paire
+  (`server/stacks/bastion/access_key/`, non versionne, jamais regeneree) dont la
+  partie PUBLIQUE est injectee par le flasheur dans chaque carte (reglage "Injecter la
+  cle SSH d'acces de Bastion", actif par defaut) et la partie PRIVEE montee en lecture
+  seule dans Bastion (`BASTION_DEFAULT_SSH_KEY_FILE`), cle par defaut de toutes les
+  machines, avec le meme compte qu'Ansible (`pi`, ou `EXPOLAB_ANSIBLE_USER`) : rien a
+  coller machine par machine. Elle est **distincte de la cle
+  d'automatisation d'Ansible** (une connexion avec celle-ci est toujours un job, jamais
+  une session humaine). **A sauvegarder avec les donnees du serveur** : la perdre coupe
+  l'acces aux cartes deja flashees (sauf mot de passe de secours, reglage "compte
+  utilisateur" du flasheur). Elle ne protege que les cartes flashees APRES sa creation ;
+  les machines deja en service gardent leurs identifiants dans Bastion. Necessite une
+  image de Bastion qui lit `BASTION_DEFAULT_SSH_KEY_FILE` (sinon la variable est ignoree
+  et la cle se colle a la main)
 - **ansible-web** (https://ansible-web.web.expolab.lan, source dans
   `ansible-web/`) : declenche des runs pour
   [bastion-ansible](https://github.com/nopalpite/bastion-ansible) (Ansible,
@@ -645,7 +658,8 @@ master commune, puis la personnalise.
 Le master est un **Ubuntu Server** : la personnalisation passe par **cloud-init**,
 sans script maison dans le master. Ecrit **avant** le premier demarrage :
 une graine cloud-init sur la partition `system-boot` (`user-data` : hostname,
-**compte utilisateur** - nom, mot de passe hache, sudo sans mot de passe, cles SSH ;
+**compte utilisateur** - nom, mot de passe hache, sudo sans mot de passe, cles SSH (cle
+d'automatisation d'Ansible, cle d'acces de Bastion, puis les cles saisies) ;
 `network-config` : DHCP et Wi-Fi ; `meta-data` : un `instance-id`
 neuf a chaque flash, pour que cloud-init rejoue tout), puis sur la racine
 `/etc/hostname` (le nom est annonce des la premiere requete DHCP, or les
@@ -917,7 +931,7 @@ server/
     dnsmasq-admin/docker-compose.yml                                  # build context = ../../dnsmasq-admin
     caddy/{docker-compose.yml, Caddyfile}                            # Caddyfile genere, non versionne
     caddy-admin/docker-compose.yml                                    # build context = ../../caddy-admin
-    bastion/{docker-compose.yml, bastion.env, config/, maps/}        # ces 3 derniers non versionnes
+    bastion/{docker-compose.yml, bastion.env, config/, maps/, access_key/}   # tout sauf docker-compose.yml non versionne
     dashboard/{docker-compose.yml, dashboard.env, portal.env, services.yaml}   # le portail (code : portal/) ; les 3 fichiers .env/.yaml sont generes et non versionnes
     vpn-admin/docker-compose.yml                                      # build context = ../../vpn-admin
     git-mirror/{docker-compose.yml, data/}                            # data/ non versionne (clones bare + mirrors.yaml)

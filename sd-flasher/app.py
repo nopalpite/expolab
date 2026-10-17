@@ -37,6 +37,7 @@ IMAGES_DIR = Path(os.environ.get("SD_FLASHER_IMAGES_DIR", "/images"))
 DATA_DIR = Path(os.environ.get("SD_FLASHER_DATA_DIR", "/data"))
 RESERVATIONS_FILE = Path(os.environ.get("SD_FLASHER_RESERVATIONS", "/dnsmasq-admin-config/reservations.conf"))
 AUTOMATION_PUB = Path(os.environ.get("SD_FLASHER_AUTOMATION_PUB", "/keys/automation.pub"))
+ACCESS_PUB = Path(os.environ.get("SD_FLASHER_ACCESS_PUB", "/keys/access.pub"))   # cle d'acces de Bastion (humains)
 MAX_BYTES = int(os.environ.get("SD_FLASHER_MAX_GB", "256")) * 1000**3
 # Mode simulation : aucun disque n'est touche, l'ecriture va dans des fichiers de ce dossier.
 # SD_FLASHER_DEVICES_FILE = JSON {"eligible": [...], "ignored": [...]} qui remplace lsblk.
@@ -93,6 +94,7 @@ def load_settings() -> dict:
         "wifi_country": data.get("wifi_country", "FR"),
         "extra_keys": [k for k in data.get("extra_keys", []) if isinstance(k, str)],
         "use_automation_key": data.get("use_automation_key", True),
+        "use_access_key": data.get("use_access_key", True),
         "user_name": data.get("user_name", ""),
         "user_password": data.get("user_password", ""),
         "user_sudo": data.get("user_sudo", True),
@@ -114,20 +116,28 @@ def parse_packages(value) -> list[str]:
     return list(dict.fromkeys(p.strip().lower() for p in items if p.strip()))
 
 
-def automation_key() -> str:
+def _public_key(path: Path) -> str:
     try:
-        return AUTOMATION_PUB.read_text().strip().splitlines()[0]
+        return path.read_text().strip().splitlines()[0]
     except (OSError, IndexError):
         return ""
 
 
+def automation_key() -> str:
+    return _public_key(AUTOMATION_PUB)
+
+
+def access_key() -> str:
+    return _public_key(ACCESS_PUB)
+
+
 def effective_settings() -> dict:
-    """Ce qui est reellement ecrit sur la carte : reglages + cle d'automatisation."""
+    """Ce qui est reellement ecrit sur la carte : reglages + cles du serveur (automatisation,
+    puis acces Bastion, puis les cles saisies)."""
     s = load_settings()
-    keys = list(s["extra_keys"])
-    key = automation_key()
-    if s["use_automation_key"] and key:
-        keys.insert(0, key)
+    server_keys = [key for key, wanted in ((automation_key(), s["use_automation_key"]),
+                                           (access_key(), s["use_access_key"])) if wanted and key]
+    keys = server_keys + list(s["extra_keys"])
     return {"wifi_ssid": s["wifi_ssid"], "wifi_psk": s["wifi_psk"], "wifi_country": s["wifi_country"], "authorized_keys": keys,
             "user_name": s["user_name"], "user_password": s["user_password"], "user_sudo": s["user_sudo"], "user_pwauth": s["user_pwauth"],
             "time_server": s["time_server"], "apt_proxy": s["apt_proxy"],
@@ -164,6 +174,8 @@ def public_settings() -> dict:
         "extra_keys": s["extra_keys"],
         "use_automation_key": s["use_automation_key"],
         "automation_key_available": bool(automation_key()),
+        "use_access_key": s["use_access_key"],
+        "access_key_available": bool(access_key()),
     }
 
 
@@ -569,6 +581,7 @@ def api_settings_put():
         "wifi_country": str(body.get("wifi_country", current["wifi_country"])).strip().upper(),
         "extra_keys": [k.strip() for k in body.get("extra_keys", current["extra_keys"]) if isinstance(k, str) and k.strip()],
         "use_automation_key": bool(body.get("use_automation_key", current["use_automation_key"])),
+        "use_access_key": bool(body.get("use_access_key", current["use_access_key"])),
         "wifi_psk": current["wifi_psk"],
         "user_name": str(body.get("user_name", current["user_name"])).strip(),
         "user_sudo": bool(body.get("user_sudo", current["user_sudo"])),

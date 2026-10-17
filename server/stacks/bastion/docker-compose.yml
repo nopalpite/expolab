@@ -18,6 +18,8 @@ services:
       # server/lib/credentials.sh) - jamais de mot de passe par defaut en
       # dur dans ce depot public, Bastion donnant acces SSH/VNC a tout le parc.
       - ${REPO_ROOT}/server/stacks/bastion/bastion.env
+      # Compte SSH par defaut (BASTION_DEFAULT_SSH_USER), ecrit par setup_access_key.
+      - ${REPO_ROOT}/server/stacks/bastion/access_key/access.env
     environment:
       - BASTION_VNC_WS_PORT=6080
       # TLS termine par Caddy (vhost bastion.web.expolab.lan, voir
@@ -27,11 +29,16 @@ services:
       # deux approches ne se combinent pas.
       - BASTION_VNC_WS_PATH=/vnc-ws/
       - BASTION_HISTORY_RETENTION_DAYS=30
+      # Cle SSH PAR DEFAUT des machines (voir la fonction correspondante de Bastion) : la
+      # cle d'acces generee par deploy-server.sh, dont le flasheur injecte la partie
+      # publique dans chaque carte. Distincte de la cle d'automatisation d'Ansible.
+      - BASTION_DEFAULT_SSH_KEY_FILE=/run/keys/bastion_ed25519
     volumes:
       # Fuseau horaire de l'hote (un conteneur est en UTC sinon) : memes heures partout.
       - /etc/localtime:/etc/localtime:ro
       - ${REPO_ROOT}/server/stacks/bastion/config:/app/config
       - ${REPO_ROOT}/server/stacks/bastion/maps:/app/static/uploads/maps
+      - ${REPO_ROOT}/server/stacks/bastion/access_key/bastion_ed25519:/run/keys/bastion_ed25519:ro
       # DNS = dnsmasq de l'expo (voir resolv.conf) : le DNS inverse nomme les
       # machines au scan reseau. Celui de l'hote ne les connait pas.
       - ${REPO_ROOT}/server/stacks/bastion/resolv.conf:/etc/resolv.conf:ro

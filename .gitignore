@@ -1,6 +1,7 @@
 # Secrets generes au premier deploiement (server/deploy-server.sh) -
 # jamais les memes d'un lab a l'autre, ne doivent pas finir dans git.
 server/stacks/bastion/bastion.env
+server/stacks/bastion/access_key/
 
 # Optionnel : token API Dockhand, uniquement si l'authentification est
 # activee dans Dockhand (desactivee par defaut) - voir server/dockhand-api.sh.
