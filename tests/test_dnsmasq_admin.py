@@ -166,8 +166,9 @@ MAC_OLD = "dc:a6:32:00:99:0a"
 MAC_NEW = "dc:a6:32:00:99:0b"
 
 
-def lease(mac, ip, hostname):
-    return {"mac": mac, "ip": ip, "hostname": hostname, "client_id": "", "expires_in_min": 600}
+def lease(mac, ip, hostname, expires_at=900_000):
+    return {"mac": mac, "ip": ip, "hostname": hostname, "client_id": "", "expires_in_min": 600,
+            "expires_at": expires_at}
 
 
 class Lab:
@@ -220,6 +221,75 @@ def test_rapid_passes_never_shorten_the_silence_needed(monkeypatch):
     assert lab.released == []          # 40 s depuis le dernier signe de vie
     da.reconcile_once(misses, now=2090)
     assert lab.released == [MAC_OLD]
+
+
+def test_a_renewed_lease_restarts_the_silence(monkeypatch):
+    # Une machine qui redemarre n'a pas repondu a l'ARP pendant sa mise en route, puis elle
+    # obtient un NOUVEAU bail : meme avec 3 echecs et plus d'une minute de silence AVANT, elle
+    # ne doit pas etre liberee (c'etait le bug : bail neuf efface, machine en ligne mais
+    # absente du DNS, de la topologie et des baux jusqu'a son prochain renouvellement).
+    lab = Lab(monkeypatch, NAME_RESERVATION, [lease(MAC_OLD, "10.42.0.60", "pi-03", 900_000)], {"10.42.0.60": False})
+    misses = {}
+    for t in (1000, 1020, 1040):
+        da.reconcile_once(misses, now=t)
+    lab.leases = [lease(MAC_OLD, "10.42.0.60", "pi-03", 900_000 + 43_200)]   # le bail est renouvele
+    for t in (1061, 1062, 1063):
+        da.reconcile_once(misses, now=t)                                    # 3 passages, > 60 s apres le 1er silence
+    assert lab.released == []
+    for t in (1090, 1110):
+        da.reconcile_once(misses, now=t)
+    assert lab.released == []          # moins de 60 s depuis le renouvellement (1061)
+    da.reconcile_once(misses, now=1125)
+    assert lab.released == [MAC_OLD]   # vraiment muette depuis le nouveau bail : liberee
+
+
+def test_lease_renewed_during_the_arp_probe_is_not_released(monkeypatch):
+    lab = Lab(monkeypatch, NAME_RESERVATION, [lease(MAC_OLD, "10.42.0.60", "pi-03", 900_000)], {"10.42.0.60": False})
+    misses = {}
+    for t in (3000, 3020, 3040):
+        da.reconcile_once(misses, now=t)
+
+    def probe_while_the_machine_boots(ip):
+        # pendant le test ARP, la machine termine son demarrage et obtient son bail
+        lab.leases = [lease(MAC_OLD, "10.42.0.60", "pi-03", 900_000 + 43_200)]
+        return False
+
+    monkeypatch.setattr(da, "host_alive", probe_while_the_machine_boots)
+    da.reconcile_once(misses, now=3061)         # 3 echecs ET > 60 s de silence : liberation habituelle
+    assert lab.released == []
+    assert "10.42.0.60" not in misses
+
+
+def test_lease_already_gone_during_the_probe_is_not_released_twice(monkeypatch):
+    lab = Lab(monkeypatch, NAME_RESERVATION, [lease(MAC_OLD, "10.42.0.60", "pi-03")], {"10.42.0.60": False})
+    misses = {}
+    for t in (4000, 4020, 4040):
+        da.reconcile_once(misses, now=t)
+
+    def probe_then_expiry(ip):
+        lab.leases = []          # le bail a expire pendant le test
+        return False
+
+    monkeypatch.setattr(da, "host_alive", probe_then_expiry)
+    da.reconcile_once(misses, now=4061)
+    assert lab.released == []
+
+
+def test_holder_renewed_during_the_probe_is_not_released_for_a_new_board(monkeypatch):
+    # Meme garde pour le chemin « carte neuve sur IP de repli » : le titulaire qui vient de
+    # renouveler son bail pendant le test ARP n'est pas libere (les deux cartes sont vivantes).
+    lab = Lab(monkeypatch, NAME_RESERVATION,
+              [lease(MAC_OLD, "10.42.0.60", "pi-03", 900_000), lease(MAC_NEW, "10.42.0.101", "pi-03", 900_100)],
+              {"10.42.0.60": False})
+
+    def probe_while_the_holder_renews(ip):
+        lab.leases = [lease(MAC_OLD, "10.42.0.60", "pi-03", 900_000 + 43_200),
+                      lease(MAC_NEW, "10.42.0.101", "pi-03", 900_100)]
+        return False
+
+    monkeypatch.setattr(da, "host_alive", probe_while_the_holder_renews)
+    da.reconcile_once({})
+    assert MAC_OLD not in lab.released
 
 
 def test_alive_holder_is_never_released_and_counter_resets(monkeypatch):

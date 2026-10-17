@@ -99,6 +99,7 @@ def load_leases() -> list[dict]:
                 "ip": ip,
                 "mac": mac,
                 "client_id": client_id,
+                "expires_at": expiry,   # epoch : change a CHAQUE renouvellement (empreinte du bail)
                 "expires_in_min": max(0, remaining // 60),
             }
         )
@@ -346,6 +347,23 @@ def log_event(kind: str, message: str) -> None:
     notify_change()
 
 
+def lease_signature(lease: dict) -> tuple:
+    """Empreinte d'un bail : sa MAC et son echeance, qui change a chaque renouvellement ou
+    nouvelle attribution. Deux empreintes differentes = la machine a donne signe de vie
+    entre-temps."""
+    return (lease["mac"], lease.get("expires_at"))
+
+
+def still_the_same_lease(lease: dict) -> bool:
+    """Relit les baux : celui-ci existe-t-il encore, inchange ? La decision de liberer repose
+    sur un ARP qui dure plusieurs secondes ; une machine qui redemarre peut obtenir son bail
+    PENDANT ce temps, et liberer l'ancien instantane effacerait le bail tout neuf (la machine
+    resterait en ligne mais disparaitrait du DNS, de la topologie et des baux jusqu'a son
+    prochain renouvellement, jusqu'a la moitie de la duree du bail)."""
+    current = next((l for l in load_leases() if l["ip"] == lease["ip"]), None)
+    return current is not None and lease_signature(current) == lease_signature(lease)
+
+
 def reconcile_once(misses: dict, now: float | None = None) -> None:
     """Remplacement de carte sans intervention : pour chaque reservation PAR
     NOM (sans MAC), l'IP appartient au nom, pas a une carte. Deux situations
@@ -379,7 +397,7 @@ def reconcile_once(misses: dict, now: float | None = None) -> None:
         if claimant and claimant["ip"] != ip:
             # La machine qui s'annonce sous ce nom n'est pas sur son IP reservee.
             if holder and holder["mac"] != claimant["mac"]:
-                if host_alive(ip) is not False:
+                if host_alive(ip) is not False or not still_the_same_lease(holder):
                     if ("conflit", ip) not in misses:
                         log_event("conflit", f"{name} : l'IP {ip} est tenue par {holder['mac']} qui repond encore ; rien n'est libere")
                         misses[("conflit", ip)] = 1
@@ -408,13 +426,21 @@ def reconcile_once(misses: dict, now: float | None = None) -> None:
         if alive is None or alive:
             misses.pop(ip, None)
             continue
-        miss = misses.setdefault(ip, {"since": now, "count": 0})
+        signature = lease_signature(holder)
+        miss = misses.get(ip)
+        if miss is None or miss.get("signature") != signature:
+            # Premiere absence, OU le bail a change depuis la derniere (renouvele, repris par une
+            # machine qui redemarre) : elle vient de donner signe de vie, le silence repart de zero.
+            miss = misses[ip] = {"since": now, "count": 0, "signature": signature}
         miss["count"] += 1
         # Une DUREE de silence, pas un nombre de passages : la reconciliation est aussi
         # reveillee a chaque changement de bail (une fois par minute par appareil non
         # reserve), et le Wi-Fi rate parfois des requetes ARP. Liberer le bail d'une
         # machine vivante ferait disparaitre son nom du DNS jusqu'a son renouvellement.
         if miss["count"] >= STALE_AFTER_CHECKS and now - miss["since"] >= STALE_AFTER_SECONDS:
+            if not still_the_same_lease(holder):
+                misses.pop(ip, None)   # renouvele ou deja libere pendant le test ARP : rien a faire
+                continue
             ok, err = release_lease(holder)
             log_event(
                 "liberation" if ok else "erreur",

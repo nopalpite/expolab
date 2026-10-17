@@ -89,6 +89,11 @@ de secret ici (ni mot de passe, ni jeton, ni clé privée).
   de la plage dynamique (et 12 h ecrit sur chaque reservation) : ne pas l'allonger. Changer
   l'IP d'une reservation laisse la machine sur l'ancienne jusqu'a 6 h : `networkctl
   reconfigure <interface>` sur la machine la deplace tout de suite.
+- **Liberation automatique d'un bail (dnsmasq-admin) :** elle repose sur un ARP qui dure des
+  secondes, pendant lesquelles une machine qui redemarre peut obtenir son bail : liberer
+  l'ancien instantane effacerait le bail neuf (machine en ligne mais absente des baux, de la
+  topologie et de la vue exploitant jusqu'a son renouvellement). Toujours relire le bail avant
+  de liberer et reprendre le silence a zero quand l'empreinte (MAC + echeance) change.
 - **Secrets dans l'espace libre d'une image :** effacer ou remplacer un fichier ne vide
   pas ses blocs. La capture (`sd-flasher/capture.py`) copie la partition ext4 par
   `e2image` (blocs utilisés seulement : rien ne fuit) mais la partition de démarrage
