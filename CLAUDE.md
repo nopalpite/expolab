@@ -103,6 +103,14 @@ de secret ici (ni mot de passe, ni jeton, ni clé privée).
   machine placee sur un plan a `prises-admin` (`/api/machines/restart`), seul a pouvoir agir, et
   l'API n'accepte ni adresse ni commande libres. Toute nouvelle action sur une machine suit le
   meme chemin (liste blanche, delai entre deux demandes, journal).
+- **Console audio et salles :** les salles et l'appartenance des machines viennent de Bastion (`audio-admin/bastion.py`),
+  jamais de la console : une machine sans salle dans Bastion n'existe pas pour elle. Ne pas ajouter de saisie de salle
+  dans la console.
+- **Console audio :** les ports 5060 et 5061 sont BLOQUES par Firefox (« adresse interdite » : protocole SIP) : ne jamais
+  y mettre une interface web testee en direct. L'agent ne connait que SON niveau effectif (gain en dB + mute) : la
+  hierarchie exposition / salle / machine reste dans `audio-admin/hub.py`. Le jeton des agents (`agent.token`) n'est
+  jamais regenere : cela couperait toutes les machines deja installees. Un changement de sortie audio se choisit par
+  le NOM de la carte (`AGENT_SINK_MATCH`), les numeros PipeWire changent a chaque demarrage.
 - **Compte exploitant :** tout nouvel acces qu'on veut lui ouvrir passe par
   `OPERATOR_PATHS` / `operator_may_reach` du portail (liste blanche) ; par defaut il n'a acces
   a rien. Ne jamais lui faire confiance pour l'image ou les reglages du flash : le serveur les

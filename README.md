@@ -448,6 +448,49 @@ sudo ./server/matter.sh brut              # tous les attributs : ce que la prise
 sudo ./server/matter.sh eteindre 1        # / allumer 1 / identifier 1 / retirer 1
 ```
 
+## Console audio (volume de l'exposition, des salles et des machines)
+
+Page **`audio.<domaine>`** (stack `audio-admin`, source dans `audio-admin/`, derriere le portail) : un fader et un
+mute par machine, un volume general, des presets, et « Tout couper ».
+
+**Trois niveaux, tous en dB** (0 dB = pleine echelle, -60 dB = silence) :
+`exposition -> salle -> machine`. Le niveau envoye a une machine est la somme de son fader, du volume de sa salle et
+du volume de l'exposition (une machine « hors volume de l'exposition » ignore ce dernier, pas son mute ; « Tout
+couper » coupe tout). **Avec une seule salle (ou aucune), l'affichage s'adapte** : il n'y a qu'un « Volume
+general » - celui de la salle - et plus de niveau « salle ». Des qu'une seconde salle existe, l'exposition et chaque
+salle (avec son mute) apparaissent, nettement distingues.
+
+**Les salles viennent de Bastion** (`config/machines.yaml`, lu en lecture seule, rapprochement par le nom court de la
+machine) : la console ne cree ni ne range aucune salle, et le champ n'existe pas dans sa fiche. Une machine creee dans
+Bastion n'a PAS de salle par defaut : tant qu'on ne l'y a pas rangee dans une salle, **elle n'existe pas pour la console**
+(ni affichee, ni « a valider », ni pilotee : elle garde son niveau local). Retirer une machine de sa salle dans Bastion
+la fait disparaitre de la console ; la deplacer la fait changer de groupe.
+
+**Presets** : « enregistrer le niveau actuel » memorise l'exposition, les salles et chaque machine ; le rappel est
+immediat. Pas de fondu, pas de planning, pas de cadenas, pas de plafond : volontairement hors perimetre.
+
+**Machines et agents.** Chaque machine fait tourner l'**agent audio** (`audio-agent/`, Python sans dependance, sortie
+audio = carte USB choisie par son NOM, jamais par son numero) qui se connecte LUI-MEME au serveur (attente longue) :
+le serveur n'a jamais besoin de joindre la machine. Une machine inconnue, rangee dans une salle de Bastion, apparait
+dans un bandeau « Nouvelle machine detectee » et ne recoit aucun ordre tant qu'elle n'est pas **validee**. L'agent applique le niveau, le memorise
+sur la machine et le **reprend au demarrage sans attendre le reseau** (montee douce de 1,5 s) : si le Wi-Fi ou le
+serveur sont absents, le son joue au dernier niveau connu ; un niveau change pendant que la machine etait eteinte
+s'applique des qu'elle rejoint le serveur. L'agent attend la carte son avant de prevenir systemd : les applications
+sonores declarent `After=expolab-agent.service` pour ne jamais demarrer a un niveau inconnu. Une machine sans carte
+son est signalee (« pas de carte son »). Installation : `sudo AGENT_TOKEN=<jeton> audio-agent/install.sh` sur la
+machine (jeton : `server/stacks/audio-admin/data/agent.token`, genere une fois par `deploy-server.sh`, a sauvegarder).
+
+**Deux ecoutes separees** : l'interface sur `127.0.0.1:5062` (derriere Caddy et le portail) et l'API des agents sur
+`10.42.0.1:5063`, protegee par le jeton partage : les machines ne passent jamais par le portail. Les modifications
+exigent l'en-tete `X-Requested-With` (anti-requete-forgee). **Onglet « Son » de l'exploitant** : volume general,
+couper le son, ambiances (presets) et volume/mute de chaque salle, en pourcentage et sans detail de machine ; la
+liste blanche du portail n'ouvre a l'exploitant que `/exploitation` et `/api/exploitation/` de `audio.<domaine>`.
+Etat (niveaux, presets, machines) dans `server/stacks/audio-admin/data/state.json`, conserve au redemarrage.
+
+**Sortie audio.** Standard : carte audio USB (le Pi 5 n'a plus de jack ; l'audio HDMI d'un Pi 4 relie a un ecran 4K
+s'est montre fragile). A faire dans l'image master : desactiver l'audio embarque (`dtparam=audio=off`) pour que la carte
+USB soit la seule sortie.
+
 ## Interface d'exploitation (compte exploitant)
 
 Pour l'exploitant de l'exposition : un **second compte**, cree par l'administrateur dans
@@ -948,8 +991,11 @@ server/
     ntp/{docker-compose.yml, Dockerfile, entrypoint.sh, config/, data/, run/}  # serveur de temps (chrony) ; config/ (reglages), data/ (derive), run/ (socket) non versionnes
     ntp-admin/docker-compose.yml                                       # build context = ../../ntp-admin
     sd-flasher/{docker-compose.yml, images/, data/, keys/}            # conteneur privilegie ; images/ (master), data/ (reglages, audit), keys/ non versionnes
+    audio-admin/{docker-compose.yml, data/}                            # console audio ; data/ (state.json, agent.token) non versionne, a sauvegarder
     ansible-web/{docker-compose.yml, ansible-web.env, automation_key/, config.yaml, repo/, runs/}  # tout sauf docker-compose.yml non versionne ; execute bastion-ansible (depot separe, clone depuis git-mirror)
 dnsmasq-admin/                  # app Flask : app.py, Dockerfile, templates/, static/
+audio-admin/                    # console audio : hub.py (niveaux, presets, machines), bastion.py (salles lues dans Bastion), app.py (interface + API des agents), templates/, static/
+audio-agent/                    # agent audio des machines (agent.py) et son installateur (install.sh)
 apt-cache-admin/                 # idem - interface du cache apt : etat, efficacite, journal, mode, miroirs HTTPS
 portal/                         # le portail (stack dashboard) : connexion unique, tiroir et onglets, verification de session pour Caddy
 caddy-admin/                     # idem - edite server/services.yaml, recharge Caddy via son admin API
