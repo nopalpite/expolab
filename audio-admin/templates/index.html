@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>expolab · Son</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Console audio</h1>
+  <p class="subtitle">Volume de l'exposition, des salles et de chaque machine. Les machines appliquent leur niveau elles-mêmes, même si le serveur est éteint.</p>
+</header>
+<main>
+  <div class="row presets" id="presets"></div>
+  <div id="pending"></div>
+  <p id="empty" class="empty" hidden>Aucune machine pour l'instant : installe l'agent audio sur une machine (voir le README) et range-la dans une salle dans Bastion, elle apparaîtra ici pour être validée.</p>
+  <div class="console" id="console">
+    <div class="bay" id="bay"></div>
+    <aside class="master" id="master">
+      <span class="mt" id="m-title">Volume général</span>
+      <span class="mu" id="m-sub"></span>
+      <div class="fw"><input type="range" id="m-fader" class="v" min="-60" max="0" step="0.5" aria-label="Volume de l'exposition"><div class="bar"><i id="m-bar"></i></div></div>
+      <span class="db" id="m-db"></span>
+      <button type="button" class="big" id="m-mute">Mute</button>
+      <button type="button" class="big kill" id="kill">Tout couper</button>
+    </aside>
+  </div>
+  <p class="hint" id="stat"></p>
+  <section class="panel" id="detail"></section>
+  <div class="row save">
+    <input type="text" id="pname" placeholder="Nom du nouveau preset" maxlength="40" autocomplete="off">
+    <button type="button" id="psave">Enregistrer le niveau actuel</button>
+    <span class="err" id="perr"></span>
+  </div>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
