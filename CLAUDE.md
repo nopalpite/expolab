@@ -51,6 +51,9 @@ de secret ici (ni mot de passe, ni jeton, ni clé privée).
   que l'utilisateur se réserve cette étape.
 - **Toujours demander avant** un `rollback.sh` ou un script de démontage : cela
   détruit l'environnement en service.
+- **Façon de travailler.** L'utilisateur écrit en français, avance par petits pas et par allers-retours : montrer
+  d'abord une maquette ou un plan court avant d'implémenter, ne pas sur-construire (« overkill » est son mot pour une
+  fonction inutile à ce stade), commiter par étapes relisibles, et attendre son accord avant tout push ou déploiement.
 - **Infra minimale.** Pas de nouveau service pour couvrir chaque cas (un miroir
   pip a été refusé : « usine à gaz »). Étendre l'existant, ou annoncer la limite.
 - **Une page d'administration reste dans son propre conteneur**, jamais dans
@@ -59,6 +62,47 @@ de secret ici (ni mot de passe, ni jeton, ni clé privée).
 - Après un déploiement, prévenir que le navigateur peut garder l'ancienne page en
   cache (Ctrl+F5).
 
+## Travail en cours : console audio (état au 18 octobre 2026)
+
+Ce qui suit est la mémoire du projet : la mémoire locale de Claude (hors dépôt) ne suit pas d'un ordinateur à l'autre.
+
+**Livré, déployé et vérifié sur le Pi** : stack `audio-admin` (page `audio.<domaine>`), agent `audio-agent/` sur la
+machine d'essai `gerard`, onglet « Son » de l'exploitant, bulle de machine sur le plan de l'exploitant, redémarrage
+d'une machine depuis cette bulle. Le détail technique est dans le README (section « Console audio »).
+
+**Décisions prises avec l'utilisateur (ne pas les rouvrir sans raison)**
+- Trois niveaux en dB : exposition -> salle -> machine. Avec UNE seule salle, un seul « Volume général » (celui de la
+  salle) ; avec plusieurs, l'« Exposition » et un volume par salle (mute compris), nettement distingués.
+- Les salles viennent de Bastion ; une machine sans salle dans Bastion n'existe pas pour la console (ni affichée, ni
+  pilotée). « Tout couper » ne touche donc pas une machine sans salle : elle garde son niveau local.
+- **Volontairement exclus (« overkill ») : fondus, planning horaire, cadenas/verrous, plafond de volume, et tout le
+  « hors périmètre »** (redémarrage ou applications via l'agent, pilotes Matter/PJLink, mesure du niveau, MIDI, API Chataigne).
+- Au démarrage, une machine reprend son DERNIER niveau sans attendre le réseau (le son ne dépend jamais du réseau) ; un
+  niveau changé pendant qu'elle était éteinte s'applique dès qu'elle rejoint le serveur (fenêtre < 1 s mesurée).
+- Sortie audio standard = **carte audio USB** (le Pi 5 n'a plus de jack ; l'HDMI d'un Pi 4 est fragile, voir les pièges).
+- Une machine inconnue qui s'annonce doit être **validée** dans la console avant d'être pilotée.
+
+**À faire ensuite (l'utilisateur a prévu de reprendre sur un autre ordinateur)**
+1. **Tester une vraie carte USB audio** (l'utilisateur n'en avait pas au moment d'écrire) sur `gerard` : détection par nom
+   (`AGENT_SINK_MATCH=usb`, aujourd'hui `default` dans `~/.config/expolab-agent.conf` de gerard), volume matériel contre
+   logiciel (idée : volume matériel fixé au maximum, réglage logiciel PipeWire), fader/mute, retour au démarrage serveur
+   éteint, bruit et claquements, débranchement de la carte (« pas de carte son » doit remonter à la console).
+2. Désactiver l'audio embarqué dans l'image master (`dtparam=audio=off`) quand la carte USB est la sortie ; l'écrire
+   dans `image/README-master.md`.
+3. Tester le cas **deux salles** : ranger `rpi-test` dans `salle_b` dans Bastion et installer l'agent dessus.
+4. Nettoyer les essais restés sur `gerard` (voir ci-dessous).
+5. Questions ouvertes : comportement de « Tout couper » avec une machine hors salle ; usage CPU de l'agent (chaque pas de
+   lissage lance `wpctl`) ; jeton unique pour toute la flotte (un jeton par machine plus tard) ; intégration de l'agent à
+   l'image master et à un rôle Ansible (tag `audio`) plutôt que `install.sh` à la main.
+
+**Machines d'essai** (le Pi serveur et ces adresses changent d'une session à l'autre : toujours vérifier l'état réel)
+- `gerard` : Pi 4B, Ubuntu 26.04, branché sur un écran ASUS VP28U. Agent audio installé, PipeWire, `pi` dans le groupe
+  `audio`, `loginctl enable-linger`. Reste des essais à retirer : `~/.config/wireplumber/wireplumber.conf.d/52-hdmi-tsched.conf`,
+  le service `expolab-tone` et `~/audio-test/` (boucle de test), l'option `video=HDMI-A-1:1920x1080@60` dans
+  `/boot/firmware/current/cmdline.txt` (sauvegarde `cmdline.txt.bak-audio`).
+- `rpi-test` : Pi 3B, mêmes écran et système ; `alsa-utils` installé pour les essais ; son HDMI propre en 1080p.
+- Un ancien hub de test (port 8099, hors dépôt) a été arrêté ; il ne reste que le vrai `audio-admin`.
+
 ## Tests
 
 - CI (`.github/workflows/ci.yml`) : `ruff check --select E9,F .`, `bash -n`,
@@ -66,6 +110,10 @@ de secret ici (ni mot de passe, ni jeton, ni clé privée).
 - **Sous Windows,** le Python du système (3.8) est trop ancien. Il faut un
   environnement 3.12, par exemple avec `uv` : `uv venv -p 3.12`, puis
   `uv pip install ruff==0.6.9 pytest==8.3.3 pyyaml==6.0.2 flask==3.0.3 bcrypt==4.2.0 ruamel.yaml==0.18.6`.
+- **Outillage sous Windows :** l'outil Bash déforme les antislashs dans les heredocs (écrire les scripts de correctif
+  avec l'outil d'écriture de fichiers, jamais en ligne de commande) ; `core.autocrlf=true` met les fichiers de travail en CRLF
+  (normaliser avant un remplacement de texte) ; lancer Python avec `-I` sur des fichiers non fiables ; un caractère nul glissé
+  par un mauvais échappement casse un fichier Python (« source code string cannot contain null bytes »).
 - **Tests sautés sous Windows,** comme la capture réduite, qui a besoin de
   e2fsprogs et sfdisk. Les lancer sur le Pi dans un conteneur jetable
   (`debian:trixie-slim` avec `python3-pytest python3-flask python3-yaml fdisk e2fsprogs zstd xz-utils`),
@@ -103,6 +151,13 @@ de secret ici (ni mot de passe, ni jeton, ni clé privée).
   machine placee sur un plan a `prises-admin` (`/api/machines/restart`), seul a pouvoir agir, et
   l'API n'accepte ni adresse ni commande libres. Toute nouvelle action sur une machine suit le
   meme chemin (liste blanche, delai entre deux demandes, journal).
+- **Audio sur Pi et PipeWire (Ubuntu Server sans écran) :** l'utilisateur doit être dans le groupe `audio` (sans session
+  graphique, rien ne donne l'accès aux cartes son) et en session persistante (`loginctl enable-linger`), puis relancer son
+  gestionnaire de session (`systemctl restart user@UID`). Les numéros de sorties PipeWire changent à chaque démarrage : choisir
+  par le NOM (`node.name`). Le volume PipeWire est cubique (`volume = 10 ** (dB / 60)`). Pi 4 + écran 4K : la sortie est en
+  4K 30 Hz et le son HDMI est dégradé ; forcer 1080p (`video=HDMI-A-1:1920x1080@60` dans `/boot/firmware/current/cmdline.txt`
+  sur Ubuntu, pas `/boot/firmware/cmdline.txt`) le corrige en grande partie, mais PipeWire reste moins bon que l'ALSA brut
+  (forcer S16LE a empiré le son) : ne pas compter sur l'audio HDMI d'un Pi 4, d'où la carte USB. Un Pi 3 en 1080p est propre.
 - **Console audio et salles :** les salles et l'appartenance des machines viennent de Bastion (`audio-admin/bastion.py`),
   jamais de la console : une machine sans salle dans Bastion n'existe pas pour elle. Ne pas ajouter de saisie de salle
   dans la console.
