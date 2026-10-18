@@ -258,12 +258,19 @@ def test_operator_reaches_only_the_exploitation_pages(portal, tmp_path):
                       (flasher, "/exploitation/../api/settings"), ("dockhand.web.expolab.lan", "/exploitation"),
                       ("bastion.web.expolab.lan", "/"), ("dnsmasq.web.expolab.lan", "/api/topology")):
         assert verify(portal, auth, host, uri).status_code == 403, (host, uri)
+    # La console audio : seulement sa page d'exploitation et son API d'exploitation, jamais la console complete.
+    audio = "audio.web.expolab.lan"
+    for uri in ("/exploitation", "/api/exploitation/state", "/api/exploitation/expo", "/static/exploitation.js"):
+        assert verify(portal, auth, audio, uri).status_code == 204, uri
+    for uri in ("/", "/api/state", "/api/devices/gerard", "/api/expo", "/api/kill", "/api/presets", "/exploitation/../api/state"):
+        assert verify(portal, auth, audio, uri).status_code == 403, uri
     page = verify(portal, auth, "dockhand.web.expolab.lan", "/", accept="text/html")
     assert page.status_code == 302 and page.headers["Location"] == "https://dashboard.web.expolab.lan/"
     assert portal.client.get("/api/services", **auth).status_code == 401
     assert portal.client.get("/api/status", **auth).status_code == 401
     home = portal.client.get("/", **auth)
     assert home.status_code == 200 and b"Plans des salles" in home.data and b"https://sd-flasher.web.expolab.lan/exploitation" in home.data
+    assert b"https://audio.web.expolab.lan/exploitation" in home.data and b'data-tab="son"' in home.data
     assert b"drawer" not in home.data   # pas le tiroir des services de l'administrateur
 
 

@@ -1,0 +1,23 @@
+# Stack Dockhand "audio-admin" - console audio de l'expo : volume de l'exposition, des salles et de chaque
+# machine (source dans audio-admin/). network_mode: host, avec DEUX ecoutes separees :
+#   - l'interface sur 127.0.0.1:5062 : derriere Caddy et le portail (vhost audio.<domaine>) ;
+#   - l'API des agents sur 10.42.0.1:5063 : les machines de l'expo s'y connectent d'elles-memes, avec un
+#     jeton (data/agent.token, genere par deploy-server.sh) - jamais par le portail.
+# Les agents (audio-agent/) appliquent leur niveau eux-memes : une machine reprend son dernier niveau
+# meme si ce serveur est eteint.
+services:
+  audio-admin:
+    build: ${REPO_ROOT}/audio-admin
+    container_name: expolab-audio-admin
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - AUDIO_UI_PORT=5062
+      - AUDIO_AGENT_BIND=10.42.0.1
+      - AUDIO_AGENT_PORT=5063
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      # state.json (niveaux, presets, machines) et agent.token : non versionnes, a SAUVEGARDER.
+      - ${REPO_ROOT}/server/stacks/audio-admin/data:/data
+      # Salles et appartenance des machines : celles de Bastion (lecture seule, aucun identifiant n'en sort).
+      - ${REPO_ROOT}/server/stacks/bastion/config:/bastion-config:ro

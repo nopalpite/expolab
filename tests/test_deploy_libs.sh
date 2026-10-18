@@ -38,7 +38,7 @@ REPO_ROOT="$WORK"
 SERVICES="$SCRIPT_DIR/services.yaml"
 export REPO_ROOT SCRIPT_DIR SERVICES
 
-for lib in tls secrets credentials automation-key ansible-web sd-flasher apt-cache ntp matter prises lan-isolation dashboard dnsmasq stacks summary; do
+for lib in tls secrets credentials automation-key ansible-web sd-flasher apt-cache ntp matter prises audio lan-isolation dashboard dnsmasq stacks summary; do
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/lib/$lib.sh"
 done
@@ -106,6 +106,16 @@ setup_matter
 setup_prises
 [ -d "$SCRIPT_DIR/stacks/prises-admin/data" ] || fail "dossier de la stack prises-admin non cree"
 [ -d "$SCRIPT_DIR/stacks/matter/data" ] || fail "dossier de la stack matter non cree"
+# Console audio : jeton des agents genere une fois, prive, jamais regenere.
+setup_audio
+TOKEN="$SCRIPT_DIR/stacks/audio-admin/data/agent.token"
+[ -s "$TOKEN" ] || fail "jeton des agents audio non genere"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *)   # pas de modes Unix sous Windows
+    [ "$(stat -c %a "$TOKEN")" = "600" ] || fail "jeton des agents lisible par d'autres" ;;
+esac
+before="$(cat "$TOKEN")"
+setup_audio
+[ "$(cat "$TOKEN")" = "$before" ] || fail "jeton des agents regenere (couperait les machines installees)"
 
 setup_ntp
 NTP="$SCRIPT_DIR/stacks/ntp/config"

@@ -54,8 +54,10 @@ BASIC_CACHE_SECONDS = 300
 STATUS_CACHE_SECONDS = 10
 PORTAL_NAME = "dashboard"  # le portail lui-meme : jamais dans sa propre liste
 ADMIN, OPERATOR = "admin", "exploitant"
-# Ce que l'exploitant peut atteindre derriere Caddy : la page d'exploitation du flasheur.
+# Ce que l'exploitant peut atteindre derriere Caddy : la page d'exploitation du flasheur (cartes SD) et celle de
+# la console audio (volume), chacune dans son propre sous-domaine - et rien d'autre de ces services.
 OPERATOR_SERVICE = "sd-flasher"
+OPERATOR_AUDIO_SERVICE = "audio"
 OPERATOR_PATHS = ("/exploitation", "/api/exploitation/", "/static/")
 
 _failures: dict[str, list[float]] = {}
@@ -211,11 +213,12 @@ def current_session(creds: tuple[str, str] | None = None) -> tuple[str, str] | N
 
 
 def operator_may_reach(host: str, uri: str) -> bool:
-    """L'exploitant, derriere Caddy : uniquement la page d'exploitation du flasheur."""
+    """L'exploitant, derriere Caddy : uniquement les pages d'exploitation du flasheur et de la console audio."""
     path = urlparse(uri or "/").path or "/"
     if "/../" in path or path.endswith("/.."):
         return False
-    return host.lower() == f"{OPERATOR_SERVICE}.{DOMAIN}" and (path == "/exploitation" or path.startswith(OPERATOR_PATHS))
+    allowed = {f"{OPERATOR_SERVICE}.{DOMAIN}", f"{OPERATOR_AUDIO_SERVICE}.{DOMAIN}"}
+    return host.lower() in allowed and (path == "/exploitation" or path.startswith(OPERATOR_PATHS))
 
 
 # --- limitation des tentatives --------------------------------------------
@@ -427,7 +430,8 @@ def index():
 
 def exploitant_page(session: tuple[str, str]):
     return render_template("exploitant.html", user=session[0], domain=DOMAIN, is_admin=session[1] == ADMIN,
-                           flasher_url=f"https://{OPERATOR_SERVICE}.{DOMAIN}/exploitation")
+                           flasher_url=f"https://{OPERATOR_SERVICE}.{DOMAIN}/exploitation",
+                           audio_url=f"https://{OPERATOR_AUDIO_SERVICE}.{DOMAIN}/exploitation")
 
 
 @app.route("/exploitation")

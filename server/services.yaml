@@ -71,6 +71,13 @@ services:
     group: Infrastructure
     icon: play
     description: Prises connectées des modules
+  - name: audio
+    auth: true
+    backend_port: 5062
+    title: Son
+    group: Exposition
+    icon: volume
+    description: Volume de l'exposition, des salles et des machines
   - name: sd-flasher
     auth: true
     backend_port: 5057

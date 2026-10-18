@@ -93,3 +93,6 @@ server/stacks/ntp/run/
 # Etat Matter (fabric, prises approvisionnees) : propre a chaque installation, a sauvegarder.
 server/stacks/matter/data/
 server/stacks/prises-admin/data/
+
+# Console audio : niveaux, presets, machines et jeton des agents - propres a chaque installation, a sauvegarder.
+server/stacks/audio-admin/data/
