@@ -183,6 +183,7 @@ class Lab:
         monkeypatch.setattr(da, "host_alive", lambda ip: self.alive.get(ip))
         monkeypatch.setattr(da, "release_lease", self.release)
         da._events.clear()
+        da._presence.clear()
 
     def release(self, lease):
         self.released.append(lease["mac"])
@@ -220,6 +221,23 @@ def test_rapid_passes_never_shorten_the_silence_needed(monkeypatch):
         da.reconcile_once(misses, now=t)
     assert lab.released == []          # 40 s depuis le dernier signe de vie
     da.reconcile_once(misses, now=2090)
+    assert lab.released == [MAC_OLD]
+
+
+def test_wifi_machine_seen_by_the_presence_probe_is_never_released(monkeypatch):
+    # Cas vecu (rpi-test-ansible, Wi-Fi) : la presence la voyait repondre toutes les 30-40 s,
+    # mais les verifications de la liberation tombaient chaque fois sur un ARP rate.
+    lab = Lab(monkeypatch, NAME_RESERVATION, [lease(MAC_OLD, "10.42.0.60", "pi-03")], {"10.42.0.60": False})
+    misses = {}
+    for t, seen in ((1000, 990), (1020, 1010), (1040, 1010), (1060, 1051), (1080, 1051), (1100, 1071)):
+        da._presence[MAC_OLD] = {"alive": True, "since": seen, "last_seen": seen}
+        da.reconcile_once(misses, now=t)
+    assert lab.released == []
+    # Plus aucun signe de vie, ni pour la presence ni pour la liberation : liberation habituelle.
+    for t in (1140, 1160, 1180):
+        da.reconcile_once(misses, now=t)
+    assert lab.released == []          # 60 s pas encore ecoulees depuis le premier silence compte (1140)
+    da.reconcile_once(misses, now=1200)
     assert lab.released == [MAC_OLD]
 
 

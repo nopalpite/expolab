@@ -364,6 +364,17 @@ def still_the_same_lease(lease: dict) -> bool:
     return current is not None and lease_signature(current) == lease_signature(lease)
 
 
+def seen_recently(mac: str, now: float) -> bool:
+    """La sonde de presence (son propre ARP, toutes les PRESENCE_INTERVAL s) a-t-elle vu cette
+    machine repondre dans les STALE_AFTER_SECONDS dernieres secondes ? En Wi-Fi (economie
+    d'energie), une machine vivante rate un ARP sur deux : les verifications de la liberation
+    peuvent tomber trois fois de suite sur un silence pendant que la presence la voit repondre
+    entre-temps (cas vecu : bail libere, machine en ligne mais absente des baux et du DNS)."""
+    with _change:
+        last_seen = (_presence.get(mac) or {}).get("last_seen")
+    return last_seen is not None and now - last_seen < STALE_AFTER_SECONDS
+
+
 def reconcile_once(misses: dict, now: float | None = None) -> None:
     """Remplacement de carte sans intervention : pour chaque reservation PAR
     NOM (sans MAC), l'IP appartient au nom, pas a une carte. Deux situations
@@ -423,7 +434,7 @@ def reconcile_once(misses: dict, now: float | None = None) -> None:
             misses.pop(ip, None)
             continue
         alive = host_alive(ip)
-        if alive is None or alive:
+        if alive is None or alive or seen_recently(holder["mac"], now):
             misses.pop(ip, None)
             continue
         signature = lease_signature(holder)

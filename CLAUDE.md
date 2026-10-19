@@ -142,6 +142,9 @@ d'une machine depuis cette bulle. Le détail technique est dans le README (secti
   l'ancien instantane effacerait le bail neuf (machine en ligne mais absente des baux, de la
   topologie et de la vue exploitant jusqu'a son renouvellement). Toujours relire le bail avant
   de liberer et reprendre le silence a zero quand l'empreinte (MAC + echeance) change.
+  En Wi-Fi, une machine vivante rate un ARP sur deux : la liberation tient aussi compte du
+  dernier signe de vie vu par la sonde de presence (`seen_recently`), sinon elle libere des
+  machines en ligne (vecu sur rpi-test-ansible et rpi-test-02).
 - **Secrets dans l'espace libre d'une image :** effacer ou remplacer un fichier ne vide
   pas ses blocs. La capture (`sd-flasher/capture.py`) copie la partition ext4 par
   `e2image` (blocs utilisés seulement : rien ne fuit) mais la partition de démarrage
