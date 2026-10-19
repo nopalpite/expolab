@@ -116,6 +116,9 @@ esac
 before="$(cat "$TOKEN")"
 setup_audio
 [ "$(cat "$TOKEN")" = "$before" ] || fail "jeton des agents regenere (couperait les machines installees)"
+# Le role audio de bastion-ansible le lit dans l'environnement d'ansible-web.
+setup_ansible_web
+contains "$SCRIPT_DIR/stacks/ansible-web/ansible-web.env" "AUDIO_AGENT_TOKEN=$before"
 
 setup_ntp
 NTP="$SCRIPT_DIR/stacks/ntp/config"

@@ -29,6 +29,9 @@ ANSIBLE_REMOTE_USER=${EXPOLAB_ANSIBLE_USER:-pi}
 # Une carte remplacee garde son nom et son IP mais a une nouvelle cle d'hote :
 # la verification stricte d'ansible.cfg bloquerait chaque remplacement.
 ANSIBLE_HOST_KEY_CHECKING=false
+# Jeton des agents audio (setup_audio, audio.sh) : le role audio de bastion-ansible
+# l'installe sur chaque machine. Lu ici, jamais versionne.
+AUDIO_AGENT_TOKEN=$(cat "$SCRIPT_DIR/stacks/audio-admin/data/agent.token" 2>/dev/null)
 EOT
     chmod 600 "$dir/ansible-web.env"
 }
