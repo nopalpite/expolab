@@ -168,6 +168,7 @@ td code {
 .badge-ok { background: rgba(62, 207, 142, 0.15); color: var(--ok); }
 .badge-pending { background: rgba(79, 140, 255, 0.15); color: var(--accent); }
 .badge-error { background: rgba(239, 83, 80, 0.15); color: var(--error); }
+.badge-warn { background: rgba(240, 160, 32, 0.15); color: #f0a020; }
 .badge-muted { background: rgba(154, 161, 172, 0.15); color: var(--muted); }
 
 #log-content {

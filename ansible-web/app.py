@@ -118,6 +118,32 @@ def local_roles() -> set[str]:
     return {p.name for p in roles_dir.iterdir() if p.is_dir()}
 
 
+def ordered_roles() -> set[str] | None:
+    """Roles de order.yaml : les seuls que site.yml (genere a partir de lui)
+    execute. Un role absent n'a aucun play : un run sur son tag ne fait rien.
+    None si order.yaml est illisible (rien a signaler alors)."""
+    try:
+        data = yaml.safe_load((REPO_DIR / "order.yaml").read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    order = data.get("order") if isinstance(data, dict) else None
+    return {str(r) for r in order} if isinstance(order, list) else None
+
+
+RECAP_HOST_RE = re.compile(r"^\S+\s+:\s+ok=\d+", re.MULTILINE)
+
+
+def run_status(returncode: int, log: str) -> str:
+    """ok / failed / empty : `empty` = ansible-playbook a reussi sans traiter
+    aucune machine (aucun play pour cette cible, ou aucune machine dedans)."""
+    if returncode != 0:
+        return "failed"
+    recap = log.rsplit("PLAY RECAP", 1)
+    if len(recap) < 2 or not RECAP_HOST_RE.search(recap[1]):
+        return "empty"
+    return "ok"
+
+
 def load_runs() -> list[dict]:
     if not RUNS_INDEX.exists():
         return []
@@ -154,7 +180,7 @@ def execute_run(run_id: str, limit: str | None) -> None:
         try:
             with open(log_path, "w") as logf:
                 result = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=REPO_DIR)
-            status = "ok" if result.returncode == 0 else "failed"
+            status = run_status(result.returncode, log_path.read_text(errors="replace"))
         except Exception as exc:
             with open(log_path, "a") as logf:
                 logf.write(f"\nErreur d'execution : {exc}\n")
@@ -198,14 +224,16 @@ def api_settings_put():
     return jsonify({"ok": True})
 
 
-def build_targets(machines: list[dict], group_name, roles: set[str]) -> dict:
+def build_targets(machines: list[dict], group_name, roles: set[str], ordered: set[str] | None = None) -> dict:
     """Cibles valides pour `ansible-playbook --limit` : un groupe par tag
     Bastion (nom normalise, comme bastion_inventory.build_inventory) et un
     hote par machine (son `name` Bastion). Fonction pure : testable sans
-    reseau ni clone."""
+    reseau ni clone. `in_order` : role present dans order.yaml (sinon site.yml
+    n'a aucun play pour lui) ; toujours vrai si order.yaml est inconnu."""
     tag_names = sorted({t for m in machines for t in (m.get("tags") or [])})
     tags = [
-        {"name": t, "role": group_name(t), "has_role": group_name(t) in roles}
+        {"name": t, "role": group_name(t), "has_role": group_name(t) in roles,
+         "in_order": ordered is None or group_name(t) in ordered}
         for t in tag_names
     ]
     hosts = [
@@ -234,7 +262,7 @@ def load_targets() -> tuple[dict | None, str | None, int]:
     except SystemExit:
         return None, "Impossible de joindre Bastion (verifier BASTION_URL/BASTION_API_TOKEN).", 502
 
-    return build_targets(machines, inventory.group_name, local_roles()), None, 200
+    return build_targets(machines, inventory.group_name, local_roles(), ordered_roles()), None, 200
 
 
 def allowed_limits(targets: dict) -> set[str]:

@@ -41,9 +41,17 @@ document.getElementById("settings-form").addEventListener("submit", async (e) =>
 });
 
 function statusBadge(status) {
-    const map = { running: "badge-pending", ok: "badge-ok", failed: "badge-error" };
-    const label = { running: "en cours", ok: "ok", failed: "echec" };
+    // empty : ansible-playbook a reussi sans traiter aucune machine (rien n'a ete fait).
+    const map = { running: "badge-pending", ok: "badge-ok", failed: "badge-error", empty: "badge-warn" };
+    const label = { running: "en cours", ok: "ok", failed: "echec", empty: "aucune machine traitee" };
     return `<span class="badge ${map[status] || "badge-muted"}">${label[status] || status}</span>`;
+}
+
+function roleBadge(t) {
+    if (!t.has_role) return '<span class="badge badge-muted">role absent</span>';
+    // Role present mais pas dans order.yaml : site.yml n'a aucun play pour lui, un run ne ferait rien.
+    if (t.in_order === false) return '<span class="badge badge-warn" title="Ajouter le role a order.yaml (et regenerer site.yml) dans bastion-ansible">absent de order.yaml</span>';
+    return '<span class="badge badge-ok">role present</span>';
 }
 
 async function loadTags() {
@@ -72,7 +80,7 @@ async function loadTags() {
             <tr>
                 <td data-label="Tag">${t.name}</td>
                 <td data-label="Role"><code>${t.role}</code></td>
-                <td>${t.has_role ? '<span class="badge badge-ok">role present</span>' : '<span class="badge badge-muted">role absent</span>'}</td>
+                <td>${roleBadge(t)}</td>
             </tr>
         `).join("");
     } catch (e) {
