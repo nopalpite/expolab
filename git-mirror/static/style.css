@@ -215,6 +215,17 @@ button.secondary {
     color: var(--text);
 }
 
+/* Ligne Commit : empreinte courte, message (tronque), date. */
+.mirror-card-row:has(.commit-subject) code { flex: 0 0 auto; }
+.commit-subject {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.commit-date { flex: 0 0 auto; color: var(--muted); font-size: 0.8rem; }
+
 .mirror-card-meta {
     display: flex;
     gap: 18px;

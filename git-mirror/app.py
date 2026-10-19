@@ -34,6 +34,12 @@ GIT_TIMEOUT = 120  # clone/fetch peuvent prendre du temps sur un gros depot
 LS_REMOTE_TIMEOUT = 15  # simple verification "a jour ?", doit rester rapide
 
 INTERVAL_CHOICES = {0: None, 60: "1h", 360: "6h", 1440: "24h"}
+# Verification reguliere "a jour ?" (ls-remote, sans fetch) de chaque mirroir, en arriere-plan :
+# la page lit le dernier resultat au lieu de joindre chaque depot distant a chaque affichage.
+CHECK_INTERVAL = int(os.environ.get("GIT_MIRROR_CHECK_INTERVAL", "300"))
+
+_status: dict = {}            # nom -> resultat de la derniere verification (voir check_mirror)
+_status_lock = threading.Lock()
 
 
 def mask_url(url: str) -> str:
@@ -108,31 +114,66 @@ def sync_mirror(name: str) -> tuple[bool, str]:
 
     mirror["last_synced"] = datetime.now(timezone.utc).isoformat()
     save_mirrors(data)
+    check_mirror(mirror)
     return True, ""
 
 
-def check_up_to_date(mirror: dict) -> bool | None:
-    """Compare le HEAD distant au HEAD local, sans fetch. None si injoignable."""
+def local_commit(name: str) -> dict | None:
+    """Commit actuel (HEAD) du clone local : empreinte, message, date. None si illisible."""
     try:
-        remote = run_git(["ls-remote", mirror["remote_url"], "HEAD"], LS_REMOTE_TIMEOUT)
-        local = run_git(["-C", str(repo_path(mirror["name"])), "rev-parse", "HEAD"], 10)
+        result = run_git(["-C", str(repo_path(name)), "log", "-1", "--format=%H%x1f%s%x1f%cI", "HEAD"], 10)
     except subprocess.TimeoutExpired:
         return None
-    if remote.returncode != 0 or local.returncode != 0:
+    parts = result.stdout.strip().split("\x1f")
+    if result.returncode != 0 or len(parts) != 3:
         return None
-    remote_sha = remote.stdout.split()[0] if remote.stdout.strip() else None
-    local_sha = local.stdout.strip()
-    if not remote_sha or not local_sha:
+    return {"sha": parts[0], "short": parts[0][:7], "subject": parts[1], "date": parts[2]}
+
+
+def remote_head(url: str) -> str | None:
+    """Empreinte du HEAD distant, sans fetch. None si injoignable."""
+    try:
+        result = run_git(["ls-remote", url, "HEAD"], LS_REMOTE_TIMEOUT)
+    except subprocess.TimeoutExpired:
         return None
-    return remote_sha == local_sha
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return result.stdout.split()[0]
+
+
+def check_mirror(mirror: dict) -> dict:
+    """Compare le HEAD distant au HEAD local et retient le resultat. up_to_date : True, False,
+    ou None si le distant (ou le clone local) est illisible."""
+    commit = local_commit(mirror["name"])
+    remote_sha = remote_head(mirror["remote_url"])
+    status = {
+        "commit": commit,
+        "remote_sha": remote_sha,
+        "up_to_date": None if commit is None or remote_sha is None else commit["sha"] == remote_sha,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with _status_lock:
+        _status[mirror["name"]] = status
+    return status
+
+
+def mirror_status(mirror: dict) -> dict:
+    with _status_lock:
+        cached = _status.get(mirror["name"])
+    return cached or check_mirror(mirror)
 
 
 def scheduler_loop() -> None:
-    """Thread de fond : declenche un sync pour les mirroirs dont l'intervalle est ecoule."""
+    """Thread de fond : declenche un sync pour les mirroirs dont l'intervalle est ecoule, et
+    verifie toutes les CHECK_INTERVAL s si chaque mirroir est a jour."""
+    last_check = 0.0
     while True:
-        time.sleep(60)
         try:
             data = load_mirrors()
+            if time.monotonic() - last_check >= CHECK_INTERVAL:
+                last_check = time.monotonic()
+                for mirror in data.get("mirrors", []):
+                    check_mirror(mirror)
             now = datetime.now(timezone.utc)
             for mirror in data.get("mirrors", []):
                 interval = mirror.get("interval_minutes")
@@ -149,6 +190,7 @@ def scheduler_loop() -> None:
             # Ne jamais laisser une erreur ponctuelle (reseau, depot
             # supprime entre-temps...) tuer le thread de fond.
             pass
+        time.sleep(60)
 
 
 @app.route("/")
@@ -161,15 +203,19 @@ def api_mirrors_list():
     data = load_mirrors()
     mirrors = []
     for m in data.get("mirrors", []):
+        status = mirror_status(m)
         mirrors.append({
             "name": m["name"],
             "remote_url": mask_url(m["remote_url"]),
             "clone_url": clone_url(m["name"]),
             "interval_minutes": m.get("interval_minutes") or 0,
             "last_synced": m.get("last_synced"),
-            "up_to_date": check_up_to_date(m),
+            "up_to_date": status["up_to_date"],
+            "commit": status["commit"],
+            "remote_short": (status["remote_sha"] or "")[:7] or None,
+            "checked_at": status["checked_at"],
         })
-    return jsonify({"mirrors": mirrors})
+    return jsonify({"mirrors": mirrors, "check_interval": CHECK_INTERVAL})
 
 
 @app.route("/api/mirrors", methods=["POST"])
@@ -208,6 +254,7 @@ def api_mirrors_create():
         "last_synced": datetime.now(timezone.utc).isoformat(),
     })
     save_mirrors(data)
+    check_mirror(data["mirrors"][-1])
     return jsonify({"ok": True}), 201
 
 
@@ -235,6 +282,7 @@ def api_mirrors_update(name: str):
 
     mirror["interval_minutes"] = interval_minutes or None
     save_mirrors(data)
+    check_mirror(mirror)
     return jsonify({"ok": True})
 
 
@@ -248,6 +296,8 @@ def api_mirrors_delete(name: str):
     shutil.rmtree(repo_path(name), ignore_errors=True)
     data["mirrors"].remove(mirror)
     save_mirrors(data)
+    with _status_lock:
+        _status.pop(name, None)
     return jsonify({"ok": True})
 
 

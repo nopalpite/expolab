@@ -8,13 +8,23 @@ function formatDate(iso) {
 }
 
 function statusBadge(m) {
+    const checked = m.checked_at ? ` (verifie le ${formatDate(m.checked_at)})` : "";
     if (m.up_to_date === null) {
-        return '<span class="badge badge-muted">injoignable</span>';
+        return `<span class="badge badge-muted" title="Depot distant injoignable${checked}">injoignable</span>`;
     }
     if (m.up_to_date) {
-        return '<span class="badge badge-ok">a jour</span>';
+        return `<span class="badge badge-ok" title="Meme commit que le depot distant${checked}">a jour</span>`;
     }
-    return '<span class="badge badge-pending">en retard</span>';
+    const remote = m.remote_short ? ` : distant ${m.remote_short}` : "";
+    return `<span class="badge badge-pending" title="Le depot distant a avance${checked} - Sync maintenant pour le recuperer">en retard${escapeHtml(remote)}</span>`;
+}
+
+function commitLine(m) {
+    if (!m.commit) return '<span class="field-value">inconnu</span>';
+    const c = m.commit;
+    return `<code title="${escapeHtml(c.sha)}">${escapeHtml(c.short)}</code>
+            <span class="commit-subject" title="${escapeHtml(c.subject)}">${escapeHtml(c.subject)}</span>
+            <span class="commit-date">${formatDate(c.date)}</span>`;
 }
 
 function intervalLabel(minutes) {
@@ -75,6 +85,10 @@ async function loadMirrors() {
                     <code title="${escapeHtml(m.remote_url)}">${escapeHtml(m.remote_url)}</code>
                 </div>
                 <div class="mirror-card-row">
+                    <span class="field-label">Commit</span>
+                    ${commitLine(m)}
+                </div>
+                <div class="mirror-card-row">
                     <span class="field-label">Cloner</span>
                     <code title="${escapeHtml(m.clone_url)}">${escapeHtml(m.clone_url)}</code>
                     <button type="button" class="secondary" data-copy-url="${escapeHtml(m.clone_url)}">Copier</button>
@@ -82,6 +96,7 @@ async function loadMirrors() {
                 <div class="mirror-card-meta">
                     <span>Derniere sync : ${formatDate(m.last_synced)}</span>
                     <span>Auto : ${intervalLabel(m.interval_minutes)}</span>
+                    <span>Verifie : ${formatDate(m.checked_at)}</span>
                 </div>
             </div>
         `).join("");
@@ -193,3 +208,6 @@ document.getElementById("create-form").addEventListener("submit", async (e) => {
 });
 
 loadMirrors();
+// Le serveur verifie chaque mirroir en arriere-plan (check_interval) : la page relit son
+// dernier resultat toutes les 30 s (seule la liste est redessinee, pas le formulaire).
+setInterval(loadMirrors, 30000);
