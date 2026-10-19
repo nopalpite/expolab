@@ -112,6 +112,7 @@ document.getElementById("run-form").addEventListener("submit", async (e) => {
         } else {
             status.className = "status status-ok";
             status.textContent = `Run '${data.id}' lance.`;
+            viewLog(data.id, true);   // le log du run qu'on vient de lancer s'affiche et se suit
             loadRuns();
         }
     } catch (e) {
@@ -123,27 +124,63 @@ document.getElementById("run-form").addEventListener("submit", async (e) => {
     }
 });
 
-async function viewLog(runId) {
-    const panel = document.getElementById("log-panel");
+// Suivi en direct : l'historique est relu toutes les POLL_RUNNING_MS tant qu'un run tourne
+// (POLL_IDLE_MS sinon, pour voir un run lance depuis un autre onglet), et le log affiche
+// est relu tant que son run tourne, plus une derniere fois a sa fin.
+const POLL_RUNNING_MS = 2000;
+const POLL_IDLE_MS = 15000;
+let viewedRunId = null;
+let viewedRunRunning = false;
+let pollTimer = null;
+
+async function refreshLog(runId, initial) {
     const content = document.getElementById("log-content");
-    panel.hidden = false;
-    content.textContent = "Chargement...";
-    panel.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Reste colle en bas si on y etait deja (on suit la fin du run), sinon ne bouge pas.
+    const atBottom = content.scrollHeight - content.scrollTop - content.clientHeight < 40;
     try {
         const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/log`);
         const data = await res.json();
-        content.textContent = res.ok ? data.log : (data.error || "Erreur");
+        if (runId !== viewedRunId) return;   // un autre log a ete ouvert entre-temps
+        const text = res.ok ? data.log : (data.error || "Erreur");
+        if (content.textContent !== text) {
+            content.textContent = text;
+            if (initial || atBottom) content.scrollTop = content.scrollHeight;
+        }
     } catch (e) {
-        content.textContent = "Erreur reseau";
+        if (initial) content.textContent = "Erreur reseau";
     }
+}
+
+async function viewLog(runId, running) {
+    const panel = document.getElementById("log-panel");
+    const content = document.getElementById("log-content");
+    viewedRunId = runId;
+    viewedRunRunning = !!running;
+    document.getElementById("log-title").textContent = `Log ${runId}`;
+    panel.hidden = false;
+    content.textContent = "Chargement...";
+    panel.scrollIntoView({ behavior: "smooth", block: "center" });
+    await refreshLog(runId, true);
+}
+
+function schedulePoll(delay) {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(loadRuns, delay);
 }
 
 async function loadRuns() {
     const body = document.getElementById("runs-body");
+    let anyRunning = false;
     try {
         const res = await fetch("/api/runs");
         const data = await res.json();
         const runs = data.runs || [];
+        anyRunning = runs.some(r => r.status === "running");
+        const viewed = runs.find(r => r.id === viewedRunId);
+        if (viewed && (viewed.status === "running" || viewedRunRunning)) {
+            viewedRunRunning = viewed.status === "running";
+            refreshLog(viewed.id, false);   // derniere lecture comprise, quand il vient de finir
+        }
         if (!runs.length) {
             body.innerHTML = '<tr><td colspan="4" class="empty">Aucun run</td></tr>';
             return;
@@ -153,14 +190,16 @@ async function loadRuns() {
                 <td data-label="Demarre">${new Date(r.started_at).toLocaleString()}</td>
                 <td data-label="Cible">${r.limit || "tout le parc"}</td>
                 <td data-label="Statut">${statusBadge(r.status)}</td>
-                <td class="actions"><button class="secondary" data-run-id="${r.id}">Voir le log</button></td>
+                <td class="actions"><button class="secondary" data-run-id="${r.id}" data-running="${r.status === "running" ? "1" : ""}">Voir le log</button></td>
             </tr>
         `).join("");
         body.querySelectorAll("button[data-run-id]").forEach(btn => {
-            btn.addEventListener("click", () => viewLog(btn.dataset.runId));
+            btn.addEventListener("click", () => viewLog(btn.dataset.runId, btn.dataset.running === "1"));
         });
     } catch (e) {
         body.innerHTML = '<tr><td colspan="4" class="status-error">Erreur de chargement</td></tr>';
+    } finally {
+        schedulePoll(anyRunning ? POLL_RUNNING_MS : POLL_IDLE_MS);
     }
 }
 
