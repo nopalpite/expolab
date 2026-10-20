@@ -98,5 +98,11 @@ mkdir -p /run/chrony /var/lib/chrony
 # Dossier de la socket de commande (monte depuis l'hote) : chrony refuse ("Wrong permissions")
 # et desactive la socket s'il est plus ouvert que 750 - ntp-admin n'aurait alors aucun etat.
 chmod 750 /run/chrony
+# /run/chrony est un dossier de l'HOTE : apres un arret brutal (coupure de courant), le
+# fichier PID du chronyd precedent y reste. Il contient "1" - le PID de chronyd dans son
+# conteneur - et le nouveau chronyd, lui aussi PID 1, se croit deja lance et s'arrete en
+# boucle ("Another chronyd may already be running"). Ce conteneur est le seul chronyd qui
+# utilise ce dossier : un PID present ici est toujours celui d'un demarrage precedent.
+rm -f /run/chrony/chronyd.pid
 # root : le conteneur garde SYS_TIME et la socket de commande reste lisible par ntp-admin.
 exec chronyd -d -u root

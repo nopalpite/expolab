@@ -126,4 +126,10 @@ FAKE_CHRONY_ACTIVE=1 setup_ntp > "$WORK/out.log"
 grep -q "^disable --now chrony$" "$FAKE_SYSTEMCTL_LOG" || fail "chrony de l'hote non desactive"
 grep -q "chrony de l'hote" "$WORK/out.log" || fail "pas de message de migration"
 
+# Coupure de courant : le fichier PID du demarrage precedent (dossier de l'hote) est retire
+# AVANT de lancer chronyd, sinon il se croit deja lance et redemarre en boucle.
+pid_line="$(grep -n 'rm -f /run/chrony/chronyd.pid' "$ENTRYPOINT" | cut -d: -f1)"
+exec_line="$(grep -n '^exec chronyd' "$ENTRYPOINT" | cut -d: -f1)"
+[ -n "$pid_line" ] && [ "$pid_line" -lt "$exec_line" ] || fail "PID perime de chronyd non retire avant son lancement"
+
 echo "OK : stack ntp (entrypoint et fichiers)"
