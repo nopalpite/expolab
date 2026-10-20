@@ -1,6 +1,8 @@
 """Tests d'ansible-web : cibles (tags + machines) et validation de --limit."""
 import importlib.util
+import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,7 @@ import pytest
 pytest.importorskip("flask")
 
 APP_PATH = Path(__file__).resolve().parent.parent / "ansible-web" / "app.py"
+sys.path.insert(0, str(APP_PATH.parent))   # app.py importe deploy.py, a cote de lui
 spec = importlib.util.spec_from_file_location("ansible_web_app", APP_PATH)
 aw = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(aw)
@@ -142,3 +145,127 @@ def test_run_status_flags_a_run_that_touched_no_machine():
     assert aw.run_status(0, REAL_RUN_LOG) == "ok"
     assert aw.run_status(2, REAL_RUN_LOG) == "failed"
     assert aw.run_status(4, EMPTY_RUN_LOG) == "failed"
+
+
+# --- installation d'une machine apres un flash exploitant (deploy.py) ---------------------------
+
+import deploy  # noqa: E402
+
+LIST_TASKS = """
+playbook: site.yml
+
+  play #1 (wifi): Typologie wifi	TAGS: []
+    tasks:
+      wifi : Installer iw	TAGS: []
+      wifi : Poser la regle udev	TAGS: []
+
+  play #2 (audio): Typologie audio	TAGS: []
+    tasks:
+      audio : Installer PipeWire	TAGS: []
+"""
+
+
+def test_deploy_helpers():
+    assert deploy.count_planned_tasks(LIST_TASKS) == 3
+    assert deploy.count_planned_tasks("playbook: site.yml\n\n  play #1 (wifi): Typologie wifi\tTAGS: []\n    tasks:\n") == 0
+    log = "TASK [Gathering Facts] ***\nok\nTASK [wifi : Installer iw] ***\nTASK [wifi : Poser la regle udev] ***\n"
+    assert deploy.count_done_tasks(log) == 2
+    assert deploy.progress(2, 3) == 67 and deploy.progress(9, 3) == 99 and deploy.progress(0, 3) == 1 and deploy.progress(1, 0) == 0
+    machines = [{"name": "rpi-test-02.expolab.lan"}, {"name": "rpi-test"}]
+    assert deploy.inventory_name(machines, "rpi-test-02") == "rpi-test-02.expolab.lan"
+    assert deploy.inventory_name(machines, "rpi-test") == "rpi-test" and deploy.inventory_name(machines, "rpi") is None
+    # Reconnaitre LA carte flashee, premier demarrage termine.
+    assert deploy.card_ready("expolab-x-1\nstatus: done\n", "expolab-x-1")
+    assert deploy.card_ready("expolab-x-1\nstatus: error\n", "expolab-x-1")   # cloud-init en erreur : on installe quand meme
+    assert not deploy.card_ready("expolab-x-1\nstatus: running\n", "expolab-x-1")
+    assert not deploy.card_ready("expolab-x-0\nstatus: done\n", "expolab-x-1")   # ancienne carte encore allumee
+    assert not deploy.card_ready("", "expolab-x-1")
+    assert not deploy.valid_request({"hostname": "../etc", "requested_at": 1, "instance_id": "i"})
+
+
+class DeployLab:
+    """ansible-web sans reseau : Bastion, clone, sonde SSH et runs simules."""
+
+    def __init__(self, monkeypatch, tmp_path, planned=3, machines=None):
+        self.ready, self.runs, self.busy = False, {}, False
+        monkeypatch.setattr(aw, "DEPLOY_DIR", tmp_path / "deploy")
+        monkeypatch.setattr(aw, "RUNS_DIR", tmp_path / "runs")
+        monkeypatch.setattr(aw, "sync_repo", lambda: (True, ""))
+        inventory = type("Inv", (), {"fetch_machines": staticmethod(lambda: machines or [{"name": "rpi-test-02.expolab.lan"}])})
+        monkeypatch.setattr(aw, "load_inventory_module", lambda: inventory)
+        monkeypatch.setattr(aw, "planned_tasks", lambda limit: planned)
+        monkeypatch.setattr(aw, "probe_card", lambda ip, instance: self.ready)
+        monkeypatch.setattr(aw, "start_run", self.start_run)
+        monkeypatch.setattr(aw, "run_entry", lambda run_id: self.runs.get(run_id))
+        (tmp_path / "runs").mkdir(parents=True)
+        self.tmp = tmp_path
+
+    def start_run(self, limit, actor=""):
+        if self.busy:
+            return None
+        self.limit, self.actor = limit, actor
+        self.runs["R1"] = {"id": "R1", "status": "running"}
+        return "R1"
+
+    def request(self, hostname="rpi-test-02", requested_at=1000):
+        path = self.tmp / "deploy" / "requests" / f"{hostname}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"hostname": hostname, "ip": "10.42.0.107", "instance_id": "expolab-rpi-test-02-1",
+                                    "requested_at": requested_at}))
+
+    def status(self, hostname="rpi-test-02"):
+        return deploy.read_json(self.tmp / "deploy" / "status" / f"{hostname}.json")
+
+
+def test_deploy_waits_for_the_card_then_runs_and_reports_progress(monkeypatch, tmp_path):
+    lab = DeployLab(monkeypatch, tmp_path)
+    lab.request()
+    aw.deploy_once(now=1010)
+    assert lab.status()["state"] == "waiting" and lab.status()["limit"] == "rpi-test-02.expolab.lan"
+    aw.deploy_once(now=1020)
+    assert lab.status()["state"] == "waiting"           # la carte n'a pas encore demarre
+    lab.ready, lab.busy = True, True
+    aw.deploy_once(now=1030)
+    assert lab.status()["state"] == "waiting"           # un autre run tourne : elle attend son tour
+    lab.busy = False
+    aw.deploy_once(now=1040)
+    assert lab.status()["state"] == "running" and lab.limit == "rpi-test-02.expolab.lan" and lab.actor == "exploitant"
+    (tmp_path / "runs" / "R1.log").write_text("TASK [Gathering Facts] *\nTASK [wifi : Installer iw] *\nTASK [wifi : Poser la regle udev] *\n")
+    aw.deploy_once(now=1050)
+    assert lab.status()["percent"] == 67
+    lab.runs["R1"]["status"] = "ok"
+    aw.deploy_once(now=1060)
+    assert lab.status()["state"] == "done" and lab.status()["percent"] == 100
+
+
+def test_failed_run_and_machine_without_role(monkeypatch, tmp_path):
+    lab = DeployLab(monkeypatch, tmp_path)
+    lab.request()
+    lab.ready = True
+    aw.deploy_once(now=1010)
+    aw.deploy_once(now=1020)
+    lab.runs["R1"]["status"] = "failed"
+    aw.deploy_once(now=1030)
+    assert lab.status()["state"] == "failed"
+    lab2 = DeployLab(monkeypatch, tmp_path / "b", planned=0)
+    lab2.request()
+    aw.deploy_once(now=1010)
+    assert lab2.status()["state"] == "none"             # aucun role prevu : rien a installer
+    lab3 = DeployLab(monkeypatch, tmp_path / "c", machines=[{"name": "autre.expolab.lan"}])
+    lab3.request()
+    aw.deploy_once(now=1010)
+    assert lab3.status()["state"] == "none"             # inconnue de Bastion : rien a installer
+
+
+def test_deploy_times_out_and_restarts_on_a_new_request(monkeypatch, tmp_path):
+    lab = DeployLab(monkeypatch, tmp_path)
+    lab.request(requested_at=1000)
+    aw.deploy_once(now=1010)
+    aw.deploy_once(now=1000 + deploy.WAIT_SECONDS + 1)
+    assert lab.status()["state"] == "timeout"
+    lab.request(requested_at=5000)                      # « J'ai verifie, attendre encore »
+    aw.deploy_once(now=5010)
+    assert lab.status()["state"] == "waiting"
+    (tmp_path / "deploy" / "requests" / "rpi-test-02.json").unlink()   # « Abandonner »
+    aw.deploy_once(now=5020)
+    assert lab.status() is None

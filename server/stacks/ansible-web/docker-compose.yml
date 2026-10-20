@@ -22,6 +22,9 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ${REPO_ROOT}/server/stacks/ansible-web/repo:/repo
       - ${REPO_ROOT}/server/stacks/ansible-web/runs:/runs
+      # Installation d'une machine apres un flash exploitant : demandes deposees par
+      # sd-flasher (requests/), etat publie ici (status/). Voir ansible-web/deploy.py.
+      - ${REPO_ROOT}/server/stacks/ansible-web/deploy:/deploy
       - ${REPO_ROOT}/server/stacks/ansible-web/config.yaml:/data/config.yaml
       # Cle SSH dediee automatisation (voir deploy-server.sh) - jamais
       # celle utilisee en vrai vie, une cle propre a ce lab.

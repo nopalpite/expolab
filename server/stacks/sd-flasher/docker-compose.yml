@@ -34,3 +34,6 @@ services:
       - ${REPO_ROOT}/image/prepare-master.sh:/app/prepare-master.sh:ro
       # Reservations DHCP (lecture seule) : liste des noms de machines.
       - ${REPO_ROOT}/server/stacks/dnsmasq/admin-config:/dnsmasq-admin-config:ro
+      # Installation de la machine apres un flash exploitant : demande deposee ici pour
+      # ansible-web, qui y publie l'avancement (ansible-web/deploy.py).
+      - ${REPO_ROOT}/server/stacks/ansible-web/deploy:/deploy

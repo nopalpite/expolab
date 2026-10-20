@@ -47,6 +47,9 @@ DEVICES_FILE = os.environ.get("SD_FLASHER_DEVICES_FILE")
 # image/prepare-master.sh, monte depuis le depot (voir la stack) : la meme preparation master
 # que sur une machine, appliquee hors ligne a la copie d'une carte capturee.
 PREPARE_SCRIPT = Path(os.environ.get("SD_FLASHER_PREPARE_SCRIPT", "/app/prepare-master.sh"))
+# Deploiement apres un flash exploitant : dossier partage avec ansible-web (voir ansible-web/deploy.py).
+# Le flasheur y depose requests/<nom>.json, ansible-web y publie status/<nom>.json.
+DEPLOY_DIR = Path(os.environ.get("SD_FLASHER_DEPLOY_DIR", "/deploy"))
 
 UPLOAD_RESERVE = int(os.environ.get("SD_FLASHER_UPLOAD_RESERVE_MB", "1024")) * 1024 * 1024  # espace laisse libre au serveur
 # + = @ , : presents dans les noms d'images officiels (ubuntu-...-arm64+raspi.img.xz) et sans risque dans un nom de fichier
@@ -693,7 +696,7 @@ def _start_flash(device: str, hostname: str, image: Path, actor: str):
                 "steps": [{"id": s, "label": flasher.STEP_LABELS[s]} for s in flasher.STEPS]}
     audit("flash-start", device=device, model=eligible[device]["model"], serial=eligible[device]["serial"],
           hostname=hostname, image=image.name, actor=actor, dry_run=DRY_RUN)
-    threading.Thread(target=_run, args=(image, device, hostname, settings, eligible[device]), daemon=True).start()
+    threading.Thread(target=_run, args=(image, device, hostname, settings, eligible[device], actor), daemon=True).start()
     return jsonify(_job), 202
 
 
@@ -711,7 +714,7 @@ def _recheck(device: str, expected: dict, image: Path) -> None:
     flasher.check_fits(image, now["size"])
 
 
-def _run(image: Path, device: str, hostname: str, settings: dict, expected: dict) -> None:
+def _run(image: Path, device: str, hostname: str, settings: dict, expected: dict, actor: str = "") -> None:
     target = device
     if DRY_RUN:
         DRY_RUN_DIR.mkdir(parents=True, exist_ok=True)
@@ -721,7 +724,8 @@ def _run(image: Path, device: str, hostname: str, settings: dict, expected: dict
         result = flasher.run_flash(image_path=image, target=target, hostname=hostname, settings=settings,
                                    dry_run=DRY_RUN, dry_run_dir=DRY_RUN_DIR, update=_update)
         ip = next((m["ip"] for m in machine_names() if m["hostname"] == hostname), None)
-        _update(state="done", step="eject", percent=100, message="Carte prete", result=result, ip=ip)
+        deploy = actor == "exploitant" and request_deploy(hostname, ip, result.get("instance_id", ""))
+        _update(state="done", step="eject", percent=100, message="Carte prete", result=result, ip=ip, deploy=deploy)
         audit("flash-done", device=device, hostname=hostname, sha256=result["sha256"], bytes=result["bytes"])
     except flasher.FlashError as exc:
         _update(state="error", error=str(exc))
@@ -735,6 +739,43 @@ def _run(image: Path, device: str, hostname: str, settings: dict, expected: dict
 # Seules ces routes sont ouvertes a l'exploitant (le portail le verifie pour Caddy) : il choisit
 # une machine parmi les reservations, l'image et TOUS les reglages sont ceux fixes ici par
 # l'administrateur ; rien n'est lu du navigateur d'autre que la carte et le nom de la machine.
+
+def deploy_paths(hostname: str) -> tuple[Path, Path]:
+    return DEPLOY_DIR / "requests" / f"{hostname}.json", DEPLOY_DIR / "status" / f"{hostname}.json"
+
+
+def request_deploy(hostname: str, ip: str | None, instance_id: str) -> bool:
+    """Demande a ansible-web d'installer la machine des que CETTE carte aura demarre."""
+    if not instance_id or not ip:
+        return False
+    req_path, _ = deploy_paths(hostname)
+    try:
+        req_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = req_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"hostname": hostname, "ip": ip, "instance_id": instance_id,
+                                   "requested_at": int(time.time())}))
+        os.replace(tmp, req_path)
+    except OSError:
+        return False
+    audit("deploy-request", hostname=hostname, ip=ip)
+    return True
+
+
+def deploy_state(hostname: str) -> dict:
+    """Ce que l'exploitant voit du deploiement : un etat et un pourcentage, rien d'autre."""
+    _, status_path = deploy_paths(hostname)
+    try:
+        status = json.loads(status_path.read_text())
+    except (OSError, ValueError):
+        status = {}
+    state = status.get("state") if status.get("state") in ("waiting", "running", "done", "failed", "timeout", "none") else "waiting"
+    return {"state": state, "percent": int(status.get("percent") or 0) if state == "running" else 0}
+
+
+def forget_deploy(hostname: str) -> None:
+    req_path, _ = deploy_paths(hostname)
+    req_path.unlink(missing_ok=True)
+
 
 def operator_image() -> Path | None:
     name = load_settings()["operator_image"]
@@ -750,6 +791,8 @@ def operator_job() -> dict:
         return {"state": "busy"} if job.get("state") == "running" else {"state": "idle"}
     keep = ("kind", "state", "step", "percent", "hostname", "model", "steps", "ip")
     out = {k: job[k] for k in keep if k in job}
+    if job.get("state") == "done" and job.get("deploy"):
+        out["deploy"] = deploy_state(job["hostname"])
     if job.get("state") == "error":
         out["error"] = job.get("error", "")
     return out
@@ -789,10 +832,31 @@ def api_exploitation_flash():
 
 @app.route("/api/exploitation/dismiss", methods=["POST"])
 def api_exploitation_dismiss():
+    """Fermer l'ecran de fin (reussi, echec, ou « Abandonner » quand la machine n'a pas
+    demarre). Jamais pendant que la machine est attendue ou s'installe."""
     global _job
     with _job_lock:
         if _job.get("kind") == "flash" and _job.get("state") in ("done", "error"):
+            if _job.get("deploy"):
+                if deploy_state(_job["hostname"])["state"] in ("waiting", "running"):
+                    return jsonify({"error": "L'installation de la machine est en cours."}), 409
+                forget_deploy(_job["hostname"])
             _job = {"state": "idle"}
+    return jsonify(operator_job())
+
+
+@app.route("/api/exploitation/deploy/wait", methods=["POST"])
+def api_exploitation_deploy_wait():
+    """« J'ai verifie, attendre encore » : la machine n'a pas demarre a temps, on relance l'attente."""
+    with _job_lock:
+        job = _job
+        if job.get("kind") != "flash" or job.get("state") != "done" or not job.get("deploy"):
+            return jsonify({"error": "Aucune installation en attente."}), 409
+        if deploy_state(job["hostname"])["state"] != "timeout":
+            return jsonify(operator_job())
+        ok = request_deploy(job["hostname"], job.get("ip"), (job.get("result") or {}).get("instance_id", ""))
+    if not ok:
+        return jsonify({"error": "Impossible de relancer l'attente."}), 500
     return jsonify(operator_job())
 
 

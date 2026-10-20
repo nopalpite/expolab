@@ -350,6 +350,7 @@ def api(tmp_path, images, monkeypatch):
     monkeypatch.setattr(module, "DEVICES_FILE", str(devices))
     monkeypatch.setattr(module, "DRY_RUN", True)
     monkeypatch.setattr(module, "DRY_RUN_DIR", tmp_path / "sim")
+    monkeypatch.setattr(module, "DEPLOY_DIR", tmp_path / "deploy")
     module._job = {"state": "idle"}
     module.app.testing = True
     module.client = module.app.test_client()
@@ -1238,6 +1239,7 @@ def test_exploitation_flashes_only_a_reserved_machine_with_the_admin_image(api):
     assert seen["state"] == "done" and seen["hostname"] == "module-02" and "image" not in seen and "result" not in seen
     audit = api.client.get("/api/audit").get_json()
     assert any(a["event"] == "flash-start" and a.get("actor") == "exploitant" for a in audit)
+    set_deploy_status(api, "module-02", "none")   # machine sans role : rien a installer
     assert api.client.post("/api/exploitation/dismiss").get_json() == {"state": "idle"}
 
 
@@ -1251,3 +1253,67 @@ def test_exploitation_hides_an_admin_capture(api):
 def test_exploitation_page_is_served(api):
     res = api.client.get("/exploitation")
     assert res.status_code == 200 and b"exploitation.js" in res.data
+
+
+# --- installation de la machine apres un flash exploitant (ansible-web/deploy.py) ---------------
+
+def set_deploy_status(api, hostname, state, percent=0):
+    path = api.tmp / "deploy" / "status" / f"{hostname}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"hostname": hostname, "state": state, "percent": percent}))
+
+
+def deploy_request(api, hostname="module-02"):
+    path = api.tmp / "deploy" / "requests" / f"{hostname}.json"
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def operator_flash(api):
+    api.client.put("/api/settings", json={"operator_image": "master.img"})
+    assert api.client.post("/api/exploitation/flash", json={"device": "/dev/sda", "hostname": "module-02"}).status_code == 202
+    wait_done(api)
+    return api.client.get("/api/exploitation/status").get_json()["job"]
+
+
+def test_operator_flash_asks_ansible_web_to_install_this_card(api):
+    job = operator_flash(api)
+    req = deploy_request(api)
+    assert req["hostname"] == "module-02" and req["ip"] == "10.42.0.148"
+    assert req["instance_id"].startswith("expolab-module-02-")
+    # La carte flashee porte bien cet instance-id : c'est ainsi qu'ansible-web la reconnait.
+    meta = (api.tmp / "sim" / "module-02-boot" / "meta-data").read_text()
+    assert f"instance-id: {req['instance_id']}" in meta
+    assert job["deploy"] == {"state": "waiting", "percent": 0}   # rien de technique pour l'exploitant
+
+
+def test_admin_flash_never_requests_an_installation(api):
+    assert flash(api).status_code == 202
+    wait_done(api)
+    assert deploy_request(api) is None
+
+
+def test_operator_sees_progress_then_result_and_cannot_close_meanwhile(api):
+    operator_flash(api)
+    assert api.client.post("/api/exploitation/dismiss").status_code == 409   # attend la machine
+    set_deploy_status(api, "module-02", "running", 42)
+    assert api.client.get("/api/exploitation/status").get_json()["job"]["deploy"] == {"state": "running", "percent": 42}
+    assert api.client.post("/api/exploitation/dismiss").status_code == 409   # installation en cours
+    set_deploy_status(api, "module-02", "done", 100)
+    assert api.client.get("/api/exploitation/status").get_json()["job"]["deploy"]["state"] == "done"
+    assert api.client.post("/api/exploitation/dismiss").get_json() == {"state": "idle"}
+    assert deploy_request(api) is None   # demande retiree : ansible-web oublie son etat
+
+
+def test_machine_that_never_booted_can_wait_more_or_be_abandoned(api):
+    operator_flash(api)
+    first = deploy_request(api)
+    assert api.client.post("/api/exploitation/deploy/wait").get_json()["deploy"]["state"] == "waiting"
+    assert deploy_request(api) == first   # pas de timeout : rien a relancer
+    set_deploy_status(api, "module-02", "timeout")
+    time.sleep(1.1)   # requested_at a la seconde
+    api.client.post("/api/exploitation/deploy/wait")
+    again = deploy_request(api)
+    assert again["requested_at"] > first["requested_at"] and again["instance_id"] == first["instance_id"]
+    set_deploy_status(api, "module-02", "timeout")
+    assert api.client.post("/api/exploitation/dismiss").get_json() == {"state": "idle"}   # « Abandonner »
+    assert deploy_request(api) is None

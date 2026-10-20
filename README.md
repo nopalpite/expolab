@@ -521,6 +521,16 @@ d'`auth.env`). Il se connecte au meme portail et ne voit que **deux onglets** :
   l'exploitant"**, section Image master du flasheur ; aucune = rien a flasher) et tous les
   reglages sont ceux de l'administrateur : l'API d'exploitation ne prend du navigateur que
   la carte et le nom de la machine (reservee). Journal d'audit : `actor: exploitant`.
+- **Installation automatique apres le flash** : la carte prete, l'exploitant voit seulement
+  « mets-la dans la machine et allume-la », puis une barre de progression et le resultat
+  (prete / prevenir l'administrateur / n'a pas demarre : attendre encore ou abandonner).
+  Le flasheur depose une demande dans `server/stacks/ansible-web/deploy/requests/` ;
+  ansible-web (`ansible-web/deploy.py`) attend la carte - reconnue a son instance-id
+  cloud-init, unique a chaque flash, donc jamais une ancienne carte encore allumee sous le
+  meme nom - et la fin de son premier demarrage, puis lance `site.yml --limit <machine
+  Bastion>` (un run de l'historique, `actor: exploitant`) et publie l'avancement dans
+  `deploy/status/`. Machine sans role dans Bastion : rien a installer, ecran habituel.
+  Delai d'attente : 30 min (`ANSIBLE_WEB_DEPLOY_WAIT`). Uniquement pour un flash exploitant.
 
 **Controle d'acces** : la session porte un role, signe avec le hash du mot de passe de ce
 role (changer le mot de passe exploitant ne ferme que ses sessions ; un jeton exploitant ne

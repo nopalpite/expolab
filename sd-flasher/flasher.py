@@ -766,4 +766,13 @@ def run_flash(*, image_path: Path, target: str, hostname: str, settings: dict, d
         do_eject(target)
     progress("eject", 1, "Terminee")
     return {"bytes": written, "sha256": digest, "seconds": round(time.monotonic() - started), "dry_run": dry_run,
-            "customized": actions}
+            "customized": actions, "instance_id": seed_instance_id(seed)}
+
+
+def seed_instance_id(seed: dict[str, str]) -> str:
+    """instance-id cloud-init de la carte (unique a chaque flash) : il permet de reconnaitre
+    CETTE carte au demarrage, et pas une ancienne encore allumee sous le meme nom."""
+    for line in seed["meta-data"].splitlines():
+        if line.startswith("instance-id:"):
+            return line.split(":", 1)[1].strip()
+    return ""

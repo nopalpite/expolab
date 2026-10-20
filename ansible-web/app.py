@@ -24,11 +24,14 @@ import shlex
 import shutil
 import subprocess
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 from flask import Flask, jsonify, render_template, request
+
+import deploy
 
 app = Flask(__name__)
 
@@ -44,6 +47,11 @@ MIRROR_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 
 RUN_STATE = {"running": False}
 RUN_LOCK = threading.Lock()
+
+# Deploiement apres un flash exploitant (voir deploy.py) : dossier partage avec sd-flasher.
+DEPLOY_DIR = Path("/deploy")
+DEPLOY_INTERVAL = 10   # secondes entre deux passages sur les demandes
+SSH_PROBE_TIMEOUT = 20
 
 
 def load_settings() -> dict:
@@ -297,24 +305,141 @@ def api_runs_create():
         if limit not in allowed_limits(targets):
             return jsonify({"error": f"Cible inconnue : '{limit}' (ni tag, ni machine de Bastion)"}), 400
 
+    run_id = start_run(limit)
+    if run_id is None:
+        return jsonify({"error": "Un run est deja en cours"}), 409
+    return jsonify({"ok": True, "id": run_id}), 201
+
+
+def start_run(limit: str | None, actor: str = "") -> str | None:
+    """Lance un run en arriere-plan ; None si un run tourne deja (un seul a la fois)."""
     with RUN_LOCK:
         if RUN_STATE["running"]:
-            return jsonify({"error": "Un run est deja en cours"}), 409
+            return None
         RUN_STATE["running"] = True
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     runs = load_runs()
-    runs.append({
+    entry = {
         "id": run_id,
         "limit": limit,
         "status": "running",
         "started_at": datetime.now(timezone.utc).isoformat(),
         "finished_at": None,
-    })
+    }
+    if actor:
+        entry["actor"] = actor
+    runs.append(entry)
     save_runs(runs)
 
     threading.Thread(target=execute_run, args=(run_id, limit), daemon=True).start()
-    return jsonify({"ok": True, "id": run_id}), 201
+    return run_id
+
+
+# --- deploiement apres un flash exploitant (voir deploy.py) -------------------------------
+
+def planned_tasks(limit: str) -> int:
+    """Nombre de taches que site.yml executerait sur cette machine (0 : rien a deployer)."""
+    try:
+        result = subprocess.run(["ansible-playbook", str(REPO_DIR / "site.yml"), "--list-tasks", "--limit", limit],
+                                capture_output=True, text=True, timeout=120, cwd=REPO_DIR)
+    except (subprocess.TimeoutExpired, OSError):
+        return 0
+    return deploy.count_planned_tasks(result.stdout) if result.returncode == 0 else 0
+
+
+def probe_card(ip: str, instance_id: str) -> bool:
+    """La carte attendue repond-elle en SSH, premier demarrage termine ? (cle d'automatisation)"""
+    cmd = ["ssh", "-i", os.environ.get("ANSIBLE_PRIVATE_KEY_FILE", "/keys/automation_ed25519"),
+           "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+           "-o", "ConnectTimeout=8", "-o", "LogLevel=ERROR",
+           f"{os.environ.get('ANSIBLE_REMOTE_USER', 'pi')}@{ip}",
+           "cat /var/lib/cloud/data/instance-id; cloud-init status"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=SSH_PROBE_TIMEOUT)
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return deploy.card_ready(result.stdout, instance_id)
+
+
+def run_entry(run_id: str) -> dict | None:
+    return next((r for r in load_runs() if r["id"] == run_id), None)
+
+
+def deploy_step(req: dict, status: dict | None, now: float) -> dict:
+    """Fait avancer une demande d'un cran et renvoie son nouvel etat."""
+    if status is None or status.get("requested_at") != req["requested_at"]:
+        status = {"hostname": req["hostname"], "requested_at": req["requested_at"], "state": "pending"}
+    state = status["state"]
+    if state in deploy.FINAL:
+        return status
+
+    if state == "pending":
+        ok, _err = sync_repo()
+        if not ok:
+            return status   # mirroir injoignable : on reessaiera au prochain passage
+        try:
+            machines = load_inventory_module().fetch_machines()
+        except SystemExit:
+            return status   # Bastion injoignable : idem
+        limit = deploy.inventory_name(machines, req["hostname"])
+        planned = planned_tasks(limit) if limit else 0
+        if not planned:
+            return {**status, "state": "none"}
+        return {**status, "state": "waiting", "limit": limit, "planned": planned,
+                "deadline": req["requested_at"] + deploy.WAIT_SECONDS}
+
+    if state == "waiting":
+        if now > status["deadline"]:
+            return {**status, "state": "timeout"}
+        if not req.get("ip") or not probe_card(req["ip"], req["instance_id"]):
+            return status
+        run_id = start_run(status["limit"], actor="exploitant")
+        if run_id is None:
+            return status   # un autre run tourne : la machine attend son tour
+        return {**status, "state": "running", "run_id": run_id, "percent": 1}
+
+    if state == "running":
+        run = run_entry(status["run_id"])
+        if run is None:
+            return {**status, "state": "failed"}
+        if run["status"] == "running":
+            try:
+                log = (RUNS_DIR / f"{status['run_id']}.log").read_text(errors="replace")
+            except OSError:
+                log = ""
+            return {**status, "percent": deploy.progress(deploy.count_done_tasks(log), status["planned"])}
+        return {**status, "state": "done" if run["status"] == "ok" else "failed", "percent": 100}
+    return status
+
+
+def deploy_once(now: float | None = None) -> None:
+    now = time.time() if now is None else now
+    requests_dir, status_dir = DEPLOY_DIR / "requests", DEPLOY_DIR / "status"
+    names = set()
+    for path in sorted(requests_dir.glob("*.json")) if requests_dir.is_dir() else []:
+        req = deploy.read_json(path)
+        if not deploy.valid_request(req) or path.stem != req["hostname"]:
+            continue
+        names.add(req["hostname"])
+        status_path = status_dir / f"{req['hostname']}.json"
+        before = deploy.read_json(status_path)
+        after = deploy_step(req, before, now)
+        if after != before:
+            deploy.write_json(status_path, after)
+    # Demande retiree (abandon, ou l'exploitant a ferme l'ecran) : son etat disparait aussi.
+    for path in status_dir.glob("*.json") if status_dir.is_dir() else []:
+        if path.stem not in names:
+            path.unlink(missing_ok=True)
+
+
+def deploy_loop() -> None:
+    while True:
+        try:
+            deploy_once()
+        except Exception as exc:  # noqa: BLE001 - ne jamais tuer la boucle
+            print(f"deploiement : {exc}", flush=True)
+        time.sleep(DEPLOY_INTERVAL)
 
 
 @app.route("/api/runs/<run_id>/log", methods=["GET"])
@@ -326,4 +451,5 @@ def api_runs_log(run_id: str):
 
 
 if __name__ == "__main__":
+    threading.Thread(target=deploy_loop, daemon=True).start()
     app.run(host="127.0.0.1", port=5055)
