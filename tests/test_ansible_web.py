@@ -151,15 +151,30 @@ def test_run_status_flags_a_run_that_touched_no_machine():
 
 import deploy  # noqa: E402
 
+# Sortie reelle de `--list-hosts --list-tasks --limit rpi-test.expolab.lan` (abregee) : les
+# plays qui ne visent pas la machine (`hosts (0):`) listent quand meme leurs taches.
 LIST_TASKS = """
 playbook: site.yml
 
   play #1 (wifi): Typologie wifi	TAGS: []
+    pattern: ['wifi']
+    hosts (1):
+      rpi-test.expolab.lan
     tasks:
       wifi : Installer iw	TAGS: []
       wifi : Poser la regle udev	TAGS: []
 
-  play #2 (audio): Typologie audio	TAGS: []
+  play #2 (desktop): Typologie desktop	TAGS: []
+    pattern: ['desktop']
+    hosts (0):
+    tasks:
+      desktop : Installer sway	TAGS: []
+      desktop : Deployer la config sway	TAGS: []
+
+  play #3 (audio): Typologie audio	TAGS: []
+    pattern: ['audio']
+    hosts (1):
+      rpi-test.expolab.lan
     tasks:
       audio : Installer PipeWire	TAGS: []
 """
@@ -167,7 +182,7 @@ playbook: site.yml
 
 def test_deploy_helpers():
     assert deploy.count_planned_tasks(LIST_TASKS) == 3
-    assert deploy.count_planned_tasks("playbook: site.yml\n\n  play #1 (wifi): Typologie wifi\tTAGS: []\n    tasks:\n") == 0
+    assert deploy.count_planned_tasks(LIST_TASKS.replace("hosts (1):", "hosts (0):")) == 0   # aucun play ne la vise
     log = "TASK [Gathering Facts] ***\nok\nTASK [wifi : Installer iw] ***\nTASK [wifi : Poser la regle udev] ***\n"
     assert deploy.count_done_tasks(log) == 2
     assert deploy.progress(2, 3) == 67 and deploy.progress(9, 3) == 99 and deploy.progress(0, 3) == 1 and deploy.progress(1, 0) == 0

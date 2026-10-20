@@ -341,7 +341,7 @@ def start_run(limit: str | None, actor: str = "") -> str | None:
 def planned_tasks(limit: str) -> int:
     """Nombre de taches que site.yml executerait sur cette machine (0 : rien a deployer)."""
     try:
-        result = subprocess.run(["ansible-playbook", str(REPO_DIR / "site.yml"), "--list-tasks", "--limit", limit],
+        result = subprocess.run(["ansible-playbook", str(REPO_DIR / "site.yml"), "--list-hosts", "--list-tasks", "--limit", limit],
                                 capture_output=True, text=True, timeout=120, cwd=REPO_DIR)
     except (subprocess.TimeoutExpired, OSError):
         return 0

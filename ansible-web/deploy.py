@@ -53,16 +53,24 @@ def inventory_name(machines: list[dict], hostname: str) -> str | None:
     return None
 
 
-def count_planned_tasks(list_tasks_output: str) -> int:
-    """Taches prevues d'apres `ansible-playbook --list-tasks` (lignes sous `tasks:`)."""
-    count, in_tasks = 0, False
-    for line in list_tasks_output.splitlines():
+HOSTS_RE = re.compile(r"^hosts \((\d+)\):$")
+
+
+def count_planned_tasks(list_output: str) -> int:
+    """Taches prevues d'apres `ansible-playbook --list-hosts --list-tasks --limit <machine>` :
+    seulement les plays qui visent la machine (`hosts (1):`). `--list-tasks` seul liste les
+    taches de TOUS les plays, meme ceux dont les hotes ne correspondent pas a --limit."""
+    count, in_tasks, targeted = 0, False, False
+    for line in list_output.splitlines():
         stripped = line.strip()
+        hosts = HOSTS_RE.match(stripped)
         if stripped.startswith("play #"):
-            in_tasks = False
+            in_tasks, targeted = False, False
+        elif hosts:
+            targeted = int(hosts.group(1)) > 0
         elif stripped == "tasks:":
             in_tasks = True
-        elif in_tasks and stripped:
+        elif in_tasks and targeted and stripped:
             count += 1
     return count
 
