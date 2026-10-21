@@ -72,6 +72,8 @@ Storage=persistent
 SystemMaxUse=200M"; then
         mkdir -p "${EXPOLAB_JOURNAL_DIR:-/var/log/journal}"
         systemctl restart systemd-journald
+        # Sinon le journal du demarrage en cours reste en memoire (/run) jusqu'au prochain.
+        journalctl --flush 2> /dev/null || true
         echo "[+] Journal systeme persistant (200 Mo max) : journalctl -b -1 apres une coupure."
     fi
 
