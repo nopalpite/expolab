@@ -92,7 +92,6 @@ def test_run_on_machine_and_group_are_accepted(client):
 def test_run_without_limit_does_not_query_bastion(client, monkeypatch):
     monkeypatch.setattr(aw, "load_targets", lambda: pytest.fail("ne doit pas etre appele"))
     assert post_run(client, {}).status_code == 201
-    assert post_run(client, {"limit": None}).status_code == 409  # run deja en cours
 
 
 def test_run_propagates_sync_errors(client, monkeypatch):
@@ -202,7 +201,7 @@ class DeployLab:
     """ansible-web sans reseau : Bastion, clone, sonde SSH et runs simules."""
 
     def __init__(self, monkeypatch, tmp_path, planned=3, machines=None):
-        self.ready, self.runs, self.busy = False, {}, False
+        self.ready, self.runs = False, {}
         monkeypatch.setattr(aw, "DEPLOY_DIR", tmp_path / "deploy")
         monkeypatch.setattr(aw, "RUNS_DIR", tmp_path / "runs")
         monkeypatch.setattr(aw, "sync_repo", lambda: (True, ""))
@@ -210,17 +209,16 @@ class DeployLab:
         monkeypatch.setattr(aw, "load_inventory_module", lambda: inventory)
         monkeypatch.setattr(aw, "planned_tasks", lambda limit: planned)
         monkeypatch.setattr(aw, "probe_card", lambda ip, instance: self.ready)
-        monkeypatch.setattr(aw, "start_run", self.start_run)
+        monkeypatch.setattr(aw, "enqueue_run", self.enqueue_run)
         monkeypatch.setattr(aw, "run_entry", lambda run_id: self.runs.get(run_id))
         (tmp_path / "runs").mkdir(parents=True)
         self.tmp = tmp_path
 
-    def start_run(self, limit, actor=""):
-        if self.busy:
-            return None
+    def enqueue_run(self, limit, actor=""):
         self.limit, self.actor = limit, actor
-        self.runs["R1"] = {"id": "R1", "status": "running"}
-        return "R1"
+        run_id = f"R{len(self.runs) + 1}"
+        self.runs[run_id] = {"id": run_id, "status": "queued"}
+        return run_id, False
 
     def request(self, hostname="rpi-test-02", requested_at=1000):
         path = self.tmp / "deploy" / "requests" / f"{hostname}.json"
@@ -239,12 +237,12 @@ def test_deploy_waits_for_the_card_then_runs_and_reports_progress(monkeypatch, t
     assert lab.status()["state"] == "waiting" and lab.status()["limit"] == "rpi-test-02.expolab.lan"
     aw.deploy_once(now=1020)
     assert lab.status()["state"] == "waiting"           # la carte n'a pas encore demarre
-    lab.ready, lab.busy = True, True
+    lab.ready = True
     aw.deploy_once(now=1030)
-    assert lab.status()["state"] == "waiting"           # un autre run tourne : elle attend son tour
-    lab.busy = False
-    aw.deploy_once(now=1040)
     assert lab.status()["state"] == "running" and lab.limit == "rpi-test-02.expolab.lan" and lab.actor == "exploitant"
+    aw.deploy_once(now=1040)
+    assert lab.status()["percent"] == 1                 # en file derriere un autre run : elle attend son tour
+    lab.runs["R1"]["status"] = "running"
     (tmp_path / "runs" / "R1.log").write_text("TASK [Gathering Facts] *\nTASK [wifi : Installer iw] *\nTASK [wifi : Poser la regle udev] *\n")
     aw.deploy_once(now=1050)
     assert lab.status()["percent"] == 67
@@ -261,7 +259,14 @@ def test_failed_run_and_machine_without_role(monkeypatch, tmp_path):
     aw.deploy_once(now=1020)
     lab.runs["R1"]["status"] = "failed"
     aw.deploy_once(now=1030)
-    assert lab.status()["state"] == "failed"
+    assert lab.status()["state"] == "retrying"           # un nouvel essai automatique...
+    aw.deploy_once(now=1030 + deploy.RETRY_DELAY - 1)
+    assert lab.status()["state"] == "retrying"           # ...2 min plus tard
+    aw.deploy_once(now=1030 + deploy.RETRY_DELAY)
+    assert lab.status()["state"] == "running" and lab.status()["run_id"] == "R2" and lab.status()["attempt"] == 2
+    lab.runs["R2"]["status"] = "failed"
+    aw.deploy_once(now=2000)
+    assert lab.status()["state"] == "failed"             # un seul nouvel essai
     lab2 = DeployLab(monkeypatch, tmp_path / "b", planned=0)
     lab2.request()
     aw.deploy_once(now=1010)
@@ -297,3 +302,83 @@ def test_every_subprocess_gets_its_own_stdin():
     assert len(calls) >= 4
     for call in calls:
         assert any(k.arg == "stdin" for k in call.keywords), f"subprocess.run ligne {call.lineno} sans stdin"
+
+
+def test_cancelled_deploy_run_is_not_retried(monkeypatch, tmp_path):
+    lab = DeployLab(monkeypatch, tmp_path)
+    lab.request()
+    lab.ready = True
+    aw.deploy_once(now=1010)
+    aw.deploy_once(now=1020)
+    lab.runs["R1"]["status"] = "cancelled"               # annule a la main par l'administrateur
+    aw.deploy_once(now=1030)
+    assert lab.status()["state"] == "failed"
+
+
+# --- file d'attente des runs ---------------------------------------------------------------------
+
+@pytest.fixture
+def queue(tmp_path, monkeypatch):
+    monkeypatch.setattr(aw, "RUNS_DIR", tmp_path)
+    monkeypatch.setattr(aw, "RUNS_INDEX", tmp_path / "index.yaml")
+    targets = aw.build_targets(MACHINES, group_name, {"desktop"})
+    monkeypatch.setattr(aw, "load_targets", lambda: (targets, None, 200))
+    aw.RUN_STATE["running"] = False
+    aw.app.config["TESTING"] = True
+    return aw.app.test_client()
+
+
+def statuses():
+    return [(r["limit"], r["status"]) for r in aw.load_runs()]
+
+
+def test_runs_wait_their_turn_in_arrival_order(queue):
+    first = queue.post("/api/runs", json={"limit": "pi-01"}).get_json()
+    second = queue.post("/api/runs", json={"limit": "pi-02"}).get_json()
+    assert first["queued"] is False and second["queued"] is True     # le second attend son tour
+    assert first["id"] != second["id"]                                # meme seconde : ids distincts
+    again = queue.post("/api/runs", json={"limit": "pi-02"}).get_json()
+    assert again["id"] == second["id"]                                # deja en attente : pas de doublon
+    assert aw.next_queued()["limit"] == "pi-01"
+    assert statuses() == [("pi-01", "running"), ("pi-02", "queued")]
+    assert queue.get(f"/api/runs/{second['id']}/log").get_json()["log"].startswith("En attente")
+    aw.update_run(first["id"], status="ok")
+    assert aw.next_queued()["limit"] == "pi-02"
+    assert aw.next_queued() is None
+
+
+def test_only_a_queued_run_can_be_cancelled(queue):
+    first = queue.post("/api/runs", json={"limit": "pi-01"}).get_json()["id"]
+    second = queue.post("/api/runs", json={"limit": "pi-02"}).get_json()["id"]
+    aw.next_queued()                                                   # le premier demarre
+    assert queue.post(f"/api/runs/{first}/cancel").status_code == 409  # deja lance : va a son terme
+    assert queue.post(f"/api/runs/{second}/cancel").status_code == 200
+    assert statuses() == [("pi-01", "running"), ("pi-02", "cancelled")]
+    assert aw.next_queued() is None                                    # un run annule ne part jamais
+    assert queue.post("/api/runs/inconnu/cancel").status_code == 404
+
+
+def test_restart_marks_an_interrupted_run_failed_and_keeps_the_queue(queue):
+    queue.post("/api/runs", json={"limit": "pi-01"})
+    queue.post("/api/runs", json={"limit": "pi-02"})
+    aw.next_queued()
+    aw.recover_runs()                                                   # ansible-web redemarre
+    assert statuses() == [("pi-01", "failed"), ("pi-02", "queued")]
+    assert queue.get("/api/runs").get_json()["runs"][0]["limit"] in ("pi-01", "pi-02")
+
+
+def test_queue_loop_runs_one_at_a_time(queue, monkeypatch):
+    seen = []
+
+    def fake_execute(run_id, limit):
+        seen.append((limit, aw.RUN_STATE["running"]))
+        aw.update_run(run_id, status="ok")
+        aw.RUN_STATE["running"] = False
+        if len(seen) == 2:
+            raise SystemExit   # fin du test
+    monkeypatch.setattr(aw, "execute_run", fake_execute)
+    queue.post("/api/runs", json={"limit": "pi-01"})
+    queue.post("/api/runs", json={"limit": "pi-02"})
+    with pytest.raises(SystemExit):
+        aw.queue_loop()
+    assert seen == [("pi-01", True), ("pi-02", True)]

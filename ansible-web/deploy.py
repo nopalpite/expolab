@@ -6,7 +6,8 @@ la traite et publie l'ETAT dans `/deploy/status/<nom>.json`, que le flasheur lit
 la page de l'exploitant. Un fichier par cote : jamais deux ecrivains sur le meme.
 
 Etats : pending (pas encore traitee) -> waiting (attend que la carte demarre) ->
-running (run Ansible en cours) -> done | failed ; timeout (jamais vue dans le delai) ;
+running (run Ansible en file ou en cours) -> done | failed ; apres un echec, un nouvel essai
+automatique (retrying, 2 min) avant failed ; timeout (jamais vue dans le delai) ;
 none (rien a deployer : machine sans role dans Bastion/site.yml).
 
 La carte attendue est reconnue a son instance-id cloud-init (unique a chaque flash) :
@@ -22,6 +23,8 @@ from pathlib import Path
 WAIT_SECONDS = int(os.environ.get("ANSIBLE_WEB_DEPLOY_WAIT", str(30 * 60)))
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")   # meme regle que le hostname du flasheur
 FINAL = ("done", "failed", "timeout", "none")
+MAX_ATTEMPTS = 2     # un nouvel essai automatique apres un echec...
+RETRY_DELAY = 120    # ...2 min plus tard
 
 
 def read_json(path: Path) -> dict | None:

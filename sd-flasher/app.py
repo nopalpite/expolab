@@ -768,8 +768,13 @@ def deploy_state(hostname: str) -> dict:
         status = json.loads(status_path.read_text())
     except (OSError, ValueError):
         status = {}
-    state = status.get("state") if status.get("state") in ("waiting", "running", "done", "failed", "timeout", "none") else "waiting"
-    return {"state": state, "percent": int(status.get("percent") or 0) if state == "running" else 0}
+    state = status.get("state") if status.get("state") in ("waiting", "running", "retrying", "done", "failed", "timeout", "none") else "waiting"
+    # Nouvel essai automatique apres un echec : pour l'exploitant, l'installation continue (meme
+    # barre, mention « nouvel essai ») ; il ne voit l'echec qu'une fois ce dernier essai rate.
+    retry = state == "retrying" or (state == "running" and int(status.get("attempt") or 1) > 1)
+    if state == "retrying":
+        state = "running"
+    return {"state": state, "percent": int(status.get("percent") or 0) if state == "running" else 0, "retry": retry}
 
 
 def forget_deploy(hostname: str) -> None:
@@ -848,11 +853,21 @@ def api_exploitation_dismiss():
 @app.route("/api/exploitation/deploy/wait", methods=["POST"])
 def api_exploitation_deploy_wait():
     """« J'ai verifie, attendre encore » : la machine n'a pas demarre a temps, on relance l'attente."""
+    return _deploy_again("timeout")
+
+
+@app.route("/api/exploitation/deploy/retry", methods=["POST"])
+def api_exploitation_deploy_retry():
+    """« Reessayer » apres un echec de l'installation : la meme carte, une nouvelle demande."""
+    return _deploy_again("failed")
+
+
+def _deploy_again(expected: str):
     with _job_lock:
         job = _job
         if job.get("kind") != "flash" or job.get("state") != "done" or not job.get("deploy"):
             return jsonify({"error": "Aucune installation en attente."}), 409
-        if deploy_state(job["hostname"])["state"] != "timeout":
+        if deploy_state(job["hostname"])["state"] != expected:
             return jsonify(operator_job())
         ok = request_deploy(job["hostname"], job.get("ip"), (job.get("result") or {}).get("instance_id", ""))
     if not ok:

@@ -42,8 +42,11 @@ document.getElementById("settings-form").addEventListener("submit", async (e) =>
 
 function statusBadge(status) {
     // empty : ansible-playbook a reussi sans traiter aucune machine (rien n'a ete fait).
-    const map = { running: "badge-pending", ok: "badge-ok", failed: "badge-error", empty: "badge-warn" };
-    const label = { running: "en cours", ok: "ok", failed: "echec", empty: "aucune machine traitee" };
+    // queued : en file, attend que le run en cours se termine.
+    const map = { queued: "badge-muted", running: "badge-pending", ok: "badge-ok", failed: "badge-error",
+                  empty: "badge-warn", cancelled: "badge-muted" };
+    const label = { queued: "en attente", running: "en cours", ok: "ok", failed: "echec",
+                    empty: "aucune machine traitee", cancelled: "annule" };
     return `<span class="badge ${map[status] || "badge-muted"}">${label[status] || status}</span>`;
 }
 
@@ -111,7 +114,9 @@ document.getElementById("run-form").addEventListener("submit", async (e) => {
             status.textContent = data.error || "Erreur";
         } else {
             status.className = "status status-ok";
-            status.textContent = `Run '${data.id}' lance.`;
+            status.textContent = data.queued
+                ? `Run '${data.id}' ajoute a la file : il demarrera apres le(s) run(s) en cours.`
+                : `Run '${data.id}' lance.`;
             viewLog(data.id, true);   // le log du run qu'on vient de lancer s'affiche et se suit
             loadRuns();
         }
@@ -175,10 +180,10 @@ async function loadRuns() {
         const res = await fetch("/api/runs");
         const data = await res.json();
         const runs = data.runs || [];
-        anyRunning = runs.some(r => r.status === "running");
+        anyRunning = runs.some(r => r.status === "running" || r.status === "queued");
         const viewed = runs.find(r => r.id === viewedRunId);
-        if (viewed && (viewed.status === "running" || viewedRunRunning)) {
-            viewedRunRunning = viewed.status === "running";
+        if (viewed && (viewed.status === "running" || viewed.status === "queued" || viewedRunRunning)) {
+            viewedRunRunning = viewed.status === "running" || viewed.status === "queued";
             refreshLog(viewed.id, false);   // derniere lecture comprise, quand il vient de finir
         }
         if (!runs.length) {
@@ -187,14 +192,22 @@ async function loadRuns() {
         }
         body.innerHTML = runs.map(r => `
             <tr>
-                <td data-label="Demarre">${new Date(r.started_at).toLocaleString()}</td>
+                <td data-label="Demarre">${new Date(r.started_at || r.queued_at).toLocaleString()}</td>
                 <td data-label="Cible">${r.limit || "tout le parc"}</td>
                 <td data-label="Statut">${statusBadge(r.status)}</td>
-                <td class="actions"><button class="secondary" data-run-id="${r.id}" data-running="${r.status === "running" ? "1" : ""}">Voir le log</button></td>
+                <td class="actions">${r.status === "queued" ? `<button class="secondary" data-cancel-id="${r.id}">Annuler</button> ` : ""}<button class="secondary" data-run-id="${r.id}" data-running="${r.status === "running" || r.status === "queued" ? "1" : ""}">Voir le log</button></td>
             </tr>
         `).join("");
         body.querySelectorAll("button[data-run-id]").forEach(btn => {
             btn.addEventListener("click", () => viewLog(btn.dataset.runId, btn.dataset.running === "1"));
+        });
+        body.querySelectorAll("button[data-cancel-id]").forEach(btn => {
+            btn.addEventListener("click", async () => {
+                btn.disabled = true;
+                const res = await fetch(`/api/runs/${encodeURIComponent(btn.dataset.cancelId)}/cancel`, { method: "POST" });
+                if (!res.ok) alert((await res.json().catch(() => ({}))).error || "Erreur");
+                loadRuns();
+            });
         });
     } catch (e) {
         body.innerHTML = '<tr><td colspan="4" class="status-error">Erreur de chargement</td></tr>';

@@ -47,6 +47,11 @@ MIRROR_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 
 RUN_STATE = {"running": False}
 RUN_LOCK = threading.Lock()
+# File des runs (ordre d'arrivee) : l'index est lu et ecrit par l'interface, la file et le
+# deploiement automatique, toujours sous ce verrou.
+RUNS_LOCK = threading.RLock()
+_queue_wakeup = threading.Event()
+QUEUE_IDLE_WAIT = 5
 
 # Deploiement apres un flash exploitant (voir deploy.py) : dossier partage avec sd-flasher.
 DEPLOY_DIR = Path("/deploy")
@@ -198,15 +203,19 @@ def execute_run(run_id: str, limit: str | None) -> None:
                 logf.write(f"\nErreur d'execution : {exc}\n")
             status = "failed"
 
-    runs = load_runs()
-    for r in runs:
-        if r["id"] == run_id:
-            r["status"] = status
-            r["finished_at"] = datetime.now(timezone.utc).isoformat()
-            break
-    save_runs(runs)
+    update_run(run_id, status=status, finished_at=datetime.now(timezone.utc).isoformat())
     with RUN_LOCK:
         RUN_STATE["running"] = False
+
+
+def update_run(run_id: str, **fields) -> None:
+    with RUNS_LOCK:
+        runs = load_runs()
+        for r in runs:
+            if r["id"] == run_id:
+                r.update(fields)
+                break
+        save_runs(runs)
 
 
 @app.route("/")
@@ -291,7 +300,9 @@ def api_tags_get():
 
 @app.route("/api/runs", methods=["GET"])
 def api_runs_list():
-    return jsonify({"runs": sorted(load_runs(), key=lambda r: r["started_at"], reverse=True)})
+    with RUNS_LOCK:
+        runs = load_runs()
+    return jsonify({"runs": sorted(runs, key=lambda r: r.get("started_at") or r.get("queued_at") or "", reverse=True)})
 
 
 @app.route("/api/runs", methods=["POST"])
@@ -309,35 +320,95 @@ def api_runs_create():
         if limit not in allowed_limits(targets):
             return jsonify({"error": f"Cible inconnue : '{limit}' (ni tag, ni machine de Bastion)"}), 400
 
-    run_id = start_run(limit)
-    if run_id is None:
-        return jsonify({"error": "Un run est deja en cours"}), 409
-    return jsonify({"ok": True, "id": run_id}), 201
+    run_id, queued = enqueue_run(limit)
+    return jsonify({"ok": True, "id": run_id, "queued": queued}), 201
 
 
-def start_run(limit: str | None, actor: str = "") -> str | None:
-    """Lance un run en arriere-plan ; None si un run tourne deja (un seul a la fois)."""
-    with RUN_LOCK:
-        if RUN_STATE["running"]:
-            return None
-        RUN_STATE["running"] = True
+@app.route("/api/runs/<run_id>/cancel", methods=["POST"])
+def api_runs_cancel(run_id: str):
+    """Retire un run de la file tant qu'il n'a pas demarre (un run lance va a son terme)."""
+    with RUNS_LOCK:
+        runs = load_runs()
+        run = next((r for r in runs if r["id"] == run_id), None)
+        if run is None:
+            return jsonify({"error": "Run introuvable"}), 404
+        if run["status"] != "queued":
+            return jsonify({"error": "Seul un run en attente peut etre annule"}), 409
+        run["status"] = "cancelled"
+        run["finished_at"] = datetime.now(timezone.utc).isoformat()
+        save_runs(runs)
+    return jsonify({"ok": True})
 
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    runs = load_runs()
-    entry = {
-        "id": run_id,
-        "limit": limit,
-        "status": "running",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "finished_at": None,
-    }
-    if actor:
-        entry["actor"] = actor
-    runs.append(entry)
-    save_runs(runs)
 
-    threading.Thread(target=execute_run, args=(run_id, limit), daemon=True).start()
-    return run_id
+def enqueue_run(limit: str | None, actor: str = "") -> tuple[str, bool]:
+    """Ajoute un run a la file (ordre d'arrivee) et renvoie (id, en attente derriere un autre ?).
+    Une cible deja en attente n'est pas ajoutee une deuxieme fois : on renvoie son run."""
+    with RUNS_LOCK:
+        runs = load_runs()
+        busy = any(r["status"] in ("queued", "running") for r in runs)
+        same = next((r for r in runs if r["status"] == "queued" and r.get("limit") == limit), None)
+        if same:
+            return same["id"], True
+        base = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        ids, run_id, n = {r["id"] for r in runs}, base, 2
+        while run_id in ids:   # plusieurs runs ajoutes dans la meme seconde
+            run_id, n = f"{base}-{n}", n + 1
+        entry = {"id": run_id, "limit": limit, "status": "queued",
+                 "queued_at": datetime.now(timezone.utc).isoformat(), "started_at": None, "finished_at": None}
+        if actor:
+            entry["actor"] = actor
+        runs.append(entry)
+        save_runs(runs)
+    _queue_wakeup.set()
+    return run_id, busy
+
+
+def next_queued() -> dict | None:
+    """Le plus ancien run en attente, marque comme demarre (None si la file est vide)."""
+    with RUNS_LOCK:
+        runs = load_runs()
+        run = next((r for r in runs if r["status"] == "queued"), None)
+        if run is not None:
+            run["status"] = "running"
+            run["started_at"] = datetime.now(timezone.utc).isoformat()
+            save_runs(runs)
+        return run
+
+
+def recover_runs() -> None:
+    """Au demarrage : un run « en cours » a ete coupe par l'arret d'ansible-web (jamais repris
+    a moitie) ; ceux en attente gardent leur place dans la file."""
+    with RUNS_LOCK:
+        runs = load_runs()
+        for r in runs:
+            if r["status"] == "running":
+                r["status"] = "failed"
+                r["finished_at"] = datetime.now(timezone.utc).isoformat()
+                try:
+                    with open(RUNS_DIR / f"{r['id']}.log", "a") as logf:
+                        logf.write("\nRun interrompu : ansible-web a redemarre pendant son execution.\n")
+                except OSError:
+                    pass
+        save_runs(runs)
+
+
+def queue_loop() -> None:
+    """Execute les runs de la file un par un, dans l'ordre d'arrivee."""
+    while True:
+        run = next_queued()
+        if run is None:
+            _queue_wakeup.wait(QUEUE_IDLE_WAIT)
+            _queue_wakeup.clear()
+            continue
+        with RUN_LOCK:
+            RUN_STATE["running"] = True
+        try:
+            execute_run(run["id"], run.get("limit"))
+        except Exception as exc:  # noqa: BLE001 - la file ne doit jamais s'arreter
+            print(f"run {run['id']} : {exc}", flush=True)
+            update_run(run["id"], status="failed", finished_at=datetime.now(timezone.utc).isoformat())
+            with RUN_LOCK:
+                RUN_STATE["running"] = False
 
 
 # --- deploiement apres un flash exploitant (voir deploy.py) -------------------------------
@@ -371,7 +442,8 @@ def probe_card(ip: str, instance_id: str) -> bool:
 
 
 def run_entry(run_id: str) -> dict | None:
-    return next((r for r in load_runs() if r["id"] == run_id), None)
+    with RUNS_LOCK:
+        return next((r for r in load_runs() if r["id"] == run_id), None)
 
 
 def deploy_step(req: dict, status: dict | None, now: float) -> dict:
@@ -402,22 +474,34 @@ def deploy_step(req: dict, status: dict | None, now: float) -> dict:
             return {**status, "state": "timeout"}
         if not req.get("ip") or not probe_card(req["ip"], req["instance_id"]):
             return status
-        run_id = start_run(status["limit"], actor="exploitant")
-        if run_id is None:
-            return status   # un autre run tourne : la machine attend son tour
-        return {**status, "state": "running", "run_id": run_id, "percent": 1}
+        run_id, _queued = enqueue_run(status["limit"], actor="exploitant")   # attend son tour si besoin
+        return {**status, "state": "running", "run_id": run_id, "attempt": 1, "percent": 1}
+
+    if state == "retrying":
+        if now < status["retry_at"]:
+            return status
+        run_id, _queued = enqueue_run(status["limit"], actor="exploitant")
+        return {**status, "state": "running", "run_id": run_id, "attempt": status.get("attempt", 1) + 1}
 
     if state == "running":
         run = run_entry(status["run_id"])
         if run is None:
             return {**status, "state": "failed"}
+        if run["status"] == "queued":
+            return status
         if run["status"] == "running":
             try:
                 log = (RUNS_DIR / f"{status['run_id']}.log").read_text(errors="replace")
             except OSError:
                 log = ""
             return {**status, "percent": deploy.progress(deploy.count_done_tasks(log), status["planned"])}
-        return {**status, "state": "done" if run["status"] == "ok" else "failed", "percent": 100}
+        if run["status"] == "ok":
+            return {**status, "state": "done", "percent": 100}
+        # Echec : un nouvel essai automatique (panne passagere : reseau, apt encore occupe par le
+        # premier demarrage...) ; un run annule a la main n'est pas relance.
+        if run["status"] != "cancelled" and status.get("attempt", 1) < deploy.MAX_ATTEMPTS:
+            return {**status, "state": "retrying", "retry_at": now + deploy.RETRY_DELAY}
+        return {**status, "state": "failed"}
     return status
 
 
@@ -453,11 +537,18 @@ def deploy_loop() -> None:
 @app.route("/api/runs/<run_id>/log", methods=["GET"])
 def api_runs_log(run_id: str):
     log_path = RUNS_DIR / f"{run_id}.log"
+    run = run_entry(run_id)
+    if run is not None and run["status"] == "queued":
+        return jsonify({"log": "En attente de son tour dans la file..."})
+    if run is not None and run["status"] == "cancelled" and not log_path.exists():
+        return jsonify({"log": "Run annule avant d'avoir demarre."})
     if not log_path.exists():
         return jsonify({"error": "Log introuvable"}), 404
     return jsonify({"log": log_path.read_text()})
 
 
 if __name__ == "__main__":
+    recover_runs()
+    threading.Thread(target=queue_loop, daemon=True).start()
     threading.Thread(target=deploy_loop, daemon=True).start()
     app.run(host="127.0.0.1", port=5055)

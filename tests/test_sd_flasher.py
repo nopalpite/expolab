@@ -1283,7 +1283,7 @@ def test_operator_flash_asks_ansible_web_to_install_this_card(api):
     # La carte flashee porte bien cet instance-id : c'est ainsi qu'ansible-web la reconnait.
     meta = (api.tmp / "sim" / "module-02-boot" / "meta-data").read_text()
     assert f"instance-id: {req['instance_id']}" in meta
-    assert job["deploy"] == {"state": "waiting", "percent": 0}   # rien de technique pour l'exploitant
+    assert job["deploy"] == {"state": "waiting", "percent": 0, "retry": False}   # rien de technique pour l'exploitant
 
 
 def test_admin_flash_never_requests_an_installation(api):
@@ -1296,7 +1296,7 @@ def test_operator_sees_progress_then_result_and_cannot_close_meanwhile(api):
     operator_flash(api)
     assert api.client.post("/api/exploitation/dismiss").status_code == 409   # attend la machine
     set_deploy_status(api, "module-02", "running", 42)
-    assert api.client.get("/api/exploitation/status").get_json()["job"]["deploy"] == {"state": "running", "percent": 42}
+    assert api.client.get("/api/exploitation/status").get_json()["job"]["deploy"] == {"state": "running", "percent": 42, "retry": False}
     assert api.client.post("/api/exploitation/dismiss").status_code == 409   # installation en cours
     set_deploy_status(api, "module-02", "done", 100)
     assert api.client.get("/api/exploitation/status").get_json()["job"]["deploy"]["state"] == "done"
@@ -1317,3 +1317,24 @@ def test_machine_that_never_booted_can_wait_more_or_be_abandoned(api):
     set_deploy_status(api, "module-02", "timeout")
     assert api.client.post("/api/exploitation/dismiss").get_json() == {"state": "idle"}   # « Abandonner »
     assert deploy_request(api) is None
+
+
+def test_automatic_retry_looks_like_a_running_install_then_operator_can_retry(api):
+    operator_flash(api)
+    first = deploy_request(api)
+    path = api.tmp / "deploy" / "status" / "module-02.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"state": "retrying", "percent": 60, "attempt": 1}))
+    seen = api.client.get("/api/exploitation/status").get_json()["job"]["deploy"]
+    assert seen == {"state": "running", "percent": 60, "retry": True}     # nouvel essai : meme barre
+    assert api.client.post("/api/exploitation/dismiss").status_code == 409
+    path.write_text(json.dumps({"state": "running", "percent": 10, "attempt": 2}))
+    assert api.client.get("/api/exploitation/status").get_json()["job"]["deploy"]["retry"] is True
+    # Reessayer n'a de sens qu'apres l'echec final.
+    api.client.post("/api/exploitation/deploy/retry")
+    assert deploy_request(api) == first
+    set_deploy_status(api, "module-02", "failed")
+    time.sleep(1.1)
+    api.client.post("/api/exploitation/deploy/retry")
+    again = deploy_request(api)
+    assert again["requested_at"] > first["requested_at"] and again["instance_id"] == first["instance_id"]
