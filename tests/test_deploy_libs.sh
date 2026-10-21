@@ -38,7 +38,7 @@ REPO_ROOT="$WORK"
 SERVICES="$SCRIPT_DIR/services.yaml"
 export REPO_ROOT SCRIPT_DIR SERVICES
 
-for lib in tls secrets credentials automation-key ansible-web sd-flasher apt-cache ntp matter prises audio lan-isolation dashboard dnsmasq stacks summary; do
+for lib in tls secrets credentials automation-key ansible-web sd-flasher apt-cache ntp matter prises audio resilience lan-isolation dashboard dnsmasq stacks summary; do
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/lib/$lib.sh"
 done

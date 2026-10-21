@@ -914,6 +914,28 @@ Pour verifier apres un changement : `sudo reboot`, puis, une minute plus tard,
 `ip -br addr show expo-lan` (adresse `10.42.0.1/24`) et `docker ps` (tout `Up`,
 `expolab-dnsmasq` sans redemarrages).
 
+### Tenue aux coupures (`server/lib/resilience.sh`, pose par `deploy-server.sh`)
+
+- **Conteneurs non relances** : apres une coupure, Docker n'a pas toujours su relancer un
+  conteneur (vecu : dnsmasq, « layer not mounted », reste arrete en code 255).
+  `expolab-recover.timer` lance `server/recover-containers.sh` 1 min apres le demarrage
+  puis toutes les 2 min : il relance seulement les conteneurs arretes en **255** (coupes)
+  dont la politique est `unless-stopped` ou `always` ; un `docker stop` volontaire n'est
+  jamais annule. Journal : `journalctl -u expolab-recover`.
+- **Watchdog materiel** : `RuntimeWatchdogSec=15s` (systemd) ; si le systeme se fige, la
+  puce du Pi le redemarre.
+- **Moins d'ecritures sur la carte SD** : logs Docker tournants (10 Mo x 3 par conteneur,
+  `/etc/docker/daemon.json` ; un `daemon.json` existant qui n'est pas le notre n'est pas
+  touche).
+- **Journal persistant** (200 Mo max) : apres une coupure, `journalctl -b -1` montre la
+  fin du demarrage precedent.
+- **ntp** : le fichier PID laisse par un arret brutal est retire au demarrage
+  (`server/stacks/ntp/entrypoint.sh`).
+
+Ce que le logiciel ne remplace pas : un **onduleur** (ou une alimentation a batterie avec
+arret propre), une **pile RTC** sur le connecteur BAT du Pi 5 (bonne heure au demarrage
+sans reseau), et idealement un **SSD** a la place de la carte SD.
+
 ## Rollback (retour a l'etat initial)
 
 Deux niveaux, a combiner :

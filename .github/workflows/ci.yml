@@ -80,6 +80,9 @@ jobs:
       - name: Test du reseau de l'expo (pont expo-lan, NAT)
         run: bash tests/test_network.sh
 
+      - name: Test de la tenue aux coupures (relance, watchdog, journaux)
+        run: bash tests/test_resilience.sh
+
       # Le Caddyfile genere (forward_auth, en-tetes de cadre...) est valide par
       # Caddy lui-meme : une erreur de syntaxe ici couperait tous les services.
       - name: Validation du Caddyfile genere (Caddy)

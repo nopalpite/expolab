@@ -59,6 +59,10 @@ fi
 
 rm -f "$SCRIPT_DIR/stacks/caddy/Caddyfile"
 
+# Relance des conteneurs coupes (server/lib/resilience.sh) : plus rien a relancer. Le
+# watchdog et le journal persistant restent en place.
+systemctl disable --now expolab-recover.timer 2>/dev/null || true
+
 if command -v docker &>/dev/null; then
     if [ "$ASSUME_YES" -ne 1 ]; then
         read -r -p "Desinstaller Docker de l'hote (symetrique de son installation par deploy-server.sh) ? [y/N] " ans

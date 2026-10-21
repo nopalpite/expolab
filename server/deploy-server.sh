@@ -23,7 +23,7 @@ export REPO_ROOT
 
 # shellcheck source=./dockhand-api.sh
 source "$SCRIPT_DIR/dockhand-api.sh"
-for lib in preflight tls secrets credentials automation-key ansible-web sd-flasher apt-cache ntp matter prises audio lan-isolation dashboard dnsmasq stacks summary; do
+for lib in preflight tls secrets credentials automation-key ansible-web sd-flasher apt-cache ntp matter prises audio resilience lan-isolation dashboard dnsmasq stacks summary; do
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/lib/$lib.sh"
 done
@@ -33,6 +33,7 @@ setup_ntp
 setup_matter
 setup_prises
 setup_audio
+setup_resilience
 setup_admin_credentials
 bootstrap_dockhand
 
