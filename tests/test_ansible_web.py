@@ -284,3 +284,16 @@ def test_deploy_times_out_and_restarts_on_a_new_request(monkeypatch, tmp_path):
     (tmp_path / "deploy" / "requests" / "rpi-test-02.json").unlink()   # « Abandonner »
     aw.deploy_once(now=5020)
     assert lab.status() is None
+
+
+def test_every_subprocess_gets_its_own_stdin():
+    # Vecu : la sonde ssh passait le stdin herite (celui du conteneur) en non bloquant, puis
+    # ansible-playbook refusait de demarrer (« Ansible requires blocking IO ») pour TOUS les
+    # runs jusqu'au redemarrage. Chaque sous-processus doit donc recevoir son propre stdin.
+    import ast
+    tree = ast.parse(APP_PATH.read_text(encoding="utf-8"))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and n.func.attr == "run" and getattr(n.func.value, "id", "") == "subprocess"]
+    assert len(calls) >= 4
+    for call in calls:
+        assert any(k.arg == "stdin" for k in call.keywords), f"subprocess.run ligne {call.lineno} sans stdin"

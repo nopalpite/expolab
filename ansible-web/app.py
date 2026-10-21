@@ -72,6 +72,7 @@ def run_git(args: list[str]) -> subprocess.CompletedProcess:
         ["git"] + args,
         capture_output=True,
         text=True,
+        stdin=subprocess.DEVNULL,
         timeout=GIT_TIMEOUT,
         env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
     )
@@ -187,7 +188,10 @@ def execute_run(run_id: str, limit: str | None) -> None:
             cmd += shlex.split(extra_args)
         try:
             with open(log_path, "w") as logf:
-                result = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=REPO_DIR)
+                # stdin propre a chaque run : jamais celui du conteneur, qu'un autre outil
+                # (ssh) aurait pu laisser en non bloquant.
+                result = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=REPO_DIR,
+                                        stdin=subprocess.DEVNULL)
             status = run_status(result.returncode, log_path.read_text(errors="replace"))
         except Exception as exc:
             with open(log_path, "a") as logf:
@@ -342,7 +346,7 @@ def planned_tasks(limit: str) -> int:
     """Nombre de taches que site.yml executerait sur cette machine (0 : rien a deployer)."""
     try:
         result = subprocess.run(["ansible-playbook", str(REPO_DIR / "site.yml"), "--list-hosts", "--list-tasks", "--limit", limit],
-                                capture_output=True, text=True, timeout=120, cwd=REPO_DIR)
+                                capture_output=True, text=True, timeout=120, cwd=REPO_DIR, stdin=subprocess.DEVNULL)
     except (subprocess.TimeoutExpired, OSError):
         return 0
     return deploy.count_planned_tasks(result.stdout) if result.returncode == 0 else 0
@@ -350,13 +354,17 @@ def planned_tasks(limit: str) -> int:
 
 def probe_card(ip: str, instance_id: str) -> bool:
     """La carte attendue repond-elle en SSH, premier demarrage termine ? (cle d'automatisation)"""
-    cmd = ["ssh", "-i", os.environ.get("ANSIBLE_PRIVATE_KEY_FILE", "/keys/automation_ed25519"),
+    cmd = ["ssh", "-n", "-i", os.environ.get("ANSIBLE_PRIVATE_KEY_FILE", "/keys/automation_ed25519"),
            "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
            "-o", "ConnectTimeout=8", "-o", "LogLevel=ERROR",
            f"{os.environ.get('ANSIBLE_REMOTE_USER', 'pi')}@{ip}",
            "cat /var/lib/cloud/data/instance-id; cloud-init status"]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=SSH_PROBE_TIMEOUT)
+        # stdin a part (-n et DEVNULL) : ssh passe son stdin en non bloquant, et ce stdin herite
+        # est celui de tout le conteneur - ansible-playbook refusait ensuite de demarrer
+        # (« Ansible requires blocking IO »), pour tous les runs, jusqu'au redemarrage.
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=SSH_PROBE_TIMEOUT,
+                                stdin=subprocess.DEVNULL)
     except (subprocess.TimeoutExpired, OSError):
         return False
     return deploy.card_ready(result.stdout, instance_id)
