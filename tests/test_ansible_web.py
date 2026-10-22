@@ -241,7 +241,7 @@ def test_deploy_waits_for_the_card_then_runs_and_reports_progress(monkeypatch, t
     aw.deploy_once(now=1030)
     assert lab.status()["state"] == "running" and lab.limit == "rpi-test-02.expolab.lan" and lab.actor == "exploitant"
     aw.deploy_once(now=1040)
-    assert lab.status()["percent"] == 1                 # en file derriere un autre run : elle attend son tour
+    assert lab.status()["percent"] == 1 and lab.status()["queued"] is True   # en file : elle attend son tour
     lab.runs["R1"]["status"] = "running"
     (tmp_path / "runs" / "R1.log").write_text("TASK [Gathering Facts] *\nTASK [wifi : Installer iw] *\nTASK [wifi : Poser la regle udev] *\n")
     aw.deploy_once(now=1050)

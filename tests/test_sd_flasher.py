@@ -1283,7 +1283,9 @@ def test_operator_flash_asks_ansible_web_to_install_this_card(api):
     # La carte flashee porte bien cet instance-id : c'est ainsi qu'ansible-web la reconnait.
     meta = (api.tmp / "sim" / "module-02-boot" / "meta-data").read_text()
     assert f"instance-id: {req['instance_id']}" in meta
-    assert job["deploy"] == {"state": "waiting", "percent": 0, "retry": False}   # rien de technique pour l'exploitant
+    assert job["deploy"] is True   # ecran « Carte prete », l'installation se suit dans la liste
+    deploys = api.client.get("/api/exploitation/status").get_json()["deploys"]
+    assert deploys == [{"hostname": "module-02", "state": "waiting", "percent": 0, "retry": False, "queued": False}]
 
 
 def test_admin_flash_never_requests_an_installation(api):
@@ -1292,49 +1294,60 @@ def test_admin_flash_never_requests_an_installation(api):
     assert deploy_request(api) is None
 
 
-def test_operator_sees_progress_then_result_and_cannot_close_meanwhile(api):
+def deploys(api):
+    return {d["hostname"]: d for d in api.client.get("/api/exploitation/status").get_json()["deploys"]}
+
+
+def act(api, hostname, action):
+    return api.client.post(f"/api/exploitation/deploys/{hostname}/{action}")
+
+
+def test_another_card_can_be_flashed_while_the_first_machine_installs(api):
     operator_flash(api)
-    assert api.client.post("/api/exploitation/dismiss").status_code == 409   # attend la machine
-    set_deploy_status(api, "module-02", "running", 42)
-    assert api.client.get("/api/exploitation/status").get_json()["job"]["deploy"] == {"state": "running", "percent": 42, "retry": False}
-    assert api.client.post("/api/exploitation/dismiss").status_code == 409   # installation en cours
-    set_deploy_status(api, "module-02", "done", 100)
-    assert api.client.get("/api/exploitation/status").get_json()["job"]["deploy"]["state"] == "done"
+    # Le lecteur est libre aussitot la carte prete : l'installation continue en arriere-plan.
     assert api.client.post("/api/exploitation/dismiss").get_json() == {"state": "idle"}
-    assert deploy_request(api) is None   # demande retiree : ansible-web oublie son etat
+    assert deploy_request(api, "module-02") is not None
+    set_deploy_status(api, "module-02", "running", 42)
+    assert api.client.post("/api/exploitation/flash", json={"device": "/dev/sda", "hostname": "module-01"}).status_code == 202
+    wait_done(api)
+    both = deploys(api)
+    assert list(both) == ["module-02", "module-01"]                      # dans l'ordre des flashs
+    assert both["module-02"] == {"hostname": "module-02", "state": "running", "percent": 42, "retry": False, "queued": False}
+    assert both["module-01"]["state"] == "waiting"
 
 
-def test_machine_that_never_booted_can_wait_more_or_be_abandoned(api):
-    operator_flash(api)
-    first = deploy_request(api)
-    assert api.client.post("/api/exploitation/deploy/wait").get_json()["deploy"]["state"] == "waiting"
-    assert deploy_request(api) == first   # pas de timeout : rien a relancer
-    set_deploy_status(api, "module-02", "timeout")
-    time.sleep(1.1)   # requested_at a la seconde
-    api.client.post("/api/exploitation/deploy/wait")
-    again = deploy_request(api)
-    assert again["requested_at"] > first["requested_at"] and again["instance_id"] == first["instance_id"]
-    set_deploy_status(api, "module-02", "timeout")
-    assert api.client.post("/api/exploitation/dismiss").get_json() == {"state": "idle"}   # « Abandonner »
-    assert deploy_request(api) is None
-
-
-def test_automatic_retry_looks_like_a_running_install_then_operator_can_retry(api):
+def test_install_line_states_and_actions(api):
     operator_flash(api)
     first = deploy_request(api)
     path = api.tmp / "deploy" / "status" / "module-02.json"
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"state": "running", "percent": 1, "queued": True}))
+    assert deploys(api)["module-02"]["queued"] is True                    # « en attente de son tour »
     path.write_text(json.dumps({"state": "retrying", "percent": 60, "attempt": 1}))
-    seen = api.client.get("/api/exploitation/status").get_json()["job"]["deploy"]
-    assert seen == {"state": "running", "percent": 60, "retry": True}     # nouvel essai : meme barre
-    assert api.client.post("/api/exploitation/dismiss").status_code == 409
-    path.write_text(json.dumps({"state": "running", "percent": 10, "attempt": 2}))
-    assert api.client.get("/api/exploitation/status").get_json()["job"]["deploy"]["retry"] is True
-    # Reessayer n'a de sens qu'apres l'echec final.
-    api.client.post("/api/exploitation/deploy/retry")
+    assert deploys(api)["module-02"] == {"hostname": "module-02", "state": "running", "percent": 60, "retry": True, "queued": False}
+    # Chaque action seulement dans l'etat ou son bouton est propose.
+    assert act(api, "module-02", "retry").status_code == 409
+    assert act(api, "module-02", "forget").status_code == 409
     assert deploy_request(api) == first
     set_deploy_status(api, "module-02", "failed")
-    time.sleep(1.1)
-    api.client.post("/api/exploitation/deploy/retry")
+    time.sleep(1.1)   # requested_at a la seconde
+    assert act(api, "module-02", "retry").status_code == 200              # « Reessayer »
     again = deploy_request(api)
     assert again["requested_at"] > first["requested_at"] and again["instance_id"] == first["instance_id"]
+    set_deploy_status(api, "module-02", "timeout")
+    time.sleep(1.1)
+    assert act(api, "module-02", "wait").status_code == 200               # « Attendre encore »
+    assert deploy_request(api)["requested_at"] > again["requested_at"]
+    set_deploy_status(api, "module-02", "done", 100)
+    assert act(api, "module-02", "forget").get_json() == {"deploys": []}  # « OK » : ligne retiree
+    assert deploy_request(api) is None
+
+
+def test_install_actions_reject_unknown_machines_and_actions(api):
+    assert act(api, "module-02", "forget").status_code == 404             # rien de suivi
+    assert act(api, "module-02", "reboot").status_code == 404
+    assert act(api, "Module_02", "forget").status_code == 404
+    bad = api.tmp / "deploy" / "requests"
+    bad.mkdir(parents=True)
+    (bad / "autre.json").write_text(json.dumps({"hostname": "pas-pareil"}))   # nom incoherent : ignore
+    assert api.client.get("/api/exploitation/status").get_json()["deploys"] == []

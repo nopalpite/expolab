@@ -488,13 +488,14 @@ def deploy_step(req: dict, status: dict | None, now: float) -> dict:
         if run is None:
             return {**status, "state": "failed"}
         if run["status"] == "queued":
-            return status
+            return {**status, "queued": True}   # « en attente de son tour » pour l'exploitant
         if run["status"] == "running":
             try:
                 log = (RUNS_DIR / f"{status['run_id']}.log").read_text(errors="replace")
             except OSError:
                 log = ""
-            return {**status, "percent": deploy.progress(deploy.count_done_tasks(log), status["planned"])}
+            return {**status, "queued": False,
+                    "percent": deploy.progress(deploy.count_done_tasks(log), status["planned"])}
         if run["status"] == "ok":
             return {**status, "state": "done", "percent": 100}
         # Echec : un nouvel essai automatique (panne passagere : reseau, apt encore occupe par le

@@ -753,7 +753,7 @@ def request_deploy(hostname: str, ip: str | None, instance_id: str) -> bool:
         req_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = req_path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"hostname": hostname, "ip": ip, "instance_id": instance_id,
-                                   "requested_at": int(time.time())}))
+                                   "requested_at": round(time.time(), 3)}))
         os.replace(tmp, req_path)
     except OSError:
         return False
@@ -772,9 +772,28 @@ def deploy_state(hostname: str) -> dict:
     # Nouvel essai automatique apres un echec : pour l'exploitant, l'installation continue (meme
     # barre, mention « nouvel essai ») ; il ne voit l'echec qu'une fois ce dernier essai rate.
     retry = state == "retrying" or (state == "running" and int(status.get("attempt") or 1) > 1)
+    queued = state == "running" and bool(status.get("queued"))   # une autre machine s'installe d'abord
     if state == "retrying":
         state = "running"
-    return {"state": state, "percent": int(status.get("percent") or 0) if state == "running" else 0, "retry": retry}
+    return {"state": state, "percent": int(status.get("percent") or 0) if state == "running" else 0,
+            "retry": retry, "queued": queued}
+
+
+def operator_deploys() -> list[dict]:
+    """Installations suivies sur la page de l'exploitant : une par demande deposee, la plus
+    ancienne d'abord. Elles survivent a la fermeture de la page et a un nouveau flash."""
+    found = []
+    requests_dir = DEPLOY_DIR / "requests"
+    for path in requests_dir.glob("*.json") if requests_dir.is_dir() else []:
+        try:
+            req = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        name = req.get("hostname") if isinstance(req, dict) else None
+        if name != path.stem or not flasher.HOSTNAME_RE.match(name or ""):
+            continue
+        found.append((req.get("requested_at") or 0, {"hostname": name, **deploy_state(name)}))
+    return [d for _, d in sorted(found, key=lambda item: item[0])]
 
 
 def forget_deploy(hostname: str) -> None:
@@ -797,7 +816,7 @@ def operator_job() -> dict:
     keep = ("kind", "state", "step", "percent", "hostname", "model", "steps", "ip")
     out = {k: job[k] for k in keep if k in job}
     if job.get("state") == "done" and job.get("deploy"):
-        out["deploy"] = deploy_state(job["hostname"])
+        out["deploy"] = True   # l'installation se suit dans la liste (operator_deploys)
     if job.get("state") == "error":
         out["error"] = job.get("error", "")
     return out
@@ -815,6 +834,7 @@ def api_exploitation_status():
         "devices": [{"path": d["path"], "model": d["model"], "size": d["size"]} for d in devices.get("eligible", [])],
         "machines": machine_names(),
         "job": operator_job(),
+        "deploys": operator_deploys(),
         "image_ready": operator_image() is not None,
         "dry_run": DRY_RUN,
     })
@@ -837,42 +857,40 @@ def api_exploitation_flash():
 
 @app.route("/api/exploitation/dismiss", methods=["POST"])
 def api_exploitation_dismiss():
-    """Fermer l'ecran de fin (reussi, echec, ou « Abandonner » quand la machine n'a pas
-    demarre). Jamais pendant que la machine est attendue ou s'installe."""
+    """Fermer l'ecran de fin du flash (« Preparer une autre carte ») : le lecteur est libre.
+    L'installation de la machine continue et reste dans la liste de suivi."""
     global _job
     with _job_lock:
         if _job.get("kind") == "flash" and _job.get("state") in ("done", "error"):
-            if _job.get("deploy"):
-                if deploy_state(_job["hostname"])["state"] in ("waiting", "running"):
-                    return jsonify({"error": "L'installation de la machine est en cours."}), 409
-                forget_deploy(_job["hostname"])
             _job = {"state": "idle"}
     return jsonify(operator_job())
 
 
-@app.route("/api/exploitation/deploy/wait", methods=["POST"])
-def api_exploitation_deploy_wait():
-    """« J'ai verifie, attendre encore » : la machine n'a pas demarre a temps, on relance l'attente."""
-    return _deploy_again("timeout")
+# Actions sur une installation de la liste : seulement dans l'etat ou le bouton est propose.
+DEPLOY_ACTIONS = {
+    "retry": ("failed",),                             # « Reessayer » : la meme carte, une nouvelle demande
+    "wait": ("timeout",),                             # « Attendre encore » : la machine n'avait pas demarre
+    "forget": ("done", "failed", "timeout", "none"),  # « OK » / « Abandonner » : retire la ligne
+}
 
 
-@app.route("/api/exploitation/deploy/retry", methods=["POST"])
-def api_exploitation_deploy_retry():
-    """« Reessayer » apres un echec de l'installation : la meme carte, une nouvelle demande."""
-    return _deploy_again("failed")
-
-
-def _deploy_again(expected: str):
-    with _job_lock:
-        job = _job
-        if job.get("kind") != "flash" or job.get("state") != "done" or not job.get("deploy"):
-            return jsonify({"error": "Aucune installation en attente."}), 409
-        if deploy_state(job["hostname"])["state"] != expected:
-            return jsonify(operator_job())
-        ok = request_deploy(job["hostname"], job.get("ip"), (job.get("result") or {}).get("instance_id", ""))
-    if not ok:
-        return jsonify({"error": "Impossible de relancer l'attente."}), 500
-    return jsonify(operator_job())
+@app.route("/api/exploitation/deploys/<hostname>/<action>", methods=["POST"])
+def api_exploitation_deploy_action(hostname: str, action: str):
+    if action not in DEPLOY_ACTIONS or not flasher.HOSTNAME_RE.match(hostname):
+        return jsonify({"error": "Action inconnue."}), 404
+    req_path, _ = deploy_paths(hostname)
+    try:
+        req = json.loads(req_path.read_text())
+    except (OSError, ValueError):
+        return jsonify({"error": "Aucune installation suivie pour cette machine."}), 404
+    if deploy_state(hostname)["state"] not in DEPLOY_ACTIONS[action]:
+        return jsonify({"error": "Pas possible pour l'instant.", "deploys": operator_deploys()}), 409
+    if action == "forget":
+        forget_deploy(hostname)
+        audit("deploy-forget", hostname=hostname)
+    elif not request_deploy(hostname, req.get("ip"), req.get("instance_id", "")):
+        return jsonify({"error": "Impossible de relancer l'installation."}), 500
+    return jsonify({"deploys": operator_deploys()})
 
 
 @app.route("/api/job/dismiss", methods=["POST"])
