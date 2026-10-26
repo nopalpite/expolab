@@ -4,7 +4,7 @@
 
 setup_ansible_web() {
     local dir="$SCRIPT_DIR/stacks/ansible-web"
-    mkdir -p "$dir/automation_key" "$dir/repo" "$dir/runs" "$dir/deploy/requests" "$dir/deploy/status"
+    mkdir -p "$dir/automation_key" "$dir/repo" "$dir/runs" "$dir/deploy/requests" "$dir/deploy/status" "$dir/apps"
 
     # Cle SSH dediee automatisation - montee directement dans le conteneur
     # (voir son docker-compose.yml et ANSIBLE_PRIVATE_KEY_FILE ci-dessous),

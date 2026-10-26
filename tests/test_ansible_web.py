@@ -382,3 +382,138 @@ def test_queue_loop_runs_one_at_a_time(queue, monkeypatch):
     with pytest.raises(SystemExit):
         aw.queue_loop()
     assert seen == [("pi-01", True), ("pi-02", True)]
+
+
+# --- onglet Applications (apps.py) -------------------------------------------------------------
+
+import apps  # noqa: E402
+
+PROGS = [
+    {"name": "godot-template", "releases": [
+        {"tag": "v1.1.0", "published_at": "2026-10-24T10:00:00Z",
+         "assets": [{"name": "godot_template-1.1.0-linux-arm64.tar.gz", "size": 3, "sha256": "aaa"}]},
+        {"tag": "v1.0.0", "published_at": "2026-10-20T10:00:00Z",
+         "assets": [{"name": "godot_template-1.0.0-linux-arm64.tar.gz", "size": 3, "sha256": "bbb"}]},
+    ]},
+]
+RECAP = """
+TASK [app : Installer le programme] ****
+PLAY RECAP *********************************************************************
+rpi-test-02.expolab.lan    : ok=12   changed=3    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+rpi-test.expolab.lan       : ok=4    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0
+"""
+
+
+def test_programs_only_lists_mirrors_with_releases():
+    answers = {"/api/mirrors": {"mirrors": [{"name": "ansible", "releases": []},
+                                            {"name": "godot-template", "releases": [{"tag": "v1.1.0"}]}]},
+               "/api/mirrors/godot-template/releases": {"releases": PROGS[0]["releases"]}}
+    assert [p["name"] for p in apps.programs(get=answers.__getitem__)] == ["godot-template"]
+
+
+def test_resolve_and_run_vars():
+    assert apps.resolve(PROGS[0], "latest")["tag"] == "v1.1.0"
+    assert apps.resolve(PROGS[0], "v1.0.0")["tag"] == "v1.0.0"
+    assert apps.resolve(PROGS[0], "v9.9.9") is None and apps.resolve(None, "latest") is None
+    store = {"rpi-test-02.expolab.lan": {"app": "godot-template", "version": "v1.0.0"},
+             "rpi-test.expolab.lan": {"app": "godot-template", "version": "latest"},
+             "gerard.expolab.lan": {"installed": {"app": "x", "version": "v1"}},          # plus de programme
+             "module-09.expolab.lan": {"app": "godot-template", "version": "v0.1.0"}}     # release disparue
+    out = apps.run_vars(store, PROGS)["expolab_apps"]
+    assert set(out) == {"rpi-test-02.expolab.lan", "rpi-test.expolab.lan"}
+    assert out["rpi-test.expolab.lan"]["version"] == "v1.1.0"                            # « derniere » resolue
+    assert out["rpi-test-02.expolab.lan"] == {
+        "name": "godot-template", "version": "v1.0.0", "archive": "godot_template-1.0.0-linux-arm64.tar.gz",
+        "sha256": "bbb", "url": "http://127.0.0.1:5054/releases/godot-template/v1.0.0/godot_template-1.0.0-linux-arm64.tar.gz"}
+
+
+def test_installed_version_comes_from_the_play_recap():
+    assert apps.hosts_ok(RECAP) == {"rpi-test-02.expolab.lan"}
+    snapshot = {"rpi-test-02.expolab.lan": {"name": "godot-template", "version": "v1.1.0"},
+                "rpi-test.expolab.lan": {"name": "godot-template", "version": "v1.1.0"}}
+    store = {"rpi-test-02.expolab.lan": {"app": "godot-template", "run_id": "R1"}}
+    assert apps.record_installed(store, snapshot, RECAP, now="T")
+    assert store["rpi-test-02.expolab.lan"]["installed"] == {"app": "godot-template", "version": "v1.1.0", "at": "T"}
+    assert "run_id" not in store["rpi-test-02.expolab.lan"]
+    assert "rpi-test.expolab.lan" not in store                                           # en echec : rien d'installe
+    # Un depot Ansible sans role `app` ne pose rien : on ne pretend pas l'avoir installe.
+    assert not apps.record_installed({}, snapshot, RECAP.replace("TASK [app : ", "TASK [kiosk : "))
+
+
+def test_row_state():
+    wanted = {"tag": "v1.1.0"}
+    entry = {"app": "godot-template", "installed": {"app": "godot-template", "version": "v1.1.0"}}
+    assert apps.row_state({}, None, None) == "none"
+    assert apps.row_state(entry, wanted, None) == "uptodate"
+    assert apps.row_state(entry, {"tag": "v1.2.0"}, None) == "outdated"
+    assert apps.row_state({"app": "godot-template"}, None, None) == "missing"
+    assert apps.row_state(entry, wanted, {"status": "queued"}) == "queued"
+    assert apps.row_state(entry, wanted, {"status": "failed"}) == "failed"
+
+
+@pytest.fixture
+def appsweb(tmp_path, monkeypatch):
+    monkeypatch.setattr(aw, "APPS_STORE", tmp_path / "apps" / "apps.json")
+    monkeypatch.setattr(aw, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(aw, "RUNS_INDEX", tmp_path / "runs" / "index.yaml")
+    (tmp_path / "runs").mkdir()
+    machines = [{"name": "rpi-test-02.expolab.lan", "site": "expo", "tags": ["kiosk", "audio"]},
+                {"name": "gerard.expolab.lan", "site": None, "tags": ["audio"]}]
+    monkeypatch.setattr(aw, "bastion_machines", lambda: machines)
+    monkeypatch.setattr(apps, "programs", lambda get=None: PROGS)
+    aw.app.config["TESTING"] = True
+    client = aw.app.test_client()
+    client.tmp = tmp_path
+    return client
+
+
+def rows(client):
+    return {r["short"]: r for r in client.get("/api/apps").get_json()["machines"]}
+
+
+def test_apps_page_assigns_validates_and_installs(appsweb):
+    r = rows(appsweb)
+    assert r["rpi-test-02"]["state"] == "none" and r["rpi-test-02"]["kiosk"] is True
+    assert r["gerard"]["kiosk"] is False
+    put = lambda m, body: appsweb.put(f"/api/apps/{m}", json=body)  # noqa: E731
+    assert put("inconnue.expolab.lan", {"app": "godot-template"}).status_code == 404
+    assert put("rpi-test-02.expolab.lan", {"app": "inexistant"}).status_code == 400
+    assert put("rpi-test-02.expolab.lan", {"app": "godot-template", "version": "v9"}).status_code == 400
+    assert put("rpi-test-02.expolab.lan", {"app": "godot-template", "version": "v1.0.0"}).status_code == 200
+    r = rows(appsweb)["rpi-test-02"]
+    assert (r["app"], r["version"], r["wanted"], r["state"]) == ("godot-template", "v1.0.0", "v1.0.0", "outdated")
+    res = appsweb.post("/api/apps/rpi-test-02.expolab.lan/install").get_json()
+    assert res["ok"] is True
+    assert aw.load_runs()[-1]["limit"] == "rpi-test-02.expolab.lan" and aw.load_runs()[-1]["actor"] == "applications"
+    assert rows(appsweb)["rpi-test-02"]["state"] == "queued"
+    assert appsweb.post("/api/apps/gerard.expolab.lan/install").status_code == 400       # aucun programme
+    assert put("rpi-test-02.expolab.lan", {"app": ""}).status_code == 200                # « — aucun — »
+    assert rows(appsweb)["rpi-test-02"]["state"] == "none"
+
+
+def test_orphan_machine_is_listed_and_can_be_removed(appsweb):
+    apps.save(aw.APPS_STORE, {"ancien.expolab.lan": {"app": "godot-template", "version": "v1.0.0"}})
+    view = appsweb.get("/api/apps").get_json()
+    assert [o["name"] for o in view["orphans"]] == ["ancien.expolab.lan"]
+    assert view["programs"][0]["machines"] == 1
+    assert appsweb.delete("/api/apps/ancien.expolab.lan").status_code == 200
+    assert appsweb.get("/api/apps").get_json()["orphans"] == []
+
+
+def test_every_run_gets_the_programs_and_records_what_was_installed(appsweb, monkeypatch):
+    apps.save(aw.APPS_STORE, {"rpi-test-02.expolab.lan": {"app": "godot-template", "version": "latest"}})
+    monkeypatch.setattr(aw, "sync_repo", lambda: (True, ""))
+    seen = {}
+
+    def fake_run(cmd, stdout, **kw):
+        seen["cmd"] = cmd
+        stdout.write(RECAP)
+        return type("R", (), {"returncode": 0})()
+    monkeypatch.setattr(aw.subprocess, "run", fake_run)
+    aw.save_runs([{"id": "R9", "limit": None, "status": "running"}])
+    aw.execute_run("R9", None)
+    vars_file = appsweb.tmp / "runs" / "R9.apps.json"
+    assert seen["cmd"][-2:] == ["-e", f"@{vars_file}"]
+    assert json.loads(vars_file.read_text())["expolab_apps"]["rpi-test-02.expolab.lan"]["version"] == "v1.1.0"
+    assert rows(appsweb)["rpi-test-02"]["installed"]["version"] == "v1.1.0"
+    assert rows(appsweb)["rpi-test-02"]["state"] == "uptodate"

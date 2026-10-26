@@ -196,3 +196,22 @@ td code {
         color: var(--muted);
     }
 }
+
+/* Onglets Runs / Applications */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 10px 0 0; }
+.tab { padding: 8px 14px; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* Onglet Applications */
+.apps td { vertical-align: middle; }
+.apps td select { width: 100%; min-width: 140px; }
+.apps .machine b { display: block; }
+.apps .machine span { color: var(--muted); font-size: 12px; }
+.apps .installed { font-family: ui-monospace, monospace; font-size: 13px; }
+.apps .installed small { display: block; color: var(--muted); font-family: inherit; font-size: 11px; }
+.apps td.actions { white-space: nowrap; text-align: right; }
+.apps tr.orphan td { opacity: .75; }
+.catalog td small { color: var(--muted); }
+button.small { padding: 5px 10px; font-size: 13px; }
+.spin { display: inline-block; width: 11px; height: 11px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -1px; margin-right: 5px; }
+@keyframes spin { to { transform: rotate(360deg); } }

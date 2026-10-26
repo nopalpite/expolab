@@ -18,6 +18,7 @@ dans Bastion, protegee uniquement par l'isolation reseau de son
 environnement de deploiement.
 """
 import importlib.util
+import json
 import os
 import re
 import shlex
@@ -31,6 +32,7 @@ from pathlib import Path
 import yaml
 from flask import Flask, jsonify, render_template, request
 
+import apps
 import deploy
 
 app = Flask(__name__)
@@ -55,6 +57,11 @@ QUEUE_IDLE_WAIT = 5
 
 # Deploiement apres un flash exploitant (voir deploy.py) : dossier partage avec sd-flasher.
 DEPLOY_DIR = Path("/deploy")
+# Programmes des machines (onglet Applications, voir apps.py) : association hors git.
+APPS_STORE = Path("/apps/apps.json")
+APPS_LOCK = threading.Lock()
+MACHINES_CACHE_SECONDS = 30
+_machines_cache: dict = {"at": 0.0, "machines": None}
 DEPLOY_INTERVAL = 10   # secondes entre deux passages sur les demandes
 SSH_PROBE_TIMEOUT = 20
 
@@ -191,8 +198,14 @@ def execute_run(run_id: str, limit: str | None) -> None:
         extra_args = os.environ.get("ANSIBLE_WEB_EXTRA_ARGS", "")
         if extra_args:
             cmd += shlex.split(extra_args)
+        snapshot, note = app_vars_for_run(run_id)
+        if snapshot:
+            cmd += ["-e", f"@{RUNS_DIR / (run_id + '.apps.json')}"]
         try:
             with open(log_path, "w") as logf:
+                if note:
+                    logf.write(note + "\n")
+                    logf.flush()
                 # stdin propre a chaque run : jamais celui du conteneur, qu'un autre outil
                 # (ssh) aurait pu laisser en non bloquant.
                 result = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=REPO_DIR,
@@ -203,9 +216,35 @@ def execute_run(run_id: str, limit: str | None) -> None:
                 logf.write(f"\nErreur d'execution : {exc}\n")
             status = "failed"
 
+    if ok and snapshot:
+        try:
+            log = log_path.read_text(errors="replace")
+        except OSError:
+            log = ""
+        with APPS_LOCK:
+            store = apps.load(APPS_STORE)
+            if apps.record_installed(store, snapshot, log):
+                apps.save(APPS_STORE, store)
     update_run(run_id, status=status, finished_at=datetime.now(timezone.utc).isoformat())
     with RUN_LOCK:
         RUN_STATE["running"] = False
+
+
+def app_vars_for_run(run_id: str) -> tuple[dict, str]:
+    """Programme resolu de chaque machine (fichier de variables du run). Mirroir
+    injoignable : le run part sans, avec une note en tete de son log."""
+    with APPS_LOCK:
+        store = apps.load(APPS_STORE)
+    if not any(e.get("app") for e in store.values()):
+        return {}, ""
+    try:
+        resolved = apps.run_vars(store, apps.programs())
+    except (OSError, ValueError) as exc:
+        return {}, f"[ansible-web] programmes des machines non transmis (git-mirror injoignable : {exc.__class__.__name__})"
+    if not resolved["expolab_apps"]:
+        return {}, ""
+    (RUNS_DIR / f"{run_id}.apps.json").write_text(json.dumps(resolved, indent=2))
+    return resolved["expolab_apps"], ""
 
 
 def update_run(run_id: str, **fields) -> None:
@@ -533,6 +572,133 @@ def deploy_loop() -> None:
         except Exception as exc:  # noqa: BLE001 - ne jamais tuer la boucle
             print(f"deploiement : {exc}", flush=True)
         time.sleep(DEPLOY_INTERVAL)
+
+
+# --- onglet Applications : programme et version de chaque machine (voir apps.py) ------------
+
+def bastion_machines() -> list[dict]:
+    """Machines de Bastion (cache court : la page se rafraichit souvent)."""
+    now = time.monotonic()
+    if _machines_cache["machines"] is None or now - _machines_cache["at"] > MACHINES_CACHE_SECONDS:
+        ok, err = sync_repo()
+        if not ok:
+            raise RuntimeError(err)
+        try:
+            machines = load_inventory_module().fetch_machines()
+        except SystemExit as exc:
+            raise RuntimeError("Impossible de joindre Bastion (verifier BASTION_URL/BASTION_API_TOKEN).") from exc
+        _machines_cache.update(at=now, machines=machines)
+    return _machines_cache["machines"]
+
+
+def apps_view() -> dict:
+    machines = bastion_machines()
+    try:
+        progs, mirror_error = apps.programs(), None
+    except (OSError, ValueError) as exc:
+        progs, mirror_error = [], f"git-mirror injoignable ({exc.__class__.__name__})"
+    by_prog = {p["name"]: p for p in progs}
+    with APPS_LOCK:
+        store = apps.load(APPS_STORE)
+    with RUNS_LOCK:
+        runs = {r["id"]: r for r in load_runs()}
+    rows, known = [], set()
+    for m in sorted(machines, key=lambda m: m["name"]):
+        name = m["name"]
+        known.add(name)
+        entry = store.get(name, {})
+        wanted = apps.resolve(by_prog.get(entry.get("app")), entry.get("version") or apps.LATEST)
+        rows.append({
+            "name": name, "short": name.split(".")[0], "site": m.get("site") or "",
+            "tags": sorted(m.get("tags") or []),
+            "kiosk": "kiosk" in {t.replace("-", "_") for t in (m.get("tags") or [])},
+            "app": entry.get("app") or "", "version": entry.get("version") or "",
+            "wanted": wanted["tag"] if wanted else None,
+            "installed": entry.get("installed"), "run_id": entry.get("run_id"),
+            "state": apps.row_state(entry, wanted, runs.get(entry.get("run_id"))),
+        })
+    orphans = [{"name": n, "app": e.get("app") or "", "version": e.get("version") or "", "installed": e.get("installed")}
+               for n, e in sorted(store.items()) if n not in known]
+    counts = {}
+    for e in store.values():
+        if e.get("app"):
+            counts[e["app"]] = counts.get(e["app"], 0) + 1
+    return {
+        "machines": rows, "orphans": orphans, "mirror_error": mirror_error,
+        "programs": [{"name": p["name"], "machines": counts.get(p["name"], 0),
+                      "releases": [{"tag": r["tag"], "published_at": r.get("published_at")} for r in p["releases"]]}
+                     for p in progs],
+    }
+
+
+@app.route("/api/apps", methods=["GET"])
+def api_apps():
+    try:
+        return jsonify(apps_view())
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.route("/api/apps/<machine>", methods=["PUT"])
+def api_apps_set(machine: str):
+    """Associe un programme et une version a une machine (programme vide = aucun)."""
+    body = request.get_json(force=True, silent=True) or {}
+    app_name = str(body.get("app") or "").strip()
+    version = str(body.get("version") or apps.LATEST).strip()
+    try:
+        if machine not in {m["name"] for m in bastion_machines()}:
+            return jsonify({"error": "Machine inconnue de Bastion"}), 404
+        progs = {p["name"]: p for p in apps.programs()} if app_name else {}
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+    except (OSError, ValueError):
+        return jsonify({"error": "git-mirror injoignable"}), 502
+    if app_name and app_name not in progs:
+        return jsonify({"error": "Programme inconnu (aucune release dans git-mirror)"}), 400
+    if app_name and version != apps.LATEST and apps.resolve(progs[app_name], version) is None:
+        return jsonify({"error": "Version inconnue pour ce programme"}), 400
+    with APPS_LOCK:
+        store = apps.load(APPS_STORE)
+        entry = store.setdefault(machine, {})
+        if app_name:
+            entry.update(app=app_name, version=version)
+        else:
+            entry.pop("app", None)
+            entry.pop("version", None)
+        entry.pop("run_id", None)
+        apps.save(APPS_STORE, store)
+    return jsonify(apps_view())
+
+
+@app.route("/api/apps/<machine>/install", methods=["POST"])
+def api_apps_install(machine: str):
+    """Installe (ou met a jour) le programme de la machine : un run limite a elle, en file."""
+    with APPS_LOCK:
+        entry = apps.load(APPS_STORE).get(machine) or {}
+    if not entry.get("app"):
+        return jsonify({"error": "Aucun programme associe a cette machine"}), 400
+    try:
+        if machine not in {m["name"] for m in bastion_machines()}:
+            return jsonify({"error": "Machine inconnue de Bastion"}), 404
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+    run_id, queued = enqueue_run(machine, actor="applications")
+    with APPS_LOCK:
+        store = apps.load(APPS_STORE)
+        store.setdefault(machine, {})["run_id"] = run_id
+        apps.save(APPS_STORE, store)
+    return jsonify({"ok": True, "id": run_id, "queued": queued})
+
+
+@app.route("/api/apps/<machine>", methods=["DELETE"])
+def api_apps_forget(machine: str):
+    """Retire une machine de la liste (machine supprimee de Bastion). Rien n'est desinstalle."""
+    with APPS_LOCK:
+        store = apps.load(APPS_STORE)
+        if store.pop(machine, None) is None:
+            return jsonify({"error": "Machine inconnue"}), 404
+        apps.save(APPS_STORE, store)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/runs/<run_id>/log", methods=["GET"])

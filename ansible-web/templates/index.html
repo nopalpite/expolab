@@ -10,10 +10,14 @@
     <header>
         <h1>Ansible</h1>
         <p class="subtitle">Declenche des runs Ansible contre le parc Bastion</p>
+        <nav class="tabs">
+            <a href="#runs" class="tab" data-tab="runs">Runs</a>
+            <a href="#applications" class="tab" data-tab="applications">Applications</a>
+        </nav>
     </header>
 
     <main>
-        <section class="panel">
+        <section class="panel" data-pane="runs">
             <h2>Reglages</h2>
             <form id="settings-form">
                 <div class="field">
@@ -26,7 +30,7 @@
             <p id="settings-status" class="status" hidden></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-pane="runs">
             <h2>Lancer un run</h2>
             <form id="run-form">
                 <div class="field">
@@ -41,7 +45,7 @@
             <p id="run-status" class="status" hidden></p>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-pane="runs">
             <h2>Tags Bastion</h2>
             <table id="tags-table">
                 <thead>
@@ -57,7 +61,7 @@
             </table>
         </section>
 
-        <section class="panel">
+        <section class="panel" data-pane="runs">
             <h2>Historique des runs</h2>
             <table id="runs-table">
                 <thead>
@@ -74,6 +78,38 @@
             </table>
         </section>
 
+        <!-- Onglet Applications : programme (depot du mirroir) et version de chaque machine. -->
+        <section class="panel" data-pane="applications" hidden>
+            <h2>Programmes par machine</h2>
+            <p class="subtitle" style="margin: 0 0 10px;">Chaque machine affiche <b>un</b> programme en plein ecran (role <code>kiosk</code>).
+                Choisir un programme et une version enregistre l'association ; <b>Installer</b> lance un run sur la machine (il passe par la file).
+                Une machine flashee par l'exploitant recoit aussi son programme pendant son installation automatique.</p>
+            <p id="apps-error" class="status status-error" hidden></p>
+            <table id="apps-table" class="apps">
+                <thead>
+                    <tr><th>Machine</th><th>Programme</th><th>Version voulue</th><th>Installee</th><th>Etat</th><th></th></tr>
+                </thead>
+                <tbody id="apps-body">
+                    <tr><td colspan="6" class="empty">Chargement...</td></tr>
+                </tbody>
+            </table>
+            <p class="subtitle" style="margin: 10px 0 0;"><b>Version voulue</b> : une release precise (figee) ou « derniere » (la plus recente au moment du run).
+                <b>Installee</b> : ce qu'un run a reussi a poser sur la machine. Une machine sans tag <code>kiosk</code> peut recevoir un programme,
+                mais rien ne l'affichera a l'ecran.</p>
+        </section>
+
+        <section class="panel" data-pane="applications" hidden>
+            <h2>Programmes disponibles</h2>
+            <p class="subtitle" style="margin: 0 0 10px;">Les depots de git-mirror qui ont des releases avec une archive Linux arm64.
+                Une nouvelle release apparait apres le sync du mirroir.</p>
+            <table class="catalog">
+                <thead><tr><th>Depot du mirroir</th><th>Derniere release</th><th>Releases</th><th>Machines</th></tr></thead>
+                <tbody id="programs-body">
+                    <tr><td colspan="4" class="empty">Chargement...</td></tr>
+                </tbody>
+            </table>
+        </section>
+
         <section class="panel" id="log-panel" hidden>
             <h2 id="log-title">Log</h2>
             <pre id="log-content"></pre>
@@ -81,5 +117,6 @@
     </main>
 
     <script src="/static/app.js"></script>
+    <script src="/static/apps.js"></script>
 </body>
 </html>

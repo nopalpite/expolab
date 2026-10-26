@@ -17,7 +17,7 @@ RUN apt-get update -qq && \
     pip install --no-cache-dir ansible-core==2.17.* flask==3.0.* pyyaml==6.0.*
 
 WORKDIR /app
-COPY app.py deploy.py ./
+COPY app.py apps.py deploy.py ./
 COPY templates/ templates/
 COPY static/ static/
 

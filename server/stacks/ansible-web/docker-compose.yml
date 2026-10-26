@@ -25,6 +25,8 @@ services:
       # Installation d'une machine apres un flash exploitant : demandes deposees par
       # sd-flasher (requests/), etat publie ici (status/). Voir ansible-web/deploy.py.
       - ${REPO_ROOT}/server/stacks/ansible-web/deploy:/deploy
+      # Programme et version de chaque machine (onglet Applications, voir ansible-web/apps.py).
+      - ${REPO_ROOT}/server/stacks/ansible-web/apps:/apps
       - ${REPO_ROOT}/server/stacks/ansible-web/config.yaml:/data/config.yaml
       # Cle SSH dediee automatisation (voir deploy-server.sh) - jamais
       # celle utilisee en vrai vie, une cle propre a ce lab.
