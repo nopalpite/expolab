@@ -21,13 +21,18 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, send_file
+
+import releases
 
 app = Flask(__name__)
 
 DATA_DIR = Path("/data")
 REPOS_DIR = DATA_DIR / "repos"
 CONFIG_PATH = DATA_DIR / "mirrors.yaml"
+# Releases GitHub des mirroirs (programmes des machines, voir releases.py).
+RELEASES_DIR = DATA_DIR / "releases"
+_release_errors: dict = {}   # nom -> derniere erreur de recuperation des releases (le git reste a jour)
 
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,30}[a-z0-9]$")
 GIT_TIMEOUT = 120  # clone/fetch peuvent prendre du temps sur un gros depot
@@ -115,7 +120,18 @@ def sync_mirror(name: str) -> tuple[bool, str]:
     mirror["last_synced"] = datetime.now(timezone.utc).isoformat()
     save_mirrors(data)
     check_mirror(mirror)
+    sync_mirror_releases(mirror)
     return True, ""
+
+
+def sync_mirror_releases(mirror: dict) -> None:
+    """Recupere les releases (depot GitHub) ; une erreur est retenue pour la page mais ne
+    fait jamais echouer la synchronisation du git."""
+    try:
+        releases.sync_releases(mirror["name"], mirror["remote_url"], RELEASES_DIR)
+        _release_errors.pop(mirror["name"], None)
+    except Exception as exc:  # noqa: BLE001 - reseau, droits du jeton, disque plein...
+        _release_errors[mirror["name"]] = f"Releases non recuperees : {exc.__class__.__name__}"
 
 
 def local_commit(name: str) -> dict | None:
@@ -214,6 +230,9 @@ def api_mirrors_list():
             "commit": status["commit"],
             "remote_short": (status["remote_sha"] or "")[:7] or None,
             "checked_at": status["checked_at"],
+            "releases": [{"tag": r["tag"], "published_at": r["published_at"]}
+                         for r in releases.read_index(RELEASES_DIR, m["name"])],
+            "release_error": _release_errors.get(m["name"]),
         })
     return jsonify({"mirrors": mirrors, "check_interval": CHECK_INTERVAL})
 
@@ -255,6 +274,7 @@ def api_mirrors_create():
     })
     save_mirrors(data)
     check_mirror(data["mirrors"][-1])
+    sync_mirror_releases(data["mirrors"][-1])
     return jsonify({"ok": True}), 201
 
 
@@ -294,6 +314,8 @@ def api_mirrors_delete(name: str):
         return jsonify({"error": f"'{name}' introuvable"}), 404
 
     shutil.rmtree(repo_path(name), ignore_errors=True)
+    shutil.rmtree(RELEASES_DIR / name, ignore_errors=True)
+    _release_errors.pop(name, None)
     data["mirrors"].remove(mirror)
     save_mirrors(data)
     with _status_lock:
@@ -306,7 +328,26 @@ def api_mirrors_sync(name: str):
     ok, err = sync_mirror(name)
     if not ok:
         return jsonify({"error": err}), 502 if "introuvable" not in err else 404
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "release_error": _release_errors.get(name)})
+
+
+@app.route("/api/mirrors/<name>/releases", methods=["GET"])
+def api_mirror_releases(name: str):
+    """Index des releases recuperees (les plus recentes d'abord) : ce que lit ansible-web."""
+    if not NAME_RE.match(name) or find_mirror(load_mirrors(), name) is None:
+        return jsonify({"error": f"'{name}' introuvable"}), 404
+    return jsonify({"releases": releases.read_index(RELEASES_DIR, name)})
+
+
+@app.route("/releases/<name>/<tag>/<asset>", methods=["GET"])
+def release_asset(name: str, tag: str, asset: str):
+    """Une archive de release, seulement si elle figure dans l'index du mirroir."""
+    if not NAME_RE.match(name):
+        return jsonify({"error": "Introuvable"}), 404
+    path = releases.asset_path(RELEASES_DIR, name, tag, asset)
+    if path is None:
+        return jsonify({"error": "Introuvable"}), 404
+    return send_file(path, mimetype="application/gzip", as_attachment=True, download_name=asset)
 
 
 # Protocole HTTP intelligent de git (smart HTTP), pour que les mirroirs

@@ -27,6 +27,15 @@ function commitLine(m) {
             <span class="commit-date">${formatDate(c.date)}</span>`;
 }
 
+// Releases GitHub recuperees (archives des programmes des machines), ou l'erreur de recuperation.
+function releaseLine(m) {
+    if (m.release_error) return `<span class="status-error">${escapeHtml(m.release_error)}</span>`;
+    const rel = m.releases || [];
+    if (!rel.length) return '<span class="field-value">aucune</span>';
+    const others = rel.length > 1 ? ` <span class="commit-date">(+${rel.length - 1} plus ancienne${rel.length > 2 ? "s" : ""})</span>` : "";
+    return `<code>${escapeHtml(rel[0].tag)}</code> <span class="commit-date">${formatDate(rel[0].published_at)}</span>${others}`;
+}
+
 function intervalLabel(minutes) {
     const labels = { 0: "Manuel", 60: "1h", 360: "6h", 1440: "24h" };
     return labels[minutes] || "Manuel";
@@ -87,6 +96,10 @@ async function loadMirrors() {
                 <div class="mirror-card-row">
                     <span class="field-label">Commit</span>
                     ${commitLine(m)}
+                </div>
+                <div class="mirror-card-row">
+                    <span class="field-label">Release</span>
+                    ${releaseLine(m)}
                 </div>
                 <div class="mirror-card-row">
                     <span class="field-label">Cloner</span>
