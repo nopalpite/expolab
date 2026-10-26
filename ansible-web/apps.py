@@ -74,17 +74,33 @@ def run_vars(store: dict, progs: list[dict]) -> dict:
         if not entry.get("app"):
             continue
         rel = resolve(by_name.get(entry["app"]), entry.get("version") or LATEST)
-        if rel is None or not rel["assets"]:
+        archives = {}
+        for asset in (rel or {}).get("assets") or []:
+            arch = asset_arch(asset)
+            if arch and arch not in archives:
+                archives[arch] = {
+                    "archive": asset["name"],
+                    "sha256": asset["sha256"],
+                    "url": f"{MIRROR_URL}/releases/{entry['app']}/{rel['tag']}/{asset['name']}",
+                }
+        if not archives:
             continue
-        asset = rel["assets"][0]
-        apps[host] = {
-            "name": entry["app"],
-            "version": rel["tag"],
-            "archive": asset["name"],
-            "sha256": asset["sha256"],
-            "url": f"{MIRROR_URL}/releases/{entry['app']}/{rel['tag']}/{asset['name']}",
-        }
+        # Toutes les architectures de la release : le role prend celle de la machine.
+        apps[host] = {"name": entry["app"], "version": rel["tag"], "archives": archives}
     return {"expolab_apps": apps}
+
+
+def asset_arch(asset: dict) -> str | None:
+    """arm64 / x86_64 d'une archive (donnee par git-mirror ; d'apres son nom pour un
+    index plus ancien, qui ne la donnait pas)."""
+    if asset.get("arch") in ("arm64", "x86_64"):
+        return asset["arch"]
+    name = asset.get("name", "")
+    return "arm64" if "linux-arm64" in name else "x86_64" if "linux-x86_64" in name else None
+
+
+def release_arches(release: dict) -> list[str]:
+    return sorted({a for a in (asset_arch(x) for x in release.get("assets") or []) if a})
 
 
 def hosts_ok(log: str) -> set[str]:

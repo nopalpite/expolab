@@ -97,7 +97,7 @@ function renderApps() {
             const last = p.releases[0];
             const date = last && last.published_at ? new Date(last.published_at).toLocaleDateString("fr-FR") : "";
             return `<tr><td><b>${esc(p.name)}</b></td><td>${esc(last ? last.tag : "—")} <small>· ${esc(date)}</small></td>
-                    <td>${esc(p.releases.map(r => r.tag).join(", "))}</td><td>${p.machines}</td></tr>`;
+                    <td>${esc(p.releases.map(r => `${r.tag} (${(r.arches || []).join(" + ") || "?"})`).join(", "))}</td><td>${p.machines}</td></tr>`;
         }).join("")
         : '<tr><td colspan="4" class="empty">Aucun depot du mirroir n\'a de release</td></tr>';
 }

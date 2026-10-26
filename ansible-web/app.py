@@ -632,7 +632,8 @@ def apps_view() -> dict:
     return {
         "machines": rows, "orphans": orphans, "mirror_error": mirror_error,
         "programs": [{"name": p["name"], "machines": counts.get(p["name"], 0),
-                      "releases": [{"tag": r["tag"], "published_at": r.get("published_at")} for r in p["releases"]]}
+                      "releases": [{"tag": r["tag"], "published_at": r.get("published_at"),
+                                    "arches": apps.release_arches(r)} for r in p["releases"]]}
                      for p in progs],
     }
 

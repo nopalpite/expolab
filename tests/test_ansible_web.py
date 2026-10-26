@@ -393,7 +393,8 @@ PROGS = [
         {"tag": "v1.1.0", "published_at": "2026-10-24T10:00:00Z",
          "assets": [{"name": "godot_template-1.1.0-linux-arm64.tar.gz", "size": 3, "sha256": "aaa"}]},
         {"tag": "v1.0.0", "published_at": "2026-10-20T10:00:00Z",
-         "assets": [{"name": "godot_template-1.0.0-linux-arm64.tar.gz", "size": 3, "sha256": "bbb"}]},
+         "assets": [{"name": "godot_template-1.0.0-linux-arm64.tar.gz", "arch": "arm64", "size": 3, "sha256": "bbb"},
+                    {"name": "godot_template-1.0.0-linux-x86_64.tar.gz", "arch": "x86_64", "size": 3, "sha256": "ccc"}]},
     ]},
 ]
 RECAP = """
@@ -422,9 +423,15 @@ def test_resolve_and_run_vars():
     out = apps.run_vars(store, PROGS)["expolab_apps"]
     assert set(out) == {"rpi-test-02.expolab.lan", "rpi-test.expolab.lan"}
     assert out["rpi-test.expolab.lan"]["version"] == "v1.1.0"                            # « derniere » resolue
-    assert out["rpi-test-02.expolab.lan"] == {
-        "name": "godot-template", "version": "v1.0.0", "archive": "godot_template-1.0.0-linux-arm64.tar.gz",
-        "sha256": "bbb", "url": "http://127.0.0.1:5054/releases/godot-template/v1.0.0/godot_template-1.0.0-linux-arm64.tar.gz"}
+    base = "http://127.0.0.1:5054/releases/godot-template/v1.0.0/"
+    assert out["rpi-test-02.expolab.lan"] == {"name": "godot-template", "version": "v1.0.0", "archives": {
+        "arm64": {"archive": "godot_template-1.0.0-linux-arm64.tar.gz", "sha256": "bbb",
+                  "url": base + "godot_template-1.0.0-linux-arm64.tar.gz"},
+        "x86_64": {"archive": "godot_template-1.0.0-linux-x86_64.tar.gz", "sha256": "ccc",
+                   "url": base + "godot_template-1.0.0-linux-x86_64.tar.gz"}}}
+    # Index plus ancien (sans « arch ») : l'architecture est deduite du nom.
+    assert set(out["rpi-test.expolab.lan"]["archives"]) == {"arm64"}
+    assert apps.release_arches(PROGS[0]["releases"][1]) == ["arm64", "x86_64"]
 
 
 def test_installed_version_comes_from_the_play_recap():

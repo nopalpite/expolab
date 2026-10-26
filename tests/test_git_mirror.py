@@ -128,18 +128,32 @@ def test_github_repo_and_token_come_from_the_mirror_url():
     assert releases.github_repo("http://127.0.0.1:5054/git/x.git") is None
 
 
-def test_only_arm64_archives_of_published_releases_are_kept(tmp_path):
+def test_asset_architecture_comes_from_its_name():
+    assert releases.asset_arch("godot_template-1.0.0-linux-arm64.tar.gz") == "arm64"
+    assert releases.asset_arch("godot_template-1.0.0-linux-x86_64.tar.gz") == "x86_64"
+    assert releases.asset_arch("app-linux-aarch64.tar.gz") == "arm64"
+    assert releases.asset_arch("app-linux-amd64.tar.gz") == "x86_64"
+    assert releases.asset_arch("app-windows-x86_64.zip") is None                 # pas Linux
+    assert releases.asset_arch("app-linux-arm64x.tar.gz") is None                # pas un mot entier
+    assert releases.asset_arch("notes.txt") is None
+
+
+def test_linux_arm64_and_x86_64_archives_of_published_releases_are_kept(tmp_path):
     arm, x86 = b"binaire-arm64", b"binaire-x86"
     gh = FakeGitHub([
-        release("v1.1.0", "2026-10-24T10:00:00Z", [(11, "app-1.1.0-linux-arm64.tar.gz", arm), (12, "app-1.1.0-linux-x86_64.tar.gz", x86)]),
+        release("v1.1.0", "2026-10-24T10:00:00Z", [(11, "app-1.1.0-linux-arm64.tar.gz", arm), (12, "app-1.1.0-linux-x86_64.tar.gz", x86),
+                                                   (13, "app-1.1.0-windows-x86_64.zip", b"win")]),
         release("v1.0.0", "2026-10-20T10:00:00Z", [(21, "app-1.0.0-linux-arm64.tar.gz", arm)]),
         release("v2.0.0-brouillon", "2026-10-25T10:00:00Z", [(31, "app-2.0.0-linux-arm64.tar.gz", arm)], draft=True),
-        release("v0.9.0", "2026-10-01T10:00:00Z", [(41, "notes.txt", b"x")]),          # pas d'archive arm64
-    ], {11: arm, 12: x86, 21: arm, 31: arm, 41: b"x"})
+        release("v0.9.0", "2026-10-01T10:00:00Z", [(41, "notes.txt", b"x")]),          # pas d'archive Linux
+    ], {11: arm, 12: x86, 13: b"win", 21: arm, 31: arm, 41: b"x"})
     index = releases.sync_releases("app", URL, tmp_path, gh.get)
     assert [r["tag"] for r in index] == ["v1.1.0", "v1.0.0"]                      # plus recente d'abord
-    assert [a["name"] for a in index[0]["assets"]] == ["app-1.1.0-linux-arm64.tar.gz"]
+    assert [(a["name"], a["arch"]) for a in index[0]["assets"]] == [
+        ("app-1.1.0-linux-arm64.tar.gz", "arm64"), ("app-1.1.0-linux-x86_64.tar.gz", "x86_64")]
     assert (tmp_path / "app" / "v1.1.0" / "app-1.1.0-linux-arm64.tar.gz").read_bytes() == arm
+    assert (tmp_path / "app" / "v1.1.0" / "app-1.1.0-linux-x86_64.tar.gz").read_bytes() == x86
+    assert not (tmp_path / "app" / "v1.1.0" / "app-1.1.0-windows-x86_64.zip").exists()
     assert not (tmp_path / "app" / "v2.0.0-brouillon").exists()
     assert all(token == "SECRET" for _, token, _ in gh.calls)
     assert "SECRET" not in (tmp_path / "app" / "index.json").read_text()        # jamais ecrit

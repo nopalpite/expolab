@@ -2,9 +2,10 @@
 sont publies en release par la CI de leur depot, pas dans le git. Le mirroir les
 recupere a chaque sync pour que le serveur les ait sans internet cote machines.
 
-Seules les archives dont le nom contient ASSET_MATCH (defaut « linux-arm64 », les
-Raspberry Pi) sont telechargees, pour les KEEP releases les plus recentes (hors
-brouillons). Rangement : <dossier>/<mirroir>/<tag>/<archive>, et index.json par
+Seules les archives Linux d'une architecture connue (arm64 : Raspberry Pi ; x86_64 :
+PC) sont telechargees, pour les KEEP releases les plus recentes (hors brouillons).
+L'index donne l'architecture de chaque archive (convention des exports Godot :
+<depot>-<version>-linux-<arch>.tar.gz) : la machine recoit celle qui lui correspond. Rangement : <dossier>/<mirroir>/<tag>/<archive>, et index.json par
 mirroir (ce que ansible-web lit). Une archive deja la, de la bonne taille, n'est pas
 retelechargee ; une release sortie des KEEP plus recentes est supprimee.
 
@@ -20,7 +21,9 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
-ASSET_MATCH = os.environ.get("GIT_MIRROR_RELEASE_ASSET_MATCH", "linux-arm64")
+# Architecture d'une archive d'apres son nom (aarch64/amd64 : autres noms courants).
+ARCH_RE = re.compile(r"(?:^|[-_.])(arm64|aarch64|x86_64|amd64)(?=[-_.]|$)")
+ARCH_NAMES = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}
 KEEP = int(os.environ.get("GIT_MIRROR_RELEASE_KEEP", "5"))
 API = "https://api.github.com"
 TAG_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$")
@@ -39,6 +42,14 @@ def github_repo(remote_url: str) -> tuple[str, str] | None:
     if path.count("/") != 1:
         return None
     return path, (parts.password or parts.username or "")
+
+
+def asset_arch(name: str) -> str | None:
+    """arm64 / x86_64 pour une archive Linux d'architecture reconnue, sinon None."""
+    if "linux" not in name.lower():
+        return None
+    found = ARCH_RE.search(name)
+    return ARCH_NAMES[found.group(1)] if found else None
 
 
 def http_get(url: str, token: str, accept: str):
@@ -100,7 +111,8 @@ def sync_releases(name: str, remote_url: str, root: Path, get=None) -> list[dict
         assets = []
         for asset in rel.get("assets") or []:
             asset_name = str(asset.get("name", ""))
-            if ASSET_MATCH not in asset_name or not ASSET_RE.match(asset_name):
+            arch = asset_arch(asset_name)
+            if arch is None or not ASSET_RE.match(asset_name):
                 continue
             dest = root / name / tag / asset_name
             old = known.get((tag, asset_name))
@@ -108,7 +120,7 @@ def sync_releases(name: str, remote_url: str, root: Path, get=None) -> list[dict
                 sha = old["sha256"]
             else:
                 sha = download(asset["id"], repo, token, dest, asset["size"], get)
-            assets.append({"name": asset_name, "size": asset["size"], "sha256": sha})
+            assets.append({"name": asset_name, "arch": arch, "size": asset["size"], "sha256": sha})
         if assets:
             index.append({"tag": tag, "published_at": rel.get("published_at"),
                           "prerelease": bool(rel.get("prerelease")), "assets": assets})
