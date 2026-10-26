@@ -201,6 +201,12 @@ def execute_run(run_id: str, limit: str | None) -> None:
         snapshot, note = app_vars_for_run(run_id)
         if snapshot:
             cmd += ["-e", f"@{RUNS_DIR / (run_id + '.apps.json')}"]
+            # apps.yml (bastion-ansible) installe le programme de chaque machine AVANT site.yml :
+            # avant le role kiosk (qui demarre l'ecran) et avant overlay_on (toujours en dernier).
+            if (REPO_DIR / "apps.yml").exists():
+                cmd.insert(1, str(REPO_DIR / "apps.yml"))
+            else:
+                note = "[ansible-web] programmes non installes : apps.yml absent du depot Ansible"
         try:
             with open(log_path, "w") as logf:
                 if note:

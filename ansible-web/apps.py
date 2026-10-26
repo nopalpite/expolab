@@ -7,7 +7,7 @@ release, doit tourner sur quelle machine.
 - Les programmes sont les depots de git-mirror qui ont des releases (archives linux-arm64
   recuperees par git-mirror, voir git-mirror/releases.py).
 - A CHAQUE run, ansible-web resout l'association en variables (`expolab_apps`) passees a
-  ansible-playbook (-e @fichier) : le role `app` de bastion-ansible installe le programme
+  ansible-playbook (-e @fichier) : apps.yml (role `internal_app`) de bastion-ansible installe le programme
   sur les machines du run qui en ont un. Un run lance pour autre chose (tag, flash
   exploitant) installe donc aussi le programme.
 - « Installee » = ce qu'un run a reussi a poser sur la machine, d'apres son PLAY RECAP.
@@ -97,8 +97,8 @@ def hosts_ok(log: str) -> set[str]:
 
 def record_installed(store: dict, snapshot: dict, log: str, now: str | None = None) -> bool:
     """Apres un run : la version installee des machines qui l'ont recue sans echec. Seulement
-    si le role `app` a vraiment tourne (un depot Ansible sans ce role ne pose rien)."""
-    if "TASK [app : " not in log:
+    si le role `internal_app` a vraiment tourne (un depot Ansible sans lui ne pose rien)."""
+    if "TASK [internal_app : " not in log:
         return False
     now = now or datetime.now(timezone.utc).isoformat()
     changed = False

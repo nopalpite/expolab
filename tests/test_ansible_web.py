@@ -397,7 +397,7 @@ PROGS = [
     ]},
 ]
 RECAP = """
-TASK [app : Installer le programme] ****
+TASK [internal_app : Installer le programme] ****
 PLAY RECAP *********************************************************************
 rpi-test-02.expolab.lan    : ok=12   changed=3    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
 rpi-test.expolab.lan       : ok=4    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0
@@ -437,7 +437,7 @@ def test_installed_version_comes_from_the_play_recap():
     assert "run_id" not in store["rpi-test-02.expolab.lan"]
     assert "rpi-test.expolab.lan" not in store                                           # en echec : rien d'installe
     # Un depot Ansible sans role `app` ne pose rien : on ne pretend pas l'avoir installe.
-    assert not apps.record_installed({}, snapshot, RECAP.replace("TASK [app : ", "TASK [kiosk : "))
+    assert not apps.record_installed({}, snapshot, RECAP.replace("TASK [internal_app : ", "TASK [kiosk : "))
 
 
 def test_row_state():
@@ -503,6 +503,10 @@ def test_orphan_machine_is_listed_and_can_be_removed(appsweb):
 def test_every_run_gets_the_programs_and_records_what_was_installed(appsweb, monkeypatch):
     apps.save(aw.APPS_STORE, {"rpi-test-02.expolab.lan": {"app": "godot-template", "version": "latest"}})
     monkeypatch.setattr(aw, "sync_repo", lambda: (True, ""))
+    repo = appsweb.tmp / "repo"
+    repo.mkdir()
+    (repo / "apps.yml").write_text("---")
+    monkeypatch.setattr(aw, "REPO_DIR", repo)
     seen = {}
 
     def fake_run(cmd, stdout, **kw):
@@ -514,6 +518,7 @@ def test_every_run_gets_the_programs_and_records_what_was_installed(appsweb, mon
     aw.execute_run("R9", None)
     vars_file = appsweb.tmp / "runs" / "R9.apps.json"
     assert seen["cmd"][-2:] == ["-e", f"@{vars_file}"]
+    assert seen["cmd"][1] == str(repo / "apps.yml")                     # programme pose AVANT site.yml
     assert json.loads(vars_file.read_text())["expolab_apps"]["rpi-test-02.expolab.lan"]["version"] == "v1.1.0"
     assert rows(appsweb)["rpi-test-02"]["installed"]["version"] == "v1.1.0"
     assert rows(appsweb)["rpi-test-02"]["state"] == "uptodate"
