@@ -98,3 +98,6 @@ server/stacks/prises-admin/data/
 
 # Console audio : niveaux, presets, machines et jeton des agents - propres a chaque installation, a sauvegarder.
 server/stacks/audio-admin/data/
+
+# Supervision : reglages, canaux d'alerte (secrets compris), maintenance et historique - propres a chaque installation, a sauvegarder.
+server/stacks/supervision-admin/data/

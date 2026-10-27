@@ -255,6 +255,7 @@ case "$DEPLOYED" in *" apt-cache-admin"*) ;; *) fail "apt-cache-admin absent des
 case "$DEPLOYED" in *" ntp "*) ;; *) fail "ntp absent des stacks deployees" ;; esac
 case "$DEPLOYED" in *" ntp-admin"*) ;; *) fail "ntp-admin absent des stacks deployees" ;; esac
 case "$DEPLOYED" in *" sd-flasher"*) ;; *) fail "sd-flasher absent des stacks deployees" ;; esac
+case "$DEPLOYED" in *" supervision-admin"*) ;; *) fail "supervision-admin absente des stacks deployees" ;; esac
 mkdir -p "$WORK/vpn/wireguard/config" && touch "$WORK/vpn/wireguard/config/wg0.conf"
 DEPLOYED="" && deploy_stacks > /dev/null
 case "$DEPLOYED" in *" vpn-admin"*) ;; *) fail "vpn-admin non redeploye alors que le VPN est installe" ;; esac

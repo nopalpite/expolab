@@ -385,3 +385,14 @@ def test_api_drives_expo_maintenance_and_settings(client):
     history = client.get("/api/history?days=abc").get_json()["incidents"]
     assert [(i["machine"], i["label"], i["level"]) for i in history] == [
         ("rpi-test", "En maintenance", "info"), ("", "Exposition fermée", "info")]
+
+
+def test_image_copies_every_module_and_the_stack_is_deployed():
+    dockerfile = (SRC / "Dockerfile").read_text(encoding="utf-8")
+    copied = next(line for line in dockerfile.splitlines() if line.startswith("COPY app.py")).split()[1:-1]
+    assert sorted(copied) == sorted(p.name for p in SRC.glob("*.py"))
+    assert "apprise" in dockerfile
+    stacks = (SRC.parent / "server" / "lib" / "stacks.sh").read_text(encoding="utf-8")
+    assert " supervision-admin" in stacks
+    compose = (SRC.parent / "server" / "stacks" / "supervision-admin" / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "SUPERVISION_PORT=5064" in compose and "bastion/config:/bastion-config:ro" in compose

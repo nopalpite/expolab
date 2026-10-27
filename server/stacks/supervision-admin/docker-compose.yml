@@ -1,0 +1,20 @@
+# Stack Dockhand "supervision-admin" - supervision des machines de l'expo (source dans supervision-admin/).
+# network_mode: host : l'interface ecoute sur 127.0.0.1:5064, derriere Caddy et le portail (vhost
+# supervision.<domaine>), et le serveur interroge lui-meme node_exporter (port 9100) des machines taguees
+# `monitoring` dans Bastion (role Ansible `monitoring` de bastion-ansible). Rien n'est installe pour elle sur
+# les machines au-dela de ce role ; seules les alertes sortent vers Internet (Telegram, Discord, Slack, Mailjet...).
+services:
+  supervision-admin:
+    build: ${REPO_ROOT}/supervision-admin
+    container_name: expolab-supervision-admin
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - SUPERVISION_PORT=5064
+    volumes:
+      # Heure locale : silence de nuit et recapitulatif du matin.
+      - /etc/localtime:/etc/localtime:ro
+      # supervision.db (reglages, canaux avec leurs secrets, maintenance, historique) : non versionne, a SAUVEGARDER.
+      - ${REPO_ROOT}/server/stacks/supervision-admin/data:/data
+      # Machines a surveiller : celles de Bastion taguees `monitoring` (lecture seule, aucun identifiant n'en sort).
+      - ${REPO_ROOT}/server/stacks/bastion/config:/bastion-config:ro

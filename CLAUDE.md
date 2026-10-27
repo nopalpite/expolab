@@ -109,7 +109,7 @@ d'une machine depuis cette bulle. Le détail technique est dans le README (secti
   `pytest tests`, puis les scripts `tests/test_*.sh`.
 - **Sous Windows,** le Python du système (3.8) est trop ancien. Il faut un
   environnement 3.12, par exemple avec `uv` : `uv venv -p 3.12`, puis
-  `uv pip install ruff==0.6.9 pytest==8.3.3 pyyaml==6.0.2 flask==3.0.3 bcrypt==4.2.0 ruamel.yaml==0.18.6`.
+  `uv pip install ruff==0.6.9 pytest==8.3.3 pyyaml==6.0.2 flask==3.0.3 bcrypt==4.2.0 ruamel.yaml==0.18.6 apprise==1.9.3`.
 - **Outillage sous Windows :** l'outil Bash déforme les antislashs dans les heredocs (écrire les scripts de correctif
   avec l'outil d'écriture de fichiers, jamais en ligne de commande) ; `core.autocrlf=true` met les fichiers de travail en CRLF
   (normaliser avant un remplacement de texte) ; lancer Python avec `-I` sur des fichiers non fiables ; un caractère nul glissé

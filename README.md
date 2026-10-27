@@ -491,6 +491,43 @@ Etat (niveaux, presets, machines) dans `server/stacks/audio-admin/data/state.jso
 s'est montre fragile). A faire dans l'image master : desactiver l'audio embarque (`dtparam=audio=off`) pour que la carte
 USB soit la seule sortie.
 
+## Supervision des machines
+
+Page **`supervision.<domaine>`** (stack `supervision-admin`, source dans `supervision-admin/`, derriere le portail) :
+l'etat des machines de l'expo, l'historique des problemes et les canaux d'alerte, dans une seule application.
+
+**Quelles machines.** Celles qui portent le tag **`monitoring`** dans Bastion (`config/machines.yaml`, lu en lecture
+seule). Le meme tag installe sur la machine, par le role Ansible `monitoring` de bastion-ansible, `node_exporter`
+(port 9100) et une petite sonde (appareils USB branches, ecrans, alimentation). La machine ne publie que des faits :
+**c'est le serveur qui juge**, toutes les 30 s, d'apres les autres tags :
+
+| Machines | Ce qui est verifie |
+|---|---|
+| toutes | joignable, sonde a jour, temperature, disque, memoire, alimentation (sous-tension, bridage) |
+| `kiosk` | `kiosk.service` et `kiosk-vnc.service` actifs, au moins un ecran branche |
+| `audio` | au moins un appareil USB de classe audio (carte son) |
+
+**Deux niveaux** : alerte et avertissement. Seuils et delais reglables dans la page (onglet Reglages), chacun avec
+une valeur par defaut : temperature 75 / 85 °C, disque 85 / 95 % et memoire 90 / 95 % utilises ; un probleme n'est
+signale qu'apres avoir dure (injoignable : 2 min, service arrete : 1 min, le reste : 1 min).
+
+**Exposition ouverte ou fermee.** Expo fermee : aucune machine interrogee, aucune alerte, les problemes en cours sont
+clos sans envoi. A l'ouverture, un delai de demarrage (5 min) laisse aux machines le temps de s'allumer. Bascule a la
+main dans la page en attendant la gestion d'allumage, qui utilisera le meme point d'entree :
+`POST http://127.0.0.1:5064/api/expo {"open": true|false, "source": "..."}` depuis le serveur, avec l'en-tete
+`X-Requested-With: expolab`. **Maintenance** : une machine eteinte volontairement sort de la surveillance sans fermer
+l'expo (note facultative), avec le meme delai de demarrage a sa sortie.
+
+**Canaux d'alerte** : Telegram, Discord, Slack, Mailjet (e-mail par le relais SMTP de Mailjet) ou toute URL
+[Apprise](https://github.com/caronc/apprise). Chaque canal choisit ses niveaux, se teste et se coupe dans la page ;
+son dernier envoi est affiche. Les changements d'un meme passage partent en un seul message. **Nuit** (19:00 -> 08:00,
+reglable) : silence complet, puis un recapitulatif a la fin de la nuit si l'expo est ouverte. Seul le serveur a acces
+a Internet : les machines n'envoient jamais rien elles-memes.
+
+**Donnees** : `server/stacks/supervision-admin/data/supervision.db` (SQLite) : reglages, canaux avec leurs secrets
+(jamais renvoyes au navigateur), maintenance, historique (conservation reglable, 90 jours par defaut). A sauvegarder.
+**Limite connue** : sur une machine `overlay_on`, node_exporter ne publie pas le disque de `/` : il n'est pas verifie.
+
 ## Interface d'exploitation (compte exploitant)
 
 Pour l'exploitant de l'exposition : un **second compte**, cree par l'administrateur dans
@@ -1024,10 +1061,12 @@ server/
     ntp-admin/docker-compose.yml                                       # build context = ../../ntp-admin
     sd-flasher/{docker-compose.yml, images/, data/, keys/}            # conteneur privilegie ; images/ (master), data/ (reglages, audit), keys/ non versionnes
     audio-admin/{docker-compose.yml, data/}                            # console audio ; data/ (state.json, agent.token) non versionne, a sauvegarder
+    supervision-admin/{docker-compose.yml, data/}                      # supervision ; data/ (supervision.db : reglages, canaux, historique) non versionne, a sauvegarder
     ansible-web/{docker-compose.yml, ansible-web.env, automation_key/, config.yaml, repo/, runs/}  # tout sauf docker-compose.yml non versionne ; execute bastion-ansible (depot separe, clone depuis git-mirror)
 dnsmasq-admin/                  # app Flask : app.py, Dockerfile, templates/, static/
 audio-admin/                    # console audio : hub.py (niveaux, presets, machines), bastion.py (salles lues dans Bastion), app.py (interface + API des agents), templates/, static/
 audio-agent/                    # agent audio des machines (agent.py) et son installateur (install.sh)
+supervision-admin/              # supervision : fleet.py (machines de Bastion), scrape.py (node_exporter), checks.py (regles par tag), supervisor.py (expo, maintenance, delais), notify.py (canaux Apprise, nuit), history.py (SQLite), app.py
 apt-cache-admin/                 # idem - interface du cache apt : etat, efficacite, journal, mode, miroirs HTTPS
 portal/                         # le portail (stack dashboard) : connexion unique, tiroir et onglets, verification de session pour Caddy
 caddy-admin/                     # idem - edite server/services.yaml, recharge Caddy via son admin API

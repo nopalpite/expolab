@@ -19,7 +19,7 @@
 #                    auth: true (ex: protocole git HTTP de git-mirror)
 # - title, group, icon, description : (optionnels) affichage dans le portail
 #                    (tiroir et accueil). icon : box, server, network, globe,
-#                    shield, terminal, git, play, download, clock. Sans titre, le nom sert.
+#                    shield, terminal, git, play, download, clock, volume, chart. Sans titre, le nom sert.
 # - framed        : (optionnel, defaut true) false = le portail ouvre ce
 #                    service dans un nouvel onglet du navigateur au lieu de
 #                    l'afficher dans un cadre.
@@ -78,6 +78,13 @@ services:
     group: Exposition
     icon: volume
     description: Volume de l'exposition, des salles et des machines
+  - name: supervision
+    auth: true
+    backend_port: 5064
+    title: Supervision
+    group: Exposition
+    icon: chart
+    description: État des machines, historique et alertes
   - name: sd-flasher
     auth: true
     backend_port: 5057
