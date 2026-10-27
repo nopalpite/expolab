@@ -13,9 +13,10 @@ import threading
 import time
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template, request
 
 import checks as C
+import notify as N
 import scrape
 from fleet import BastionMachines, short_name
 from history import History
@@ -28,24 +29,28 @@ BASTION_CONFIG = os.environ.get("SUPERVISION_BASTION_CONFIG", "/bastion-config/m
 POLL_SECONDS = 30
 
 log = logging.getLogger("supervision")
-app = Flask(__name__)
-supervisor = None
+app = Flask(__name__, root_path=str(Path(__file__).resolve().parent))
+supervisor = notifier = None
 
 
-def create(data_dir=DATA_DIR, machines_source=None, fetch=scrape.fetch, clock=time.time):
-    global supervisor
+def create(data_dir=DATA_DIR, machines_source=None, fetch=scrape.fetch, send=N.apprise_send, clock=time.time,
+           background=True):
+    global supervisor, notifier
     Path(data_dir).mkdir(parents=True, exist_ok=True)
-    supervisor = Supervisor(History(Path(data_dir) / "supervision.db"), machines_source or BastionMachines(BASTION_CONFIG),
-                            fetch, clock=clock)
-    return supervisor
+    history = History(Path(data_dir) / "supervision.db")
+    supervisor = Supervisor(history, machines_source or BastionMachines(BASTION_CONFIG), fetch, clock=clock)
+    notifier = N.Notifier(history, send=send, clock=clock, background=background)
+    return supervisor, notifier
 
 
 def loop():
     while True:
         started = time.monotonic()
         try:
-            for event in supervisor.tick():
+            events = supervisor.tick()
+            for event in events:
                 log.info("%s %s %s : %s (%s)", event.kind, event.machine, event.label, event.level, event.detail)
+            notifier.after_tick(events, supervisor.expo()["open"])
         except Exception:                      # un passage rate ne doit jamais arreter la supervision
             log.exception("passage en echec")
         time.sleep(max(1.0, POLL_SECONDS - (time.monotonic() - started)))
@@ -69,6 +74,11 @@ def no_store(resp):
 def body() -> dict:
     data = request.get_json(silent=True)
     return data if isinstance(data, dict) else {}
+
+
+@app.route("/")
+def index():
+    return render_template("index.html")
 
 
 @app.route("/api/state")
@@ -114,6 +124,41 @@ def api_maintenance():
         return jsonify({"error": "Machine inconnue (tag monitoring dans Bastion ?)."}), 400
     supervisor.set_maintenance(name, bool(data.get("on")), data.get("note", ""))
     return jsonify({"ok": True})
+
+
+@app.route("/api/channels")
+def api_channels():
+    return jsonify({"channels": notifier.channels_view(), "night": notifier.night(),
+                    # une liste : jsonify trierait les cles d'un dictionnaire (Telegram doit rester en tete)
+                    "kinds": [{"id": k, "label": label, "fields": [{"name": n, "label": fl, "secret": s} for n, fl, s in fields]}
+                              for k, (label, fields) in N.KINDS.items()]})
+
+
+def channel_call(fn):
+    try:
+        return jsonify(fn() or {"ok": True})
+    except N.ChannelError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/channels", methods=["POST"])
+def api_channel_save():
+    return channel_call(lambda: {"id": notifier.save_channel(body())["id"]})
+
+
+@app.route("/api/channels/<channel_id>", methods=["DELETE"])
+def api_channel_delete(channel_id):
+    return channel_call(lambda: notifier.delete_channel(channel_id))
+
+
+@app.route("/api/channels/<channel_id>/test", methods=["POST"])
+def api_channel_test(channel_id):
+    return channel_call(lambda: {"last": notifier.test_channel(channel_id)})
+
+
+@app.route("/api/night", methods=["POST"])
+def api_night():
+    return channel_call(lambda: {"night": notifier.set_night(body())})
 
 
 if __name__ == "__main__":

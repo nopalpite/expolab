@@ -151,7 +151,7 @@ def test_temperature_disk_and_memory_follow_the_settings():
 
     full = metrics(**{'mountpoint="/"} 1.0285826048e+10': 'mountpoint="/"} 5e+08'})        # 3 % libre
     assert levels(C.evaluate(set(), full, C.DEFAULTS))["disk"] == C.ALERT
-    low_mem = metrics(**{"node_memory_MemAvailable_bytes 3.034771456e+09": "node_memory_MemAvailable_bytes 2e+08"})
+    low_mem = metrics(**{"node_memory_MemAvailable_bytes 3.034771456e+09": "node_memory_MemAvailable_bytes 3.4e+08"})   # 91 % utilise
     assert levels(C.evaluate(set(), low_mem, C.DEFAULTS))["memory"] == C.WARNING
 
 
@@ -175,7 +175,7 @@ def test_application_health_is_checked_only_when_published():
 def test_settings_are_validated():
     assert C.validate({"temp_warn": "70"}, C.DEFAULTS)["temp_warn"] == 70
     for bad in ({"inconnu": 1}, {"temp_warn": 5}, {"temp_warn": "chaud"}, {"retention_days": True},
-                {"temp_warn": 90, "temp_alert": 80}, {"disk_alert_pct": 20}):
+                {"temp_warn": 90, "temp_alert": 80}, {"disk_warn": 96}, {"mem_alert": 80}):
         with pytest.raises(C.SettingsError):
             C.validate(bad, C.DEFAULTS)
 
@@ -202,12 +202,21 @@ class Fleet:
 def env(tmp_path):
     now, fleet = [1_000_000.0], Fleet()
     sup = Supervisor(History(tmp_path / "s.db"), fleet, fleet.fetch, clock=lambda: now[0], workers=2)
+    sup.update_settings({"unreachable_minutes": 1})      # 1 min pour tout : des scenarios plus courts
     now[0] += 6 * 60                       # passe le delai de demarrage du premier lancement
 
     def advance(seconds):
         now[0] += seconds
         return sup.tick()
     return sup, fleet, now, advance
+
+
+def problems(sup):
+    return [i for i in sup.history.incidents(0) if i["level"] != "info"]
+
+
+def journal(sup):
+    return [(i["machine"], i["label"], i["detail"]) for i in reversed(sup.history.incidents(0)) if i["level"] == "info"]
 
 
 def kinds(events):
@@ -227,7 +236,7 @@ def test_problem_is_reported_once_after_the_confirmation_delay_then_resolved(env
 
     fleet.answers["10.42.0.134"] = metrics()
     assert kinds(advance(30)) == [("resolved", "rpi-test", "Joignable", C.ALERT)]
-    [incident] = sup.history.incidents(0)
+    [incident] = problems(sup)
     assert (incident["close_reason"], incident["closed_at"] - incident["opened_at"]) == ("rétabli", 60)
 
 
@@ -236,7 +245,7 @@ def test_short_glitch_is_never_reported(env):
     fleet.answers["10.42.0.150"] = None
     advance(30)
     fleet.answers["10.42.0.150"] = metrics()
-    assert advance(30) == [] and sup.history.incidents(0) == []
+    assert advance(30) == [] and problems(sup) == []
 
 
 def test_warning_that_becomes_an_alert_is_raised(env):
@@ -255,7 +264,7 @@ def test_closed_expo_checks_nothing_and_opening_waits_for_startup(env):
     assert len(sup.history.open_incidents()) == 1
 
     sup.set_expo(False)
-    assert sup.history.open_incidents() == [] and sup.history.incidents(0)[0]["close_reason"] == "exposition fermée"
+    assert sup.history.open_incidents() == [] and problems(sup)[0]["close_reason"] == "exposition fermée"
     fleet.calls.clear()
     assert advance(3600) == [] and fleet.calls == []
     assert {v["status"] for v in sup.view()["machines"]} == {"fermée"}
@@ -265,6 +274,8 @@ def test_closed_expo_checks_nothing_and_opening_waits_for_startup(env):
     assert advance(30) == [] and advance(4 * 60) == []                  # demarrage : suivi, pas signale
     assert sup.view()["machines"][0]["status"] == "démarrage"
     assert kinds(advance(60)) == [("opened", "rpi-test", "Joignable", C.ALERT)]
+    assert journal(sup) == [("", "Exposition fermée", "manuel · 1 problème(s) clos sans envoi"),
+                            ("", "Exposition ouverte", "allumage · démarrage 5 min")]
 
 
 def test_machine_in_maintenance_is_not_polled_and_gets_a_startup_delay(env):
@@ -272,7 +283,7 @@ def test_machine_in_maintenance_is_not_polled_and_gets_a_startup_delay(env):
     fleet.answers["10.42.0.134"] = None
     advance(0), advance(60)
     sup.set_maintenance("rpi-test", True, "écran en réparation")
-    assert sup.history.open_incidents() == [] and sup.history.incidents(0)[0]["close_reason"] == "maintenance"
+    assert sup.history.open_incidents() == [] and problems(sup)[0]["close_reason"] == "maintenance"
 
     fleet.calls.clear()
     assert advance(3600) == [] and fleet.calls == ["10.42.0.150"]
@@ -282,6 +293,17 @@ def test_machine_in_maintenance_is_not_polled_and_gets_a_startup_delay(env):
     sup.set_maintenance("rpi-test", False)
     assert advance(30) == [] and advance(4 * 60) == []
     assert kinds(advance(60)) == [("opened", "rpi-test", "Joignable", C.ALERT)]
+    assert journal(sup) == [("rpi-test", "En maintenance", "écran en réparation"), ("rpi-test", "Fin de maintenance", "")]
+
+
+def test_service_down_waits_its_own_delay(env):
+    sup, fleet, now, advance = env
+    sup.update_settings({"service_minutes": 3})
+    fleet.answers["10.42.0.134"] = metrics(**{'name="kiosk.service",state="active",type="simple"} 1':
+                                              'name="kiosk.service",state="active",type="simple"} 0'})
+    advance(0)
+    assert advance(120) == []
+    assert kinds(advance(60)) == [("opened", "rpi-test", "Service kiosk", C.ALERT)]
 
 
 def test_machine_removed_from_monitoring_closes_its_incidents_silently(env):
@@ -289,7 +311,7 @@ def test_machine_removed_from_monitoring_closes_its_incidents_silently(env):
     fleet.answers["10.42.0.150"] = None
     advance(0), advance(60)
     fleet.machines.pop()
-    assert advance(30) == [] and sup.history.incidents(0)[0]["close_reason"] == "retirée de la supervision"
+    assert advance(30) == [] and problems(sup)[0]["close_reason"] == "retirée de la supervision"
 
 
 def test_unreachable_machine_closes_its_other_incidents(env):
@@ -299,7 +321,7 @@ def test_unreachable_machine_closes_its_other_incidents(env):
     assert kinds(advance(60)) == [("opened", "rpi-test", "Carte son USB", C.ALERT)]
     fleet.answers["10.42.0.134"] = None
     advance(30)
-    assert sup.history.incidents(0)[-1]["close_reason"] == "machine injoignable"
+    assert problems(sup)[-1]["close_reason"] == "machine injoignable"
 
 
 def test_incidents_survive_a_restart_and_history_is_purged(env, tmp_path):
@@ -315,12 +337,14 @@ def test_incidents_survive_a_restart_and_history_is_purged(env, tmp_path):
     again.update_settings({"retention_days": 1})
     now[0] += 2 * 86400
     again.tick()
-    assert again.history.incidents(0) == []
+    assert problems(again) == []
 
 
 def test_settings_have_defaults_and_are_stored(env):
     sup, *_ = env
-    assert sup.settings() == C.DEFAULTS
+    assert sup.settings() == {**C.DEFAULTS, "unreachable_minutes": 1}
+    assert C.confirm_seconds("reachable", C.DEFAULTS) == 120 and C.confirm_seconds("unit:kiosk.service", C.DEFAULTS) == 60
+    assert C.confirm_seconds("audio_usb", C.DEFAULTS) == 60
     sup.update_settings({"temp_warn": 70})
     assert sup.settings()["temp_warn"] == 70
     with pytest.raises(C.SettingsError):
@@ -358,4 +382,6 @@ def test_api_drives_expo_maintenance_and_settings(client):
     assert client.post("/api/settings", json={"retention_days": 30}, headers=H).get_json()["settings"]["retention_days"] == 30
     fields = client.get("/api/settings").get_json()["fields"]
     assert fields["temp_warn"]["default"] == 75
-    assert client.get("/api/history?days=abc").get_json() == {"incidents": []}
+    history = client.get("/api/history?days=abc").get_json()["incidents"]
+    assert [(i["machine"], i["label"], i["level"]) for i in history] == [
+        ("rpi-test", "En maintenance", "info"), ("", "Exposition fermée", "info")]

@@ -20,14 +20,27 @@ PROBE_STALE_SECONDS = 120          # la sonde passe toutes les 15 s
 SETTINGS = {
     "temp_warn": (75, 40, 110, "Température : avertissement (°C)"),
     "temp_alert": (85, 40, 110, "Température : alerte (°C)"),
-    "disk_warn_pct": (15, 1, 90, "Disque libre : avertissement sous (%)"),
-    "disk_alert_pct": (5, 1, 90, "Disque libre : alerte sous (%)"),
-    "mem_warn_pct": (10, 1, 90, "Mémoire libre : avertissement sous (%)"),
-    "confirm_seconds": (60, 0, 3600, "Délai avant de signaler un problème (s)"),
-    "startup_grace_minutes": (5, 0, 60, "Délai de démarrage après ouverture ou maintenance (min)"),
+    "disk_warn": (85, 10, 100, "Disque utilisé : avertissement (%)"),
+    "disk_alert": (95, 10, 100, "Disque utilisé : alerte (%)"),
+    "mem_warn": (90, 10, 100, "Mémoire utilisée : avertissement (%)"),
+    "mem_alert": (95, 10, 100, "Mémoire utilisée : alerte (%)"),
+    "unreachable_minutes": (2, 0, 120, "Injoignable depuis (min)"),
+    "service_minutes": (1, 0, 120, "Service arrêté depuis (min)"),
+    "startup_grace_minutes": (5, 0, 60, "Démarrage : surveiller après (min)"),
     "retention_days": (90, 1, 3650, "Conservation de l'historique (jours)"),
 }
 DEFAULTS = {key: spec[0] for key, spec in SETTINGS.items()}
+PAIRS = (("temp_warn", "temp_alert", "température"), ("disk_warn", "disk_alert", "disque"), ("mem_warn", "mem_alert", "mémoire"))
+CONFIRM_SECONDS = 60       # les autres problemes : signales apres 1 min
+
+
+def confirm_seconds(check_id: str, settings: dict) -> int:
+    """Duree pendant laquelle un probleme doit durer avant d'etre signale."""
+    if check_id == "reachable":
+        return 60 * settings["unreachable_minutes"]
+    if check_id.startswith("unit:"):
+        return 60 * settings["service_minutes"]
+    return CONFIRM_SECONDS
 
 
 class SettingsError(ValueError):
@@ -48,10 +61,9 @@ def validate(changes: dict, current: dict) -> dict:
         if isinstance(raw, bool) or not low <= value <= high:
             raise SettingsError(f"{label} : entre {low} et {high}")
         merged[key] = value
-    if merged["temp_alert"] < merged["temp_warn"]:
-        raise SettingsError("La température d'alerte doit être au moins celle d'avertissement.")
-    if merged["disk_alert_pct"] > merged["disk_warn_pct"]:
-        raise SettingsError("Le seuil d'alerte du disque doit être au plus celui d'avertissement.")
+    for warn, alert, what in PAIRS:
+        if merged[alert] < merged[warn]:
+            raise SettingsError(f"Le seuil d'alerte ({what}) doit être au moins celui d'avertissement.")
     return merged
 
 
@@ -108,17 +120,19 @@ def _disk(s, cfg):
     size, avail = s.value("node_filesystem_size_bytes", mountpoint="/"), s.value("node_filesystem_avail_bytes", mountpoint="/")
     if not size or avail is None:
         return None
-    pct = 100 * avail / size
-    level = ALERT if pct < cfg["disk_alert_pct"] else WARNING if pct < cfg["disk_warn_pct"] else None
-    return Check("disk", "Disque", level, f"{pct:.0f} % libre")
+    return _used("disk", "Disque", 100 - 100 * avail / size, cfg["disk_warn"], cfg["disk_alert"])
 
 
 def _memory(s, cfg):
     total, avail = s.value("node_memory_MemTotal_bytes"), s.value("node_memory_MemAvailable_bytes")
     if not total or avail is None:
         return None
-    pct = 100 * avail / total
-    return Check("memory", "Mémoire", WARNING if pct < cfg["mem_warn_pct"] else None, f"{pct:.0f} % libre")
+    return _used("memory", "Mémoire", 100 - 100 * avail / total, cfg["mem_warn"], cfg["mem_alert"])
+
+
+def _used(cid, label, pct, warn, alert):
+    level = ALERT if pct >= alert else WARNING if pct >= warn else None
+    return Check(cid, label, level, f"{pct:.0f} % utilisé")
 
 
 def _power(s):

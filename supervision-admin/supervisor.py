@@ -27,6 +27,7 @@ class Event:
     level: str
     detail: str
     at: float
+    incident_id: int
 
 
 class Supervisor:
@@ -60,21 +61,29 @@ class Supervisor:
         with self._lock:
             if bool(is_open) == self.expo()["open"]:
                 return
-            now = self.clock()
-            self.history.put("expo", {"open": bool(is_open), "since": now, "source": str(source)[:60]})
-            if not is_open:
-                for incident in self.history.open_incidents():
-                    self.history.close_incident(incident["id"], now, "exposition fermée")
-                self._checks, self._polled, self._failing = {}, {}, {}
+            now, source = self.clock(), str(source)[:60]
+            self.history.put("expo", {"open": bool(is_open), "since": now, "source": source})
+            if is_open:
+                grace = self.settings()["startup_grace_minutes"]
+                self.history.journal("", "expo", "Exposition ouverte", f"{source} · démarrage {grace} min", now)
+                return
+            closed = self.history.open_incidents()
+            for incident in closed:
+                self.history.close_incident(incident["id"], now, "exposition fermée")
+            self._checks, self._polled, self._failing = {}, {}, {}
+            detail = f"{source} · {len(closed)} problème(s) clos sans envoi" if closed else source
+            self.history.journal("", "expo", "Exposition fermée", detail, now)
 
     def set_maintenance(self, machine: str, on: bool, note=""):
         with self._lock:
-            now = self.clock()
+            now, note = self.clock(), str(note or "").strip()[:200]
             if on:
-                self.history.set_maintenance(machine, str(note or "").strip()[:200], now)
+                self.history.set_maintenance(machine, note, now)
                 self._forget(machine, now, "maintenance")
+                self.history.journal(machine, "maintenance", "En maintenance", note, now)
             elif self.history.end_maintenance(machine):
                 self._resumed[machine] = now
+                self.history.journal(machine, "maintenance", "Fin de maintenance", "", now)
 
     def _forget(self, machine, now, reason):
         for incident in self.history.open_incidents():
@@ -129,16 +138,16 @@ class Supervisor:
                 self._failing.pop(key, None)
                 if incident:
                     self.history.close_incident(incident["id"], now, "rétabli")
-                    events.append(Event("resolved", name, check.label, incident["level"], check.detail, now))
+                    events.append(Event("resolved", name, check.label, incident["level"], check.detail, now, incident["id"]))
                 continue
             since = self._failing.setdefault(key, now)
             if incident:
                 if C.SEVERITY[check.level] > C.SEVERITY[incident["level"]]:
                     self.history.raise_level(incident["id"], check.level, check.detail)
-                    events.append(Event("raised", name, check.label, check.level, check.detail, now))
-            elif not in_grace and now - since >= settings["confirm_seconds"]:
-                self.history.open_incident(name, check, now)
-                events.append(Event("opened", name, check.label, check.level, check.detail, now))
+                    events.append(Event("raised", name, check.label, check.level, check.detail, now, incident["id"]))
+            elif not in_grace and now - since >= C.confirm_seconds(check.id, settings):
+                incident_id = self.history.open_incident(name, check, now)
+                events.append(Event("opened", name, check.label, check.level, check.detail, now, incident_id))
         for check_id, incident in opened.items():
             if check_id not in seen:       # plus verifie (tag retire) ou masque par « injoignable »
                 reason = "machine injoignable" if results[0].level else "plus vérifié"

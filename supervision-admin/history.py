@@ -20,12 +20,14 @@ CREATE TABLE IF NOT EXISTS incidents (
     detail TEXT NOT NULL DEFAULT '',
     opened_at REAL NOT NULL,
     closed_at REAL,
-    close_reason TEXT
+    close_reason TEXT,
+    notified TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS incidents_open ON incidents (closed_at);
 CREATE INDEX IF NOT EXISTS incidents_opened ON incidents (opened_at);
 """
-COLUMNS = ("id", "machine", "check_id", "label", "level", "detail", "opened_at", "closed_at", "close_reason")
+COLUMNS = ("id", "machine", "check_id", "label", "level", "detail", "opened_at", "closed_at", "close_reason", "notified")
+INFO = "info"          # ligne du journal (exposition ouverte/fermee, maintenance) : close des sa creation
 
 
 class History:
@@ -70,6 +72,18 @@ class History:
             return self._db.execute(
                 "INSERT INTO incidents (machine, check_id, label, level, detail, opened_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (machine, check.id, check.label, check.level, check.detail, now)).lastrowid
+
+    def journal(self, machine, kind, label, detail, now):
+        self._query("INSERT INTO incidents (machine, check_id, label, level, detail, opened_at, closed_at, close_reason) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, '')", (machine, kind, label, INFO, detail, now, now))
+
+    def add_notified(self, incident_id, text):
+        """Note qui a ete prevenu (« Telegram », « silence de nuit »...), sans doublon."""
+        with self._lock, self._db:
+            row = self._db.execute("SELECT notified FROM incidents WHERE id = ?", (incident_id,)).fetchone()
+            if row is not None and text not in row[0].split(", "):
+                self._db.execute("UPDATE incidents SET notified = ? WHERE id = ?",
+                                 (", ".join(filter(None, [row[0], text])), incident_id))
 
     def raise_level(self, incident_id, level, detail):
         self._query("UPDATE incidents SET level = ?, detail = ? WHERE id = ?", (level, detail, incident_id))
