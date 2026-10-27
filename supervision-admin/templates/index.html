@@ -22,6 +22,7 @@
     <button type="button" id="expo-open">Ouvrir l'expo</button>
   </section>
   <p class="warnbox" id="bastion-error" hidden></p>
+  <p class="warnbox" id="planned-error" hidden></p>
 
   <nav class="tabs" id="tabs">
     <button type="button" data-tab="state" class="on">État</button>
@@ -81,6 +82,10 @@
       <div class="row">Conserver
         <select id="s-retention" aria-label="Conservation de l'historique">
           <option value="30">30 jours</option><option value="90">90 jours</option><option value="365">1 an</option>
+        </select>
+        · courbes
+        <select id="s-graph-days" aria-label="Conservation des courbes">
+          <option value="3">3 jours</option><option value="7">7 jours</option><option value="30">30 jours</option>
         </select>
       </div>
       <div class="row save">

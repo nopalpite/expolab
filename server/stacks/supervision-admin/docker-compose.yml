@@ -18,3 +18,5 @@ services:
       - ${REPO_ROOT}/server/stacks/supervision-admin/data:/data
       # Machines a surveiller : celles de Bastion taguees `monitoring` (lecture seule, aucun identifiant n'en sort).
       - ${REPO_ROOT}/server/stacks/bastion/config:/bastion-config:ro
+      # Programme prevu pour chaque machine (onglet Applications d'ansible-web, lecture seule).
+      - ${REPO_ROOT}/server/stacks/ansible-web/apps:/ansible-apps:ro

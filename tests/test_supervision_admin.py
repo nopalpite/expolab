@@ -396,3 +396,136 @@ def test_image_copies_every_module_and_the_stack_is_deployed():
     assert " supervision-admin" in stacks
     compose = (SRC.parent / "server" / "stacks" / "supervision-admin" / "docker-compose.yml").read_text(encoding="utf-8")
     assert "SUPERVISION_PORT=5064" in compose and "bastion/config:/bastion-config:ro" in compose
+    assert "ansible-web/apps:/ansible-apps:ro" in compose
+
+
+# --- programme du kiosque (sonde + onglet Applications d'ansible-web) -------------------------------
+
+def program(running=1, restarts=0, version="v1.0.0"):
+    return metrics(HEALTHY + f"""pop_inov_app_info{{name="godot-template",path="/opt/apps/godot-template/current/godot-template.arm64",version="{version}"}} 1
+pop_inov_app_running {running}
+pop_inov_app_start_time_seconds 1.7931e+09
+pop_inov_kiosk_restarts {restarts}
+""")
+
+
+def test_program_must_run_without_restarting_in_a_loop():
+    tags = {"kiosk", "monitoring"}
+    check = lambda samples, restarts=0: next(c for c in C.evaluate(tags, samples, C.DEFAULTS, restarts) if c.id == "program")  # noqa: E731
+
+    assert check(program()) == C.Check("program", "Programme", None, "godot-template v1.0.0")
+    assert check(program(running=0)).detail == "godot-template v1.0.0 ne tourne pas"
+    assert check(program(), restarts=3) == C.Check("program", "Programme", C.ALERT,
+                                                   "godot-template v1.0.0 plante en boucle (3 relances en 10 min)")
+    assert "program" not in levels(C.evaluate(tags, metrics(), C.DEFAULTS))            # pas de programme pose
+    kiosk_stopped = metrics(HEALTHY + 'pop_inov_app_info{name="x",path="/x",version=""} 1\npop_inov_app_running 0\n',
+                            **{'name="kiosk.service",state="active",type="simple"} 1': 'name="kiosk.service",state="active",type="simple"} 0'})
+    assert "program" not in levels(C.evaluate(tags, kiosk_stopped, C.DEFAULTS))     # deja signale par son service
+    assert C.confirm_seconds("program", {**C.DEFAULTS, "service_minutes": 3}) == 180
+
+
+def test_kiosk_restarting_in_a_loop_is_reported(env):
+    sup, fleet, now, advance = env
+    fleet.answers["10.42.0.134"] = program(restarts=5)
+    advance(0)
+    for total in (6, 7):                           # 2 relances : pas encore une boucle
+        fleet.answers["10.42.0.134"] = program(restarts=total)
+        assert advance(30) == []
+    fleet.answers["10.42.0.134"] = program(restarts=0)        # kiosque relance a la main : compteur remis a zero
+    assert advance(30) == []
+    fleet.answers["10.42.0.134"] = program(restarts=1)        # 2 + 0 + 1 = 3 relances en 10 min
+    advance(30)
+    assert kinds(advance(60)) == [("opened", "rpi-test", "Programme", C.ALERT)]
+    fleet.answers["10.42.0.134"] = program(restarts=1)
+    advance(11 * 60)                                          # plus de relance depuis 10 min
+    assert sup.history.open_incidents() == []
+
+
+def test_program_view_compares_the_machine_with_ansible_web(env):
+    sup, fleet, now, advance = env
+    planned = {"rpi-test": {"app": "godot-template", "version": "latest", "last_run": "v1.0.0"},
+               "borne": {"app": "quiz", "version": "v2", "last_run": ""}}
+    sup.planned = lambda: planned
+    fleet.answers["10.42.0.134"] = program(restarts=2)
+    assert {m["name"]: m["program"]["status"] for m in sup.view()["machines"]} == {"rpi-test": "", "borne": ""}  # pas encore vu
+    advance(0)
+    view = {m["name"]: m["program"] for m in sup.view()["machines"]}
+    assert view["rpi-test"]["status"] == "à jour" and view["rpi-test"]["restarts"] == 2
+    assert view["rpi-test"]["installed"] == {"name": "godot-template", "version": "v1.0.0", "running": True, "started": 1.7931e9}
+    assert view["borne"] == {"installed": None, "planned": planned["borne"], "status": "absent", "restarts": None}
+
+    planned["rpi-test"]["version"] = "v1.1.0"
+    assert sup.view()["machines"][0]["program"]["status"] == "différent"
+    sup.planned = lambda: {}
+    assert [m["program"] and m["program"]["status"] for m in sup.view()["machines"]] == ["non prévu", None]
+
+
+def test_ansible_web_choices_are_read_by_short_name(tmp_path):
+    import programme as P
+    store = tmp_path / "apps.json"
+    source = P.PlannedPrograms(store, clock=lambda: 0.0)
+    assert source() == {} and source.error == ""                 # ansible-web n'a encore rien enregistre
+    store.write_text("""{"rpi-test.expolab.lan": {"app": "godot-template", "version": "latest",
+                           "installed": {"app": "godot-template", "version": "v1.0.0", "at": "x"}},
+                         "rpi-test-02.expolab.lan": {},
+                         "autre.expolab.lan": {"app": "quiz", "installed": {"app": "ancien", "version": "v9"}}}""")
+    assert P.PlannedPrograms(store)() == {
+        "rpi-test": {"app": "godot-template", "version": "latest", "last_run": "v1.0.0"},
+        "autre": {"app": "quiz", "version": "latest", "last_run": ""}}
+    broken = P.PlannedPrograms(store, clock=lambda: 0.0)
+    store.write_text("{")
+    assert broken() == {} and broken.error.startswith("ansible-web illisible")
+    seen = {"name": "quiz", "version": "v9"}
+    assert P.compare({"app": "quiz", "version": "latest", "last_run": ""}, seen) == "inconnu"
+    assert P.compare({"app": "autre", "version": "v9", "last_run": ""}, seen) == "différent"
+    assert P.compare(None, None) == ""
+
+
+# --- courbes ---------------------------------------------------------------------------------------
+
+def with_cpu(total, idle):
+    return metrics(HEALTHY + f'node_cpu_seconds_total{{cpu="0",mode="idle"}} {idle}\n'
+                             f'node_cpu_seconds_total{{cpu="0",mode="user"}} {total - idle}\n')
+
+
+def test_one_point_per_minute_is_recorded_for_the_graphs(env):
+    sup, fleet, now, advance = env
+    now[0] = 1_000_020.0
+    fleet.answers["10.42.0.134"] = with_cpu(100, 80)
+    fleet.answers["10.42.0.150"] = None                       # injoignable : pas de point
+    advance(0)                                                # premiere minute : pas encore de % processeur
+    fleet.answers["10.42.0.134"] = with_cpu(130, 95)
+    advance(30)                                               # meme minute : rien de plus
+    fleet.answers["10.42.0.134"] = with_cpu(160, 105)         # 30 s, dont 10 inactives
+    advance(30)                                               # minute suivante
+    rows = sup.history.points("rpi-test", 0, 60)
+    assert [r[0] for r in rows] == [1_000_020, 1_000_080]
+    assert rows[0][1:] == [52.1, None, 23.4, 31.7]
+    assert rows[1][2] == 66.7
+    assert sup.history.points("borne", 0, 60) == []
+    assert sup.history.points("rpi-test", 0, 3600) == [[997_200, 52.1, 66.7, 23.4, 31.7]]   # moyenne par heure
+
+    sup.update_settings({"graph_days": 1})
+    fleet.answers["10.42.0.134"] = None
+    advance(2 * 86400)
+    assert sup.history.points("rpi-test", 0, 60) == []
+
+
+def test_metrics_api_returns_averaged_points_and_incidents(tmp_path):
+    spec = importlib.util.spec_from_file_location("supervision_app_metrics", SRC / "app.py")
+    app_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(app_module)
+    fleet, now = Fleet(), [2_000_000.0]
+    sup, _ = app_module.create(tmp_path, machines_source=fleet, fetch=fleet.fetch, clock=lambda: now[0], background=False)
+    sup.history.add_points(now[0] - 7200, {"rpi-test": {"temp": 50, "cpu": 10, "mem": 20, "disk": 30}})
+    sup.history.add_points(now[0] - 600, {"rpi-test": {"temp": 60, "cpu": None, "mem": 20, "disk": 30}})
+    sup.history.open_incident("rpi-test", C.Check("temperature", "Température", C.WARNING, "80 °C"), now[0] - 300)
+    client = app_module.app.test_client()
+
+    data = client.get("/api/metrics?machine=rpi-test.expolab.lan&hours=6").get_json()
+    assert (data["step"], data["until"] - data["since"]) == (60, 6 * 3600)
+    assert [p[1:] for p in data["points"]] == [[50, 10, 20, 30], [60, None, 20, 30]]
+    assert data["incidents"] == [{"opened_at": now[0] - 300, "closed_at": None, "level": C.WARNING, "label": "Température"}]
+    assert client.get("/api/metrics?machine=rpi-test&hours=99").get_json()["step"] == 240     # 24 h par defaut
+    assert client.get("/api/metrics?machine=inconnue").status_code == 404
+    assert client.get("/api/state").get_json()["planned_error"] == ""

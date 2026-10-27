@@ -2,7 +2,9 @@
 
   - settings    : reglages (seuils, delais, conservation) et etat de l'exposition, en JSON ;
   - maintenance : machines eteintes volontairement, hors surveillance (note facultative) ;
-  - incidents   : historique des problemes signales (ouverture, fin, raison de la fin), purge selon la conservation.
+  - incidents   : historique des problemes signales (ouverture, fin, raison de la fin), purge selon la conservation ;
+  - points      : mesures des courbes, un point par machine et par minute (temperature, processeur, memoire, disque),
+                  purgees selon leur propre conservation (quelques jours).
 """
 import json
 import sqlite3
@@ -25,9 +27,16 @@ CREATE TABLE IF NOT EXISTS incidents (
 );
 CREATE INDEX IF NOT EXISTS incidents_open ON incidents (closed_at);
 CREATE INDEX IF NOT EXISTS incidents_opened ON incidents (opened_at);
+CREATE TABLE IF NOT EXISTS points (
+    machine TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    temp REAL, cpu REAL, mem REAL, disk REAL,
+    PRIMARY KEY (machine, at)
+) WITHOUT ROWID;
 """
 COLUMNS = ("id", "machine", "check_id", "label", "level", "detail", "opened_at", "closed_at", "close_reason", "notified")
 INFO = "info"          # ligne du journal (exposition ouverte/fermee, maintenance) : close des sa creation
+MEASURES = ("temp", "cpu", "mem", "disk")
 
 
 class History:
@@ -103,6 +112,31 @@ class History:
         """Supprime les incidents termines avant `before` ; un incident en cours n'est jamais supprime."""
         with self._lock, self._db:
             return self._db.execute("DELETE FROM incidents WHERE closed_at IS NOT NULL AND closed_at < ?", (before,)).rowcount
+
+    def incidents_of(self, machine, since, until) -> list[dict]:
+        """Problemes (hors journal) d'une machine qui ont dure, meme en partie, entre `since` et `until`."""
+        return self._rows("WHERE machine = ? AND level != ? AND opened_at <= ? AND (closed_at IS NULL OR closed_at >= ?) "
+                          "ORDER BY opened_at", (machine, INFO, until, since))
+
+    # --- courbes --------------------------------------------------------------------------------
+
+    def add_points(self, at, points: dict):
+        """Un point par machine pour la minute `at` : {machine: {temp, cpu, mem, disk}} (valeurs absentes : None)."""
+        with self._lock, self._db:
+            self._db.executemany(
+                "INSERT OR REPLACE INTO points (machine, at, temp, cpu, mem, disk) VALUES (?, ?, ?, ?, ?, ?)",
+                [(machine, int(at), *(values.get(k) for k in MEASURES)) for machine, values in points.items()])
+
+    def points(self, machine, since, step) -> list[list]:
+        """[[debut du pas, temp, cpu, mem, disk], ...] : moyennes par pas de `step` secondes, du plus ancien au plus recent."""
+        step = max(60, int(step))
+        rows = self._query(f"SELECT (at / {step}) * {step} AS b, {', '.join(f'avg({k})' for k in MEASURES)} FROM points "
+                           "WHERE machine = ? AND at >= ? GROUP BY b ORDER BY b", (machine, int(since)))
+        return [[b, *(None if v is None else round(v, 1) for v in values)] for b, *values in rows]
+
+    def purge_points(self, before) -> int:
+        with self._lock, self._db:
+            return self._db.execute("DELETE FROM points WHERE at < ?", (int(before),)).rowcount
 
     def _rows(self, where, args=()):
         return [dict(zip(COLUMNS, row)) for row in self._query(f"SELECT {', '.join(COLUMNS)} FROM incidents {where}", args)]

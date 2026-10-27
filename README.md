@@ -506,6 +506,7 @@ seule). Le meme tag installe sur la machine, par le role Ansible `monitoring` de
 | toutes | joignable, sonde a jour, temperature, disque, memoire, alimentation (sous-tension, bridage) |
 | `kiosk` | `kiosk.service` et `kiosk-vnc.service` actifs, au moins un ecran branche |
 | `audio` | au moins un appareil USB de classe audio (carte son) |
+| programme pose | le programme du kiosque tourne et ne plante pas en boucle (3 relances de `kiosk.service` en 10 min) |
 
 **Deux niveaux** : alerte et avertissement. Seuils et delais reglables dans la page (onglet Reglages), chacun avec
 une valeur par defaut : temperature 75 / 85 °C, disque 85 / 95 % et memoire 90 / 95 % utilises ; un probleme n'est
@@ -518,6 +519,16 @@ main dans la page en attendant la gestion d'allumage, qui utilisera le meme poin
 `X-Requested-With: expolab`. **Maintenance** : une machine eteinte volontairement sort de la surveillance sans fermer
 l'expo (note facultative), avec le meme delai de demarrage a sa sortie.
 
+**Programme de chaque machine.** La sonde dit quel programme est pose (`/etc/kiosk/command`, dossier
+`/opt/apps/<programme>/<version>/` du role `internal_app`), s'il tourne et combien de fois le kiosque l'a relance. La
+fiche de la machine le compare au programme choisi dans l'onglet **Applications** d'ansible-web
+(`server/stacks/ansible-web/apps/apps.json`, lu en lecture seule) : a jour, different, absent. Une version differente
+est seulement affichee, jamais une alerte.
+
+**Courbes.** Un point par minute et par machine joignable (temperature, processeur, memoire et disque utilises),
+affiche sur 6 h, 24 h ou 7 jours dans la fiche de la machine, avec les seuils, les problemes signales et les trous
+(expo fermee, maintenance, injoignable). Conservation reglable (7 jours par defaut, quelques Mo).
+
 **Canaux d'alerte** : Telegram, Discord, Slack, Mailjet (e-mail par le relais SMTP de Mailjet) ou toute URL
 [Apprise](https://github.com/caronc/apprise). Chaque canal choisit ses niveaux, se teste et se coupe dans la page ;
 son dernier envoi est affiche. Les changements d'un meme passage partent en un seul message. **Nuit** (19:00 -> 08:00,
@@ -525,7 +536,8 @@ reglable) : silence complet, puis un recapitulatif a la fin de la nuit si l'expo
 a Internet : les machines n'envoient jamais rien elles-memes.
 
 **Donnees** : `server/stacks/supervision-admin/data/supervision.db` (SQLite) : reglages, canaux avec leurs secrets
-(jamais renvoyes au navigateur), maintenance, historique (conservation reglable, 90 jours par defaut). A sauvegarder.
+(jamais renvoyes au navigateur), maintenance, historique (conservation reglable, 90 jours par defaut), points des
+courbes. A sauvegarder.
 **Limite connue** : sur une machine `overlay_on`, node_exporter ne publie pas le disque de `/` : il n'est pas verifie.
 
 ## Interface d'exploitation (compte exploitant)
@@ -1066,7 +1078,7 @@ server/
 dnsmasq-admin/                  # app Flask : app.py, Dockerfile, templates/, static/
 audio-admin/                    # console audio : hub.py (niveaux, presets, machines), bastion.py (salles lues dans Bastion), app.py (interface + API des agents), templates/, static/
 audio-agent/                    # agent audio des machines (agent.py) et son installateur (install.sh)
-supervision-admin/              # supervision : fleet.py (machines de Bastion), scrape.py (node_exporter), checks.py (regles par tag), supervisor.py (expo, maintenance, delais), notify.py (canaux Apprise, nuit), history.py (SQLite), app.py
+supervision-admin/              # supervision : fleet.py (machines de Bastion), scrape.py (node_exporter), checks.py (regles par tag), supervisor.py (expo, maintenance, delais), notify.py (canaux Apprise, nuit), programme.py (programmes prevus dans ansible-web), history.py (SQLite, courbes), app.py
 apt-cache-admin/                 # idem - interface du cache apt : etat, efficacite, journal, mode, miroirs HTTPS
 portal/                         # le portail (stack dashboard) : connexion unique, tiroir et onglets, verification de session pour Caddy
 caddy-admin/                     # idem - edite server/services.yaml, recharge Caddy via son admin API

@@ -81,4 +81,22 @@ td.lvl-alerte { color: var(--error); } td.lvl-avertissement { color: var(--warn)
 .chform label.field { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); }
 .chform label.field input { width: 100%; }
 
+/* Programme et courbes (fiche machine) */
+.program, .graphs { margin-top: 12px; }
+.pgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.pval { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pill.small { padding: 1px 8px; font-size: 12px; }
+.bad { color: var(--error); }
+.ranges { gap: 4px; }
+.ggrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.chart { background: var(--raised); border-radius: 8px; padding: 8px 10px; }
+.plot { width: 100%; height: auto; display: block; margin: 4px 0; }
+.plot .line { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.g-temp { stroke: #ff8a65; } .g-cpu { stroke: var(--accent); } .g-mem { stroke: #b39ddb; } .g-disk { stroke: var(--ok); }
+.plot .gap { fill: var(--sleep); opacity: .15; }
+.plot .band-alerte { fill: var(--error); opacity: .2; } .plot .band-avertissement { fill: var(--warn); opacity: .2; }
+.plot .th-warn, .plot .th-alert { stroke-dasharray: 3 3; stroke-width: 1; }
+.plot .th-warn { stroke: var(--warn); } .plot .th-alert { stroke: var(--error); }
+.plot .axis { fill: var(--muted); font-size: 10px; }
+
 @media (max-width: 600px) { .expo button { flex: 1; } }

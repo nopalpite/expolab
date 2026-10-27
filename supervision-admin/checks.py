@@ -4,7 +4,8 @@ La machine ne publie que des faits (node_exporter + sonde du role `monitoring`) 
   - toute machine : joignable, sonde a jour, temperature, disque, memoire, alimentation ;
   - tag `kiosk` : kiosk.service et kiosk-vnc.service actifs, au moins un ecran branche ;
   - tag `audio` : au moins un appareil USB de classe audio (01) ;
-  - si la sonde publie un /health d'application : application qui repond.
+  - si la sonde publie un /health d'application : application qui repond ;
+  - si la sonde publie le programme du kiosque (pose par ansible-web) : programme en marche, sans relances en boucle.
 Deux niveaux : ALERTE (l'expo est touchee) et AVERTISSEMENT (a surveiller). Les seuils sont des reglages (SETTINGS).
 """
 from dataclasses import dataclass
@@ -28,17 +29,20 @@ SETTINGS = {
     "service_minutes": (1, 0, 120, "Service arrêté depuis (min)"),
     "startup_grace_minutes": (5, 0, 60, "Démarrage : surveiller après (min)"),
     "retention_days": (90, 1, 3650, "Conservation de l'historique (jours)"),
+    "graph_days": (7, 1, 90, "Conservation des courbes (jours)"),
 }
 DEFAULTS = {key: spec[0] for key, spec in SETTINGS.items()}
 PAIRS = (("temp_warn", "temp_alert", "température"), ("disk_warn", "disk_alert", "disque"), ("mem_warn", "mem_alert", "mémoire"))
 CONFIRM_SECONDS = 60       # les autres problemes : signales apres 1 min
+RESTART_WINDOW = 600       # programme qui plante en boucle : RESTART_LOOP relances de kiosk.service en 10 min
+RESTART_LOOP = 3
 
 
 def confirm_seconds(check_id: str, settings: dict) -> int:
     """Duree pendant laquelle un probleme doit durer avant d'etre signale."""
     if check_id == "reachable":
         return 60 * settings["unreachable_minutes"]
-    if check_id.startswith("unit:"):
+    if check_id.startswith("unit:") or check_id == "program":
         return 60 * settings["service_minutes"]
     return CONFIRM_SECONDS
 
@@ -79,7 +83,8 @@ def _ok(cid, label, detail=""):
     return Check(cid, label, None, detail)
 
 
-def evaluate(tags, samples: Samples | None, settings: dict) -> list[Check]:
+def evaluate(tags, samples: Samples | None, settings: dict, restarts: int = 0) -> list[Check]:
+    """`restarts` : relances de kiosk.service sur les RESTART_WINDOW dernieres secondes (suivies par le superviseur)."""
     if samples is None:
         return [Check("reachable", "Joignable", ALERT, "ne répond pas (éteinte, hors réseau ou node_exporter arrêté)")]
     checks = [_ok("reachable", "Joignable")]
@@ -93,7 +98,46 @@ def evaluate(tags, samples: Samples | None, settings: dict) -> list[Check]:
         checks.append(_audio_usb(samples))
     if samples.value("pop_inov_app_up") is not None:
         checks.append(_app(samples))
+    program = _program(samples, restarts)
+    if program:
+        checks.append(program)
     return checks
+
+
+# --- mesures (aussi enregistrees pour les courbes) ---------------------------------------------------
+
+def temperature(s: Samples):
+    temps = [v for _, v in s.all("node_thermal_zone_temp") + s.all("node_hwmon_temp_celsius") if 0 < v < 150]
+    return max(temps) if temps else None
+
+
+def disk_used(s: Samples):
+    # "/" seulement : avec la racine en overlay (tag overlay_on), node_exporter ne la publie pas et rien n'est verifie.
+    size, avail = s.value("node_filesystem_size_bytes", mountpoint="/"), s.value("node_filesystem_avail_bytes", mountpoint="/")
+    return 100 - 100 * avail / size if size and avail is not None else None
+
+
+def memory_used(s: Samples):
+    total, avail = s.value("node_memory_MemTotal_bytes"), s.value("node_memory_MemAvailable_bytes")
+    return 100 - 100 * avail / total if total and avail is not None else None
+
+
+def cpu_seconds(s: Samples):
+    """(total, inactif) en secondes CPU cumulees : le % d'occupation se calcule entre deux passages."""
+    series = s.all("node_cpu_seconds_total")
+    if not series:
+        return None
+    return sum(v for _, v in series), sum(v for labels, v in series if labels.get("mode") == "idle")
+
+
+def program_info(s: Samples) -> dict | None:
+    """Programme du kiosque d'apres la sonde : {name, version, running, started}, ou None."""
+    info = s.all("pop_inov_app_info")
+    if not info:
+        return None
+    labels = info[0][0]
+    return {"name": labels.get("name", ""), "version": labels.get("version", ""),
+            "running": s.value("pop_inov_app_running") == 1, "started": s.value("pop_inov_app_start_time_seconds")}
 
 
 def _probe(s):
@@ -107,27 +151,21 @@ def _probe(s):
 
 
 def _temperature(s, cfg):
-    temps = [v for _, v in s.all("node_thermal_zone_temp") + s.all("node_hwmon_temp_celsius") if 0 < v < 150]
-    if not temps:
+    t = temperature(s)
+    if t is None:
         return None
-    t = max(temps)
     level = ALERT if t >= cfg["temp_alert"] else WARNING if t >= cfg["temp_warn"] else None
     return Check("temperature", "Température", level, f"{t:.0f} °C")
 
 
 def _disk(s, cfg):
-    # "/" seulement : avec la racine en overlay (tag overlay_on), node_exporter ne la publie pas et rien n'est verifie.
-    size, avail = s.value("node_filesystem_size_bytes", mountpoint="/"), s.value("node_filesystem_avail_bytes", mountpoint="/")
-    if not size or avail is None:
-        return None
-    return _used("disk", "Disque", 100 - 100 * avail / size, cfg["disk_warn"], cfg["disk_alert"])
+    pct = disk_used(s)
+    return None if pct is None else _used("disk", "Disque", pct, cfg["disk_warn"], cfg["disk_alert"])
 
 
 def _memory(s, cfg):
-    total, avail = s.value("node_memory_MemTotal_bytes"), s.value("node_memory_MemAvailable_bytes")
-    if not total or avail is None:
-        return None
-    return _used("memory", "Mémoire", 100 - 100 * avail / total, cfg["mem_warn"], cfg["mem_alert"])
+    pct = memory_used(s)
+    return None if pct is None else _used("memory", "Mémoire", pct, cfg["mem_warn"], cfg["mem_alert"])
 
 
 def _used(cid, label, pct, warn, alert):
@@ -174,3 +212,18 @@ def _app(s):
         seconds = s.value("pop_inov_app_response_seconds")
         return _ok("app", "Application", f"{seconds * 1000:.0f} ms" if seconds is not None else "")
     return Check("app", "Application", ALERT, "ne répond pas")
+
+
+def _program(s, restarts):
+    info = program_info(s)
+    if info is None:
+        return None
+    states = {labels.get("state"): v for labels, v in s.all("node_systemd_unit_state") if labels.get("name") == "kiosk.service"}
+    if states and states.get("active") != 1:
+        return None        # kiosque arrete : deja signale par son service
+    what = " ".join(filter(None, (info["name"], info["version"])))
+    if restarts >= RESTART_LOOP:
+        return Check("program", "Programme", ALERT, f"{what} plante en boucle ({restarts} relances en {RESTART_WINDOW // 60} min)")
+    if not info["running"]:
+        return Check("program", "Programme", ALERT, f"{what} ne tourne pas")
+    return _ok("program", "Programme", what)

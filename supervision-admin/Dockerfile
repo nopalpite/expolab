@@ -6,7 +6,7 @@ RUN apt-get update -qq && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY app.py checks.py fleet.py history.py notify.py scrape.py supervisor.py ./
+COPY app.py checks.py fleet.py history.py notify.py programme.py scrape.py supervisor.py ./
 COPY templates/ templates/
 COPY static/ static/
 

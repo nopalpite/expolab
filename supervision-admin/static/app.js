@@ -3,7 +3,8 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const S = { state: null, sel: null, tab: "state", settings: null, fields: null, channels: null, editing: null };
+const S = { state: null, sel: null, tab: "state", settings: null, fields: null, channels: null, editing: null,
+            graph: { machine: null, hours: 24, data: null, at: 0, loading: false } };
 const STATUS = {
     ok: ["s-ok", "En ordre"], alerte: ["s-alerte", "En alerte"], avertissement: ["s-avertissement", "À surveiller"],
     "démarrage": ["s-sleep", "Démarre…"], "fermée": ["s-sleep", "Éteinte (expo fermée)"],
@@ -83,6 +84,8 @@ function renderExpo(st) {
     $("expo-close").hidden = !expo.open;
     $("bastion-error").hidden = !st.bastion_error;
     $("bastion-error").textContent = `${st.bastion_error} : dernière liste de machines connue.`;
+    $("planned-error").hidden = !st.planned_error;
+    $("planned-error").textContent = `${st.planned_error} : programmes prévus non affichés.`;
 }
 
 function failing(m) { return m.checks.filter((c) => c.level).sort((a, b) => (b.level === "alerte") - (a.level === "alerte")); }
@@ -144,6 +147,8 @@ function detail(m) {
         el("h2", { text: m.name }),
         m.polled_at ? el("p", { class: "hint", text: `Dernière vérification ${when(m.polled_at)}` }) : null,
         ...(checks.length ? checks : [el("p", { class: "hint", text: m.maintenance ? "Pas vérifiée pendant la maintenance." : "Pas encore vérifiée." })]),
+        m.program ? programBlock(m) : null,
+        graphBlock(m),
         el("h2", { text: "Maintenance" }),
         el("p", { class: "hint", text: "Machine éteinte volontairement : plus aucune vérification ni alerte ; à la sortie, délai de démarrage." }),
         actions);
@@ -210,6 +215,9 @@ async function loadSettings() {
     const retention = String(S.settings.retention_days);
     if (![...$("s-retention").options].some((o) => o.value === retention)) $("s-retention").append(el("option", { value: retention, text: `${retention} jours` }));
     $("s-retention").value = retention;
+    const graphDays = String(S.settings.graph_days);
+    if (![...$("s-graph-days").options].some((o) => o.value === graphDays)) $("s-graph-days").append(el("option", { value: graphDays, text: `${graphDays} jours` }));
+    $("s-graph-days").value = graphDays;
     renderNight(ch.night);
     S.kindOrder = ch.kinds.map((k) => k.id);
     S.kinds = Object.fromEntries(ch.kinds.map((k) => [k.id, k]));
@@ -224,7 +232,7 @@ function renderNight(night) {
 }
 
 $("s-save").addEventListener("click", async () => {
-    const changes = { retention_days: Number($("s-retention").value) };
+    const changes = { retention_days: Number($("s-retention").value), graph_days: Number($("s-graph-days").value) };
     document.querySelectorAll("input[data-key]").forEach((i) => { changes[i.dataset.key] = i.value === "" ? S.fields[i.dataset.key].default : Number(i.value); });
     try {
         await api("/api/settings", changes);
@@ -305,3 +313,108 @@ $("c-form").addEventListener("submit", async (e) => {
 
 refresh();
 setInterval(() => { if (S.tab === "state" && !document.hidden) refresh(); }, 5000);
+
+// --- programme du kiosque (sonde de la machine / onglet Applications d'ansible-web) ---------------
+
+const PROGRAM_STATUS = { "à jour": "s-ok", "différent": "s-avertissement", absent: "s-avertissement", "non prévu": "s-sleep", inconnu: "s-sleep" };
+
+function programBlock(m) {
+    const p = m.program, now = S.state.now, inst = p.installed, plan = p.planned;
+    const installed = inst ? [inst.name, inst.version].filter(Boolean).join(" ") : m.polled_at ? "aucun programme" : "—";
+    const planned = !plan ? "rien de choisi" : plan.version === "latest"
+        ? `${plan.app} · dernière version${plan.last_run ? ` (${plan.last_run} au dernier run)` : ""}` : `${plan.app} ${plan.version}`;
+    let running = "—";
+    if (inst) {
+        running = inst.running ? `oui${inst.started ? `, depuis ${duration(now - inst.started)}` : ""}` : "non";
+        if (p.restarts !== null) running += ` · ${p.restarts} relance${p.restarts > 1 ? "s" : ""} du kiosque`;
+    }
+    const cell = (label, ...value) => el("div", {}, el("div", { class: "hint", text: label }), el("div", { class: "pval" }, ...value));
+    return el("div", { class: "program" },
+        el("h2", { text: "Programme" }),
+        el("div", { class: "pgrid" },
+            cell("Installé sur la machine", installed),
+            cell("Prévu dans ansible-web", planned, p.status ? el("span", { class: "pill small" }, el("span", { class: `dot ${PROGRAM_STATUS[p.status]}` }), p.status) : null),
+            cell("En marche", el("span", { class: inst && !inst.running ? "bad" : "", text: running }))),
+        el("p", { class: "hint", text: "Programme arrêté ou qui plante en boucle : alerte « Programme ». Version différente de celle prévue : seulement affichée." }));
+}
+
+// --- courbes (un point par minute, moyennes par pas ; trous = pas de mesure) ------------------------
+
+const GRAPHS = [
+    ["Température", 1, "°C", [20, 100], "temp", "g-temp"],
+    ["Processeur", 2, "%", [0, 100], null, "g-cpu"],
+    ["Mémoire utilisée", 3, "%", [0, 100], "mem", "g-mem"],
+    ["Disque utilisé", 4, "%", [0, 100], "disk", "g-disk"],
+];
+function svg(tag, attrs = {}) {
+    const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    return n;
+}
+
+async function loadGraph(machine, hours) {
+    const g = S.graph;
+    if (g.loading) return;
+    g.loading = true;
+    try {
+        g.data = await api(`/api/metrics?machine=${encodeURIComponent(machine)}&hours=${hours}`, undefined, "GET");
+    } catch (e) { g.data = { error: e.message }; }
+    Object.assign(g, { machine, hours, at: Date.now(), loading: false });
+    if (S.sel === machine) renderState();
+}
+
+function graphBlock(m) {
+    const g = S.graph;
+    if (g.machine !== m.name || Date.now() - g.at > 60000) loadGraph(m.name, g.hours);
+    const ranges = el("div", { class: "row ranges" }, ...[[6, "6 h"], [24, "24 h"], [168, "7 j"]].map(([h, label]) =>
+        el("button", { type: "button", class: `small ${g.hours === h ? "on" : ""}`, text: label,
+                       onclick: () => { g.hours = h; g.at = 0; loadGraph(m.name, h); } })));
+    const head = el("div", { class: "row" }, el("h2", { class: "grow", text: "Courbes" }), ranges);
+    const box = (...kids) => el("div", { class: "graphs" }, head, ...kids);
+    if (g.machine !== m.name || !g.data) return box(el("p", { class: "hint", text: "Chargement…" }));
+    if (g.data.error) return box(el("p", { class: "err", text: g.data.error }));
+    if (!g.data.points.length) return box(el("p", { class: "hint", text: "Pas encore de mesure sur cette période." }));
+    return box(el("div", { class: "ggrid" }, ...GRAPHS.map((spec) => chart(spec, g.data))),
+        el("p", { class: "hint", text: "Zones grises : pas de mesure (expo fermée, maintenance ou machine injoignable). Zones colorées : problème signalé. Tirets : seuils d'avertissement et d'alerte." }));
+}
+
+function chart([title, idx, unit, [lo, hi], threshold, cls], d) {
+    const W = 300, H = 90, span = d.until - d.since, maxGap = 2 * d.step + 60;
+    const points = d.points.filter((p) => p[idx] !== null), values = points.map((p) => p[idx]);
+    if (!values.length) return el("div", { class: "chart" }, el("div", { class: "row" }, el("span", { class: "hint grow", text: title }), el("span", { class: "hint", text: "non publié" })));
+    lo = Math.min(lo, Math.floor(Math.min(...values) / 10) * 10);
+    hi = Math.max(hi, Math.ceil(Math.max(...values) / 10) * 10);
+    const x = (t) => ((t - d.since) / span) * W, y = (v) => H - ((v - lo) / (hi - lo)) * H;
+    const root = svg("svg", { viewBox: `0 0 ${W} ${H + 14}`, class: "plot", role: "img", "aria-label": title });
+    // trous : pas de mesure pendant plus de deux pas, y compris avant la premiere et apres la derniere
+    const edges = [d.since - d.step, ...points.map((p) => p[0]), d.until];
+    for (let i = 1; i < edges.length; i++) {
+        if (edges[i] - edges[i - 1] > maxGap) {
+            const a = Math.max(0, x(edges[i - 1] + d.step)), b = Math.min(W, x(edges[i]));
+            if (b > a) root.append(svg("rect", { x: a, y: 0, width: b - a, height: H, class: "gap" }));
+        }
+    }
+    d.incidents.forEach((i) => {
+        const a = Math.max(0, x(i.opened_at)), b = Math.min(W, x(i.closed_at ?? d.until));
+        if (b > a) root.append(svg("rect", { x: a, y: 0, width: Math.max(1, b - a), height: H, class: `band band-${i.level}` }));
+    });
+    if (threshold) [["warn", "th-warn"], ["alert", "th-alert"]].forEach(([k, c]) => {
+        const v = S.state.settings[`${threshold}_${k}`];
+        if (v > lo && v < hi) root.append(svg("line", { x1: 0, x2: W, y1: y(v), y2: y(v), class: c }));
+    });
+    let path = "", prev = null;
+    points.forEach((p) => {
+        path += `${prev !== null && p[0] - prev <= maxGap ? "L" : "M"}${x(p[0]).toFixed(1)} ${y(p[idx]).toFixed(1)}`;
+        prev = p[0];
+    });
+    root.append(svg("path", { d: path, class: `line ${cls}` }));
+    for (let k = 0; k < 4; k++) {
+        const dt = new Date((d.since + (span * k) / 4) * 1000);
+        const text = svg("text", { x: (W * k) / 4 + 2, y: H + 12, class: "axis" });
+        text.textContent = span > 2 * 86400 ? `${pad(dt.getDate())}/${pad(dt.getMonth() + 1)}` : `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+        root.append(text);
+    }
+    return el("div", { class: "chart" },
+        el("div", { class: "row" }, el("span", { class: "hint grow", text: title }), el("b", { text: `${Math.round(values.at(-1))} ${unit}` })),
+        root, el("div", { class: "hint", text: `min ${Math.round(Math.min(...values))} · max ${Math.round(Math.max(...values))} ${unit}` }));
+}
