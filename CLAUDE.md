@@ -122,6 +122,12 @@ d'une machine depuis cette bulle. Le détail technique est dans le README (secti
 
 ## Pièges connus
 
+- **Supervision et racine en overlay (À TRAITER) :** node_exporter exclut par défaut les systèmes de fichiers
+  `overlay` ; sur une machine taguée `overlay_on`, l'espace disque de `/` n'est donc pas publié et
+  `supervision-admin/checks.py` ne vérifie PAS le disque de ces machines (le contrôle disparaît, sans alerte). Or
+  avec l'overlay, ce qui se remplit est le tmpfs en RAM qui porte la couche d'écriture (upper/work, voir
+  `docs/OVERLAY.md` de bastion-ansible) : c'est lui qu'il faudra surveiller. À traiter avant de mettre une machine
+  en overlay en production.
 - **GitLab et git-mirror :** un jeton d'accès au projet a le rôle *Guest* par
   défaut, ce qui donne une erreur 403 « not allowed to download code ». Il faut le
   rôle **Reporter** et la portée `read_repository`. Une erreur 401 signale plutôt
